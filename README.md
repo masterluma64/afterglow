@@ -30,7 +30,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - Audio track selection, volume (remembered), fullscreen with controls that hide while
   playing and stay up while paused.
 
-State is stored in `%APPDATA%\Afterglow\progress.json`.
+State is stored in `%APPDATA%\Afterglow\progress.json` (set `AFTERGLOW_DATA_DIR` to use
+another folder, e.g. for testing).
 
 ## Building
 

@@ -62,9 +62,13 @@ fn key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// The app's folder in the user's config directory. Data from before the
-/// rename to Afterglow is moved over the first time.
+/// The app's folder in the user's config directory (or `AFTERGLOW_DATA_DIR`,
+/// e.g. for testing). Data from before the rename to Afterglow is moved over
+/// the first time.
 pub fn data_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
+        return Some(PathBuf::from(dir));
+    }
     let config = dirs::config_dir()?;
     let dir = config.join("Afterglow");
     let old = config.join("minimal-video-player");
