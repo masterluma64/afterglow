@@ -53,6 +53,7 @@ enum Action {
     ClearPlaylist,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
+    ResetAllProgress,
     TogglePause,
     Seek { to: f64, exact: bool },
     SeekBy(f64),
@@ -144,6 +145,8 @@ struct App {
     notice: Option<Notice>,
     actions: Vec<Action>,
     durations: DurationProbe,
+    /// Whether the "reset all progress" confirmation is open.
+    confirm_reset: bool,
 }
 
 impl App {
@@ -171,6 +174,7 @@ impl App {
             notice: None,
             actions: Vec::new(),
             durations: DurationProbe::new(ctx.clone()),
+            confirm_reset: false,
         };
         if !open.is_empty() {
             app.open(open, ctx);
@@ -464,7 +468,8 @@ impl App {
             self.actions.push(Action::Open(dropped));
         }
 
-        if ctx.egui_wants_keyboard_input() {
+        // No shortcuts while typing or while a dialog is open (Esc closes it).
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset {
             return;
         }
         let Playback { volume, duration, .. } = self.playback;
@@ -556,6 +561,19 @@ impl App {
                 self.store.save();
                 let name = display_name(&path);
                 self.notify(if watched { format!("{name}: marked as watched") } else { format!("{name}: progress reset") });
+            }
+            Action::ResetAllProgress => {
+                if self.loaded {
+                    // The loaded video goes back to its start too, so the live
+                    // position doesn't write its progress back.
+                    self.playback.position = 0.0;
+                    if let Ok(mpv) = &self.mpv {
+                        let _ = mpv.command(&["seek", "0", "absolute+exact"]);
+                    }
+                }
+                let reset = self.store.reset_progress();
+                self.store.save();
+                self.notify(format!("Progress reset for {reset} video{}", if reset == 1 { "" } else { "s" }));
             }
             Action::Next | Action::Prev => {
                 let next = matches!(action, Action::Next);
@@ -675,11 +693,51 @@ impl App {
             if videos.on_hover_text("Add videos to the playlist (Ctrl+O)").clicked() {
                 self.actions.push(Action::OpenVideos);
             }
-            if let Some(path) = self.current_path() {
-                ui.separator();
-                ui.add(egui::Label::new(RichText::new(display_name(path)).strong()).truncate());
-            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
+                let (response, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                    if ui.button(format!("{}  Reset all progress…", icons::RESET)).clicked() {
+                        self.confirm_reset = true;
+                    }
+                });
+                response.on_hover_text("More");
+                // The title takes the space left between the buttons.
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    if let Some(path) = self.current_path() {
+                        ui.separator();
+                        ui.add(egui::Label::new(RichText::new(display_name(path)).strong()).truncate());
+                    }
+                });
+            });
         });
+    }
+
+    /// Confirmation before wiping every video's progress.
+    fn reset_dialog(&mut self, ctx: &egui::Context) {
+        let modal = egui::Modal::new(egui::Id::unique("reset-progress")).show(ctx, |ui| {
+            ui.set_width(380.0);
+            ui.label(RichText::new(format!("{}  Reset all progress?", icons::WARNING)).size(18.0).strong());
+            ui.add_space(8.0);
+            ui.label("This forgets the saved position and watched state of every video. Your playlist and settings stay.");
+            ui.add_space(4.0);
+            ui.label(RichText::new("This can't be undone.").strong());
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                let reset = egui::Button::new(RichText::new("Reset all progress").color(Color32::WHITE))
+                    .fill(ui.visuals().error_fg_color);
+                if ui.add(reset).clicked() {
+                    self.actions.push(Action::ResetAllProgress);
+                    self.confirm_reset = false;
+                }
+                if ui.button("Cancel").clicked() {
+                    self.confirm_reset = false;
+                }
+            });
+        });
+        // Esc or a click outside cancels.
+        if modal.should_close() {
+            self.confirm_reset = false;
+        }
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
@@ -1067,6 +1125,9 @@ impl eframe::App for App {
             .frame(egui::Frame::NONE.fill(Color32::BLACK))
             .show(ui, |ui| self.video_area(ui));
         self.drop_overlay(&ctx, window);
+        if self.confirm_reset {
+            self.reset_dialog(&ctx);
+        }
 
         self.apply_actions(&ctx);
 
@@ -1198,7 +1259,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::PLAY, "—", "·", "…", "−",
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, "—", "·", "…", "−",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));

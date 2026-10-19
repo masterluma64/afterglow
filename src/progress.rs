@@ -128,6 +128,21 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Forgets the position and watched state of every video, returning how
+    /// many had any. Known lengths are kept, since they describe the files.
+    pub fn reset_progress(&mut self) -> usize {
+        let mut reset = 0;
+        for entry in self.entries.values_mut() {
+            if entry.watched || entry.position > 0.0 {
+                reset += 1;
+            }
+            entry.position = 0.0;
+            entry.watched = false;
+        }
+        self.dirty = true;
+        reset
+    }
+
     /// Records a video's length, found without playing it.
     pub fn set_duration(&mut self, path: &Path, duration: f64) {
         self.entries.entry(key(path)).or_default().duration = duration;
@@ -157,5 +172,29 @@ impl Store {
     pub fn set_volume(&mut self, volume: f64) {
         self.volume = volume;
         self.dirty = true;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_progress_keeps_lengths_and_playlist() {
+        let (a, b, c) = (Path::new("a.mkv"), Path::new("b.mkv"), Path::new("c.mkv"));
+        let mut store = Store::default();
+        store.set_playlist(&[a.to_path_buf(), b.to_path_buf(), c.to_path_buf()]);
+        store.update_position(a, 600.0, 1200.0);
+        store.update_position(b, 0.0, 900.0);
+        store.set_watched(b, true);
+        store.set_duration(c, 300.0);
+
+        assert_eq!(store.reset_progress(), 2, "only a and b had progress");
+        for (path, length) in [(a, 1200.0), (b, 900.0), (c, 300.0)] {
+            let entry = store.get(path);
+            assert_eq!((entry.position, entry.watched), (0.0, false));
+            assert_eq!(entry.duration, length, "lengths are kept");
+        }
+        assert_eq!(store.playlist.len(), 3);
     }
 }
