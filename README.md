@@ -8,8 +8,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 
 - **Playlist**: one playlist in the sidebar, restored on restart.
   - *Open folder* (Ctrl+Shift+O, or drop a folder) replaces it with the videos in that
-    folder (subfolders are ignored), sorted naturally (`Part 2` before `Part 10`), and
-    starts where you left off.
+    folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
+    Tick *Include subfolders* to also pick up videos in subfolders; changing it rescans
+    the opened folder right away.
   - *Add videos* (Ctrl+O, or drop videos) appends them; if nothing is playing, the first
     one starts.
   - Right-click an entry to play it from the start, mark it (un)watched or remove it; the

@@ -48,6 +48,7 @@ enum Action {
     Play(usize),
     Remove(usize),
     ClearPlaylist,
+    SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     TogglePause,
     Seek { to: f64, exact: bool },
@@ -170,17 +171,44 @@ impl App {
         }
         let mut list = Vec::new();
         for folder in &folders {
-            match library::scan_folder(folder) {
+            match library::scan_folder(folder, self.store.include_subfolders) {
                 Ok(found) => list.extend(found),
                 Err(e) => self.warn(format!("Could not open {}: {e}", display_name(folder))),
             }
         }
         list.extend(videos);
         if list.is_empty() {
-            self.warn(format!("No videos found in {}", display_name(&folders[0])));
+            let hint = if self.store.include_subfolders { "" } else { " (subfolders are not included)" };
+            self.warn(format!("No videos found in {}{hint}", display_name(&folders[0])));
             return;
         }
+        // Remember a single opened folder, so the subfolder setting can rescan it.
+        self.store.set_folder((folders.len() == 1).then(|| folders[0].as_path()));
         self.replace_playlist(list, ctx);
+    }
+
+    /// Changes whether folders include their subfolders, and rescans the folder
+    /// the playlist came from. Videos added by hand stay, and so does the
+    /// playing video if it is still part of the list.
+    fn set_include_subfolders(&mut self, include: bool, ctx: &egui::Context) {
+        self.store.set_include_subfolders(include);
+        self.store.save();
+        let Some(folder) = self.store.folder.clone() else { return };
+        let scanned = match library::scan_folder(&folder, include) {
+            Ok(scanned) => scanned,
+            Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
+        };
+        let added_by_hand = self.playlist.iter().filter(|p| !p.starts_with(&folder)).cloned();
+        let list: Vec<PathBuf> = scanned.into_iter().chain(added_by_hand).collect();
+        let playing = self.current_path().map(Path::to_path_buf);
+        if playing.as_ref().is_some_and(|p| !list.contains(p)) {
+            self.stop(ctx);
+        }
+        self.current = playing.and_then(|p| list.iter().position(|q| *q == p));
+        self.playlist = list;
+        self.save_playlist();
+        let what = if include { "with subfolders" } else { "without subfolders" };
+        self.notify(format!("{}: {} videos {what}", display_name(&folder), self.playlist.len()));
     }
 
     fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
@@ -238,6 +266,7 @@ impl App {
         self.stop(ctx);
         self.playlist.clear();
         self.store.set_current(None);
+        self.store.set_folder(None);
         self.save_playlist();
     }
 
@@ -438,6 +467,7 @@ impl App {
             Action::Play(index) => self.play(index, ctx),
             Action::Remove(index) => self.remove(index, ctx),
             Action::ClearPlaylist => self.clear_playlist(ctx),
+            Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include, ctx),
             Action::SetWatched(path, watched) => {
                 if self.loaded && self.current_path() == Some(path.as_path()) {
                     // Keep the live position from overwriting the change.
@@ -587,16 +617,32 @@ impl App {
                 });
             }
         });
+        let mut include = self.store.include_subfolders;
+        let tip = "Also play videos in subfolders when opening a folder";
+        if ui.checkbox(&mut include, "Include subfolders").on_hover_text(tip).changed() {
+            self.actions.push(Action::SetIncludeSubfolders(include));
+        }
+        ui.separator();
+
         if self.playlist.is_empty() {
-            ui.add_space(8.0);
+            ui.add_space(4.0);
             ui.weak("Empty. Open a folder to play its videos, or add videos one by one.");
             ui.add_space(4.0);
             ui.weak("You can also drop them onto the window.");
             return;
         }
+        let folder = self.store.folder.clone();
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             for (index, path) in self.playlist.iter().enumerate() {
-                playlist_row(ui, &self.store, &mut self.actions, index, path, self.current == Some(index));
+                // Videos from a subfolder of the opened folder show where they're from.
+                let subfolder = folder.as_deref().and_then(|f| path.parent()?.strip_prefix(f).ok());
+                let name = match subfolder {
+                    Some(sub) if !sub.as_os_str().is_empty() => {
+                        format!("{} / {}", sub.to_string_lossy().replace('\\', " / "), display_name(path))
+                    }
+                    _ => display_name(path),
+                };
+                playlist_row(ui, &self.store, &mut self.actions, index, path, &name, self.current == Some(index));
             }
         });
     }
@@ -923,9 +969,16 @@ impl Drop for App {
 }
 
 /// A playlist entry with its watch progress.
-fn playlist_row(ui: &mut egui::Ui, store: &Store, actions: &mut Vec<Action>, index: usize, path: &Path, playing: bool) {
+fn playlist_row(
+    ui: &mut egui::Ui,
+    store: &Store,
+    actions: &mut Vec<Action>,
+    index: usize,
+    path: &Path,
+    name: &str,
+    playing: bool,
+) {
     let entry = store.get(path);
-    let name = display_name(path);
     let text = if entry.watched {
         RichText::new(format!("{}  {name}", icons::CHECK)).weak()
     } else {

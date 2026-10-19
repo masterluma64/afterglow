@@ -35,6 +35,10 @@ pub struct Store {
     pub playlist: Vec<PathBuf>,
     /// The playlist entry that was playing last.
     pub current: Option<PathBuf>,
+    /// The folder the playlist was opened from, if any.
+    pub folder: Option<PathBuf>,
+    /// Whether opening a folder also includes videos in its subfolders.
+    pub include_subfolders: bool,
     pub volume: f64,
     #[serde(skip)]
     dirty: bool,
@@ -46,6 +50,8 @@ impl Default for Store {
             entries: HashMap::new(),
             playlist: Vec::new(),
             current: None,
+            folder: None,
+            include_subfolders: false,
             volume: 100.0,
             dirty: false,
         }
@@ -125,6 +131,16 @@ impl Store {
 
     pub fn set_current(&mut self, current: Option<&Path>) {
         self.current = current.map(Path::to_path_buf);
+        self.dirty = true;
+    }
+
+    pub fn set_folder(&mut self, folder: Option<&Path>) {
+        self.folder = folder.map(Path::to_path_buf);
+        self.dirty = true;
+    }
+
+    pub fn set_include_subfolders(&mut self, include: bool) {
+        self.include_subfolders = include;
         self.dirty = true;
     }
 

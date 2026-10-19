@@ -13,17 +13,36 @@ pub fn is_video(path: &Path) -> bool {
         .is_some_and(|e| VIDEO_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-/// The videos directly inside a folder (subfolders are ignored), in natural
-/// order of their names ("Part 2" before "Part 10").
-pub fn scan_folder(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let mut videos: Vec<PathBuf> = std::fs::read_dir(dir)?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && is_video(p))
-        .collect();
-    let key = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    videos.sort_by(|a, b| natural_cmp(&key(a), &key(b)));
+/// The videos in a folder, optionally including its subfolders, in natural
+/// order of their paths ("Part 2" before "Part 10", and each subfolder's
+/// videos kept together after the folder's own).
+pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<PathBuf>> {
+    std::fs::read_dir(dir)?;
+    let mut videos = Vec::new();
+    collect(dir, include_subfolders, &mut videos);
+    // Files directly in the folder come first, then subfolders in order.
+    let key = |p: &PathBuf| {
+        let rel = p.strip_prefix(dir).unwrap_or(p);
+        (rel.components().count() > 1, rel.to_string_lossy().replace('\\', "/"))
+    };
+    videos.sort_by(|a, b| {
+        let (ka, kb) = (key(a), key(b));
+        ka.0.cmp(&kb.0).then_with(|| natural_cmp(&ka.1, &kb.1))
+    });
     Ok(videos)
+}
+
+fn collect(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for path in entries.flatten().map(|e| e.path()) {
+        if path.is_dir() {
+            if recursive {
+                collect(&path, true, out);
+            }
+        } else if is_video(&path) {
+            out.push(path);
+        }
+    }
 }
 
 /// Compares strings so that "Part 2" sorts before "Part 10".
@@ -74,20 +93,24 @@ mod tests {
     }
 
     #[test]
-    fn scans_only_the_folder_itself_in_order() {
+    fn scans_folders_with_and_without_subfolders() {
         let root = std::env::temp_dir().join(format!("afterglow-scan-{}", std::process::id()));
-        let files = ["b 10.mkv", "b 2.mp4", "A 1.webm", "notes.txt", "Extras/x.mkv"];
+        let files = ["b 10.mkv", "b 2.mp4", "notes.txt", "Part 10/x.mkv", "Part 2/y.mkv", "Part 2/cover.jpg"];
         for f in files {
             let path = root.join(f);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, b"").unwrap();
         }
-        let names: Vec<String> = scan_folder(&root)
-            .unwrap()
-            .iter()
-            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
-            .collect();
+        let names = |include| -> Vec<String> {
+            scan_folder(&root, include)
+                .unwrap()
+                .iter()
+                .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+                .collect()
+        };
+        let (flat, nested) = (names(false), names(true));
         std::fs::remove_dir_all(&root).unwrap();
-        assert_eq!(names, ["A 1.webm", "b 2.mp4", "b 10.mkv"], "subfolders are ignored");
+        assert_eq!(flat, ["b 2.mp4", "b 10.mkv"]);
+        assert_eq!(nested, ["b 2.mp4", "b 10.mkv", "Part 2/y.mkv", "Part 10/x.mkv"]);
     }
 }
