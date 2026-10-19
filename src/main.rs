@@ -174,6 +174,9 @@ impl App {
         };
         if !open.is_empty() {
             app.open(open, ctx);
+        } else if let Some(index) = app.continue_target() {
+            // Pre-open where we left off, paused on that frame.
+            app.load(index, true, ctx);
         }
         app.request_durations();
         app
@@ -357,14 +360,20 @@ impl App {
     }
 
     fn play(&mut self, index: usize, ctx: &egui::Context) {
+        self.load(index, false, ctx);
+    }
+
+    /// Loads a playlist video at its saved position. With `paused`, it only
+    /// shows that frame, ready to continue.
+    fn load(&mut self, index: usize, paused: bool, ctx: &egui::Context) {
         self.save_current_progress();
         let Ok(mpv) = &self.mpv else { return };
         let Some(path) = self.playlist.get(index).cloned() else { return };
         let name = display_name(&path);
         let start = self.store.get(&path).resume_position();
+        mpv.set("pause", if paused { "yes" } else { "no" });
         match mpv.load_file(&path, start.unwrap_or(0.0)) {
             Ok(()) => {
-                mpv.set("pause", "no");
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
                 // Drop the previous frame so it never shows under the new video.
                 self.texture = None;
@@ -372,9 +381,11 @@ impl App {
                 self.loaded = false;
                 self.store.set_current(Some(&path));
                 self.store.save();
-                match start {
-                    Some(pos) => self.notify(format!("{name}  ·  resuming at {}", format_time(pos))),
-                    None => self.notify(name),
+                match (paused, start) {
+                    (true, Some(pos)) => self.notify(format!("{name}  ·  paused at {}", format_time(pos))),
+                    (true, None) => self.notify(format!("{name}  ·  press Space to play")),
+                    (false, Some(pos)) => self.notify(format!("{name}  ·  resuming at {}", format_time(pos))),
+                    (false, None) => self.notify(name),
                 }
             }
             Err(e) => self.warn(format!("Could not play {name}: {e}")),

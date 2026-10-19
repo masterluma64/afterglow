@@ -20,7 +20,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     trash icon clears the playlist. Files on disk are never touched.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
   Videos count as watched at 90% or when they finish, after which the next one starts.
-  Nothing playing? The player offers to continue the last video, or the next unwatched one.
+  On startup the video you were watching is opened, paused on the exact frame where you
+  left off.
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
   `Movie.en.ass`, …) are picked up automatically, with English preferred. The subtitle
   menu switches tracks, loads a subtitle file, or adjusts the delay.
