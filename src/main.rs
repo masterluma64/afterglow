@@ -10,18 +10,20 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Key, Layout, RichText, Sense, TextureHandle, TextureOptions, vec2};
 
-use library::{EpisodeId, Library};
 use mpv::Mpv;
 use progress::Store;
 
+const APP_NAME: &str = "Afterglow";
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
+const NOTICE_DURATION: Duration = Duration::from_millis(1500);
+const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Afterglow")
+            .with_title(APP_NAME)
             .with_inner_size([1280.0, 760.0])
             .with_min_inner_size([480.0, 300.0])
             .with_drag_and_drop(true),
@@ -29,7 +31,7 @@ fn main() -> eframe::Result {
     };
     let open: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     eframe::run_native(
-        "Afterglow",
+        APP_NAME,
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
@@ -38,23 +40,14 @@ fn main() -> eframe::Result {
     )
 }
 
-/// Something that can be played: an episode of a playlist, or a video on its own.
-#[derive(Clone, PartialEq, Debug)]
-enum Item {
-    Episode(usize, EpisodeId),
-    Video(PathBuf),
-}
-
 enum Action {
-    AddFolder,
-    OpenVideo,
-    /// A folder (becomes a playlist) or a video (plays on its own).
-    Open(PathBuf),
-    Play(Item),
-    ContinuePlaylist(usize),
-    RescanPlaylist(usize),
-    RemovePlaylist(usize),
-    RemoveVideo(PathBuf),
+    OpenFolder,
+    OpenVideos,
+    /// Folders and videos dropped onto the window or passed on the command line.
+    Open(Vec<PathBuf>),
+    Play(usize),
+    Remove(usize),
+    ClearPlaylist,
     SetWatched(PathBuf, bool),
     TogglePause,
     Seek { to: f64, exact: bool },
@@ -84,24 +77,30 @@ struct Playback {
     sub_delay: f64,
 }
 
+/// A short message shown over the video: feedback for an action, or a warning.
+struct Notice {
+    text: String,
+    warning: bool,
+    until: Instant,
+}
+
 struct App {
     mpv: Result<Mpv, String>,
     store: Store,
-    playlists: Vec<Library>,
-    current: Option<Item>,
+    playlist: Vec<PathBuf>,
+    /// Index into `playlist` of the video that is playing (or loading).
+    current: Option<usize>,
     /// True between mpv reporting the file as loaded and its end.
     loaded: bool,
     playback: Playback,
     texture: Option<TextureHandle>,
     show_sidebar: bool,
     fullscreen: bool,
-    /// Playlist whose header should be expanded on the next frame.
-    reveal: Option<usize>,
     /// Seek-bar position while the user drags it.
     scrub: Option<f64>,
     last_save: Instant,
     last_activity: Instant,
-    message: Option<String>,
+    notice: Option<Notice>,
     actions: Vec<Action>,
 }
 
@@ -112,138 +111,149 @@ impl App {
         if let Ok(mpv) = &mpv {
             mpv.set("volume", &store.volume.to_string());
         }
-        let playlists = store.playlists.iter().map(|p| Library::scan(p).unwrap_or_else(|_| Library::empty(p))).collect();
+        // Files that disappeared since last time are dropped from the playlist.
+        let playlist = store.playlist.iter().filter(|p| p.is_file()).cloned().collect();
         let mut app = Self {
             mpv,
             store,
-            playlists,
+            playlist,
             current: None,
             loaded: false,
             playback: Playback::default(),
             texture: None,
             show_sidebar: true,
             fullscreen: false,
-            reveal: None,
             scrub: None,
             last_save: Instant::now(),
             last_activity: Instant::now(),
-            message: None,
+            notice: None,
             actions: Vec::new(),
         };
-        for path in open {
-            app.open(path, ctx);
+        if !open.is_empty() {
+            app.open(open, ctx);
         }
         app
     }
 
-    fn open(&mut self, path: PathBuf, ctx: &egui::Context) {
-        if path.is_dir() {
-            self.add_playlist(path);
-        } else if library::is_video(&path) {
-            self.open_video(path, ctx);
-        } else {
-            self.message = Some(format!("Not a folder or video: {}", path.display()));
-        }
+    fn notify(&mut self, text: impl Into<String>) {
+        self.notice = Some(Notice { text: text.into(), warning: false, until: Instant::now() + NOTICE_DURATION });
     }
 
-    fn add_playlist(&mut self, folder: PathBuf) {
-        if let Some(i) = self.playlists.iter().position(|l| l.root == folder) {
-            self.reveal = Some(i);
-            return;
-        }
-        match Library::scan(&folder) {
-            Ok(lib) if lib.seasons.is_empty() => {
-                self.message = Some(format!("No videos found in {}", folder.display()));
-            }
-            Ok(lib) => {
-                self.store.add_playlist(&folder);
-                self.store.save();
-                self.playlists.push(lib);
-                self.reveal = Some(self.playlists.len() - 1);
-                self.show_sidebar = true;
-                self.message = None;
-            }
-            Err(e) => self.message = Some(format!("Could not open {}: {e}", folder.display())),
-        }
-    }
-
-    /// Plays a single video. One that is part of a playlist plays as that
-    /// playlist's episode, so the next episode follows.
-    fn open_video(&mut self, path: PathBuf, ctx: &egui::Context) {
-        let in_playlist =
-            self.playlists.iter().enumerate().find_map(|(i, lib)| lib.find(&path).map(|id| Item::Episode(i, id)));
-        let item = in_playlist.unwrap_or_else(|| {
-            self.store.add_video(&path);
-            Item::Video(path)
-        });
-        self.play(item, ctx);
-    }
-
-    fn remove_playlist(&mut self, index: usize) {
-        match self.current {
-            Some(Item::Episode(l, _)) if l == index => self.stop(),
-            Some(Item::Episode(ref mut l, _)) if *l > index => *l -= 1,
-            _ => {}
-        }
-        let lib = self.playlists.remove(index);
-        self.store.remove_playlist(&lib.root);
-        self.store.save();
-    }
-
-    fn rescan_playlist(&mut self, index: usize) {
-        let current_path = self.current_path().map(Path::to_path_buf);
-        let root = self.playlists[index].root.clone();
-        self.playlists[index] = Library::scan(&root).unwrap_or_else(|_| Library::empty(&root));
-        if let Some(Item::Episode(l, id)) = &mut self.current {
-            if *l == index {
-                match current_path.and_then(|p| self.playlists[index].find(&p)) {
-                    Some(new_id) => *id = new_id,
-                    None => self.stop(),
-                }
-            }
-        }
-    }
-
-    fn item_path<'a>(&'a self, item: &'a Item) -> Option<&'a Path> {
-        match item {
-            Item::Episode(l, id) => Some(&self.playlists.get(*l)?.get(*id)?.path),
-            Item::Video(path) => Some(path),
-        }
+    fn warn(&mut self, text: impl Into<String>) {
+        self.notice = Some(Notice { text: text.into(), warning: true, until: Instant::now() + WARNING_DURATION });
     }
 
     fn current_path(&self) -> Option<&Path> {
-        self.item_path(self.current.as_ref()?)
+        self.playlist.get(self.current?).map(PathBuf::as_path)
     }
 
-    /// The episode to offer for a playlist: the last one played if it is
-    /// unfinished, otherwise the first unwatched episode after it.
-    fn continue_in(&self, index: usize) -> Option<EpisodeId> {
-        let lib = self.playlists.get(index)?;
-        let last = self.store.last_episode(&lib.root).and_then(|p| lib.find(p));
-        let start = match last {
-            Some(id) => {
-                let entry = self.store.get(&lib.get(id)?.path);
-                if !entry.watched || entry.resume_position().is_some() {
-                    return Some(id);
-                }
-                lib.next(id)?
-            }
-            None => lib.ids().next()?,
-        };
-        lib.ids()
-            .skip_while(|&i| i != start)
-            .find(|&i| lib.get(i).is_some_and(|e| !self.store.get(&e.path).watched))
-            .or(Some(start))
-    }
-
-    /// What to offer when nothing is playing, based on what was played last.
-    fn continue_item(&self) -> Option<Item> {
-        let last = self.store.last_played.as_ref()?;
-        if let Some(index) = self.playlists.iter().position(|lib| lib.find(last).is_some()) {
-            return self.continue_in(index).map(|id| Item::Episode(index, id));
+    fn save_playlist(&mut self) {
+        self.store.set_playlist(&self.playlist);
+        let current = self.current_path().map(Path::to_path_buf);
+        if current.is_some() {
+            self.store.set_current(current.as_deref());
         }
-        let resumable = self.store.get(last).resume_position().is_some();
-        (resumable && last.is_file()).then(|| Item::Video(last.clone()))
+        self.store.save();
+    }
+
+    /// Opens dropped or passed paths. Folders replace the playlist with their
+    /// videos (and start playing); videos are added to the end.
+    fn open(&mut self, paths: Vec<PathBuf>, ctx: &egui::Context) {
+        let (folders, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| p.is_dir());
+        let (videos, others): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| library::is_video(p));
+        if let Some(other) = others.first() {
+            self.warn(format!("Not a video: {}", display_name(other)));
+        }
+        if folders.is_empty() {
+            self.add_videos(videos, ctx);
+            return;
+        }
+        let mut list = Vec::new();
+        for folder in &folders {
+            match library::scan_folder(folder) {
+                Ok(found) => list.extend(found),
+                Err(e) => self.warn(format!("Could not open {}: {e}", display_name(folder))),
+            }
+        }
+        list.extend(videos);
+        if list.is_empty() {
+            self.warn(format!("No videos found in {}", display_name(&folders[0])));
+            return;
+        }
+        self.replace_playlist(list, ctx);
+    }
+
+    fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
+        self.stop(ctx);
+        self.playlist = list;
+        self.show_sidebar = true;
+        self.save_playlist();
+        match self.continue_target() {
+            Some(index) => self.play(index, ctx),
+            None => self.notify(format!("{} videos, all watched", self.playlist.len())),
+        }
+    }
+
+    /// Appends videos (skipping ones already listed). Starts the first of them
+    /// when nothing is playing.
+    fn add_videos(&mut self, videos: Vec<PathBuf>, ctx: &egui::Context) {
+        if videos.is_empty() {
+            return;
+        }
+        let mut first = None;
+        let mut added = 0;
+        for video in videos {
+            let index = match self.playlist.iter().position(|p| *p == video) {
+                Some(i) => i,
+                None => {
+                    self.playlist.push(video);
+                    added += 1;
+                    self.playlist.len() - 1
+                }
+            };
+            first.get_or_insert(index);
+        }
+        self.save_playlist();
+        match first {
+            Some(index) if self.current.is_none() => self.play(index, ctx),
+            _ if added > 0 => self.notify(format!("Added {added} video{} to the playlist", if added == 1 { "" } else { "s" })),
+            _ => self.notify("Already in the playlist"),
+        }
+    }
+
+    fn remove(&mut self, index: usize, ctx: &egui::Context) {
+        if index >= self.playlist.len() {
+            return;
+        }
+        match self.current {
+            Some(c) if c == index => self.stop(ctx),
+            Some(c) if c > index => self.current = Some(c - 1),
+            _ => {}
+        }
+        self.playlist.remove(index);
+        self.save_playlist();
+    }
+
+    fn clear_playlist(&mut self, ctx: &egui::Context) {
+        self.stop(ctx);
+        self.playlist.clear();
+        self.store.set_current(None);
+        self.save_playlist();
+    }
+
+    /// The video to offer when nothing is playing: the last one played if it is
+    /// unfinished, otherwise the next unwatched one after it (wrapping around).
+    /// `None` when everything is watched.
+    fn continue_target(&self) -> Option<usize> {
+        let watched = |i: usize| self.store.get(&self.playlist[i]).watched;
+        let last = self.store.current.as_ref().and_then(|c| self.playlist.iter().position(|p| p == c));
+        let start = match last {
+            Some(i) if !watched(i) || self.store.get(&self.playlist[i]).resume_position().is_some() => return Some(i),
+            Some(i) => i + 1,
+            None => 0,
+        };
+        let n = self.playlist.len();
+        (0..n).map(|k| (start + k) % n).find(|&i| !watched(i))
     }
 
     fn save_current_progress(&mut self) {
@@ -255,56 +265,46 @@ impl App {
         }
     }
 
-    fn play(&mut self, item: Item, ctx: &egui::Context) {
+    fn play(&mut self, index: usize, ctx: &egui::Context) {
         self.save_current_progress();
         let Ok(mpv) = &self.mpv else { return };
-        let (path, title, playlist) = match &item {
-            Item::Episode(l, id) => {
-                let Some(lib) = self.playlists.get(*l) else { return };
-                let Some(ep) = lib.get(*id) else { return };
-                (ep.path.clone(), format!("{} — {}", ep.name, lib.name), Some(lib.root.clone()))
-            }
-            Item::Video(path) => (path.clone(), display_name(path), None),
-        };
-
-        let start = self.store.get(&path).resume_position().unwrap_or(0.0);
-        match mpv.load_file(&path, start) {
+        let Some(path) = self.playlist.get(index).cloned() else { return };
+        let name = display_name(&path);
+        let start = self.store.get(&path).resume_position();
+        match mpv.load_file(&path, start.unwrap_or(0.0)) {
             Ok(()) => {
                 mpv.set("pause", "no");
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-                self.store.set_played(&path, playlist.as_deref());
-                self.store.save();
-                // Drop the previous frame so it never shows under new content.
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
+                // Drop the previous frame so it never shows under the new video.
                 self.texture = None;
-                self.current = Some(item);
+                self.current = Some(index);
                 self.loaded = false;
-                self.message = None;
+                self.store.set_current(Some(&path));
+                self.store.save();
+                match start {
+                    Some(pos) => self.notify(format!("{name}  ·  resuming at {}", format_time(pos))),
+                    None => self.notify(name),
+                }
             }
-            Err(e) => self.message = Some(format!("Could not play {}: {e}", display_name(&path))),
+            Err(e) => self.warn(format!("Could not play {name}: {e}")),
         }
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, ctx: &egui::Context) {
         self.save_current_progress();
-        if let Ok(mpv) = &self.mpv {
-            let _ = mpv.command(&["stop"]);
+        if self.current.is_some() {
+            if let Ok(mpv) = &self.mpv {
+                let _ = mpv.command(&["stop"]);
+            }
         }
+        self.finish(ctx);
+    }
+
+    /// Clears the playing state once nothing is playing any more.
+    fn finish(&mut self, ctx: &egui::Context) {
         self.current = None;
         self.loaded = false;
-    }
-
-    fn next_item(&self, item: &Item) -> Option<Item> {
-        match item {
-            Item::Episode(l, id) => self.playlists.get(*l)?.next(*id).map(|n| Item::Episode(*l, n)),
-            Item::Video(_) => None,
-        }
-    }
-
-    fn prev_item(&self, item: &Item) -> Option<Item> {
-        match item {
-            Item::Episode(l, id) => self.playlists.get(*l)?.prev(*id).map(|n| Item::Episode(*l, n)),
-            Item::Video(_) => None,
-        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(APP_NAME.into()));
     }
 
     fn handle_mpv_events(&mut self, ctx: &egui::Context) {
@@ -315,18 +315,22 @@ impl App {
                 mpv::Event::EndFile { eof, error } => {
                     self.loaded = false;
                     if error {
-                        self.message = Some("Playback failed: the file could not be decoded.".into());
+                        self.warn("Playback failed: the file could not be decoded.");
+                        self.finish(ctx);
+                        continue;
                     }
                     if !eof {
                         continue;
                     }
-                    let Some(current) = self.current.clone() else { continue };
-                    if let Some(path) = self.item_path(&current).map(Path::to_path_buf) {
+                    let Some(index) = self.current else { continue };
+                    if let Some(path) = self.playlist.get(index).cloned() {
                         self.store.set_watched(&path, true);
                     }
-                    match self.next_item(&current) {
-                        Some(next) => self.play(next, ctx),
-                        None => self.current = None,
+                    if index + 1 < self.playlist.len() {
+                        self.play(index + 1, ctx);
+                    } else {
+                        self.notify("End of the playlist");
+                        self.finish(ctx);
                     }
                     self.store.save();
                 }
@@ -354,7 +358,9 @@ impl App {
 
     fn handle_input(&mut self, ctx: &egui::Context) {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
-        self.actions.extend(dropped.into_iter().map(Action::Open));
+        if !dropped.is_empty() {
+            self.actions.push(Action::Open(dropped));
+        }
 
         if ctx.egui_wants_keyboard_input() {
             return;
@@ -365,8 +371,8 @@ impl App {
             // egui ignores extra Shift/Alt when matching, so more specific
             // combinations must come before their plain counterparts.
             let mut bindings = vec![
-                (M::CTRL, Key::O, Action::OpenVideo),
-                (M::CTRL, Key::N, Action::AddFolder),
+                (M::CTRL | M::SHIFT, Key::O, Action::OpenFolder),
+                (M::CTRL, Key::O, Action::OpenVideos),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
                 (M::SHIFT, Key::ArrowLeft, Action::SeekBy(-30.0)),
                 (M::SHIFT, Key::ArrowRight, Action::SeekBy(30.0)),
@@ -414,36 +420,24 @@ impl App {
 
     fn apply(&mut self, action: Action, ctx: &egui::Context) {
         match action {
-            Action::AddFolder => {
-                if let Some(folder) = rfd::FileDialog::new().set_title("Add folder as playlist").pick_folder() {
-                    self.add_playlist(folder);
+            Action::OpenFolder => {
+                if let Some(folder) = rfd::FileDialog::new().set_title("Open folder as playlist").pick_folder() {
+                    self.open(vec![folder], ctx);
                 }
             }
-            Action::OpenVideo => {
-                let file = rfd::FileDialog::new()
-                    .set_title("Open video")
+            Action::OpenVideos => {
+                let files = rfd::FileDialog::new()
+                    .set_title("Add videos to the playlist")
                     .add_filter("Videos", library::VIDEO_EXTENSIONS)
-                    .pick_file();
-                if let Some(file) = file {
-                    self.open_video(file, ctx);
+                    .pick_files();
+                if let Some(files) = files {
+                    self.add_videos(files, ctx);
                 }
             }
-            Action::Open(path) => self.open(path, ctx),
-            Action::Play(item) => self.play(item, ctx),
-            Action::ContinuePlaylist(index) => {
-                if let Some(id) = self.continue_in(index) {
-                    self.play(Item::Episode(index, id), ctx);
-                }
-            }
-            Action::RescanPlaylist(index) => self.rescan_playlist(index),
-            Action::RemovePlaylist(index) => self.remove_playlist(index),
-            Action::RemoveVideo(path) => {
-                if self.current == Some(Item::Video(path.clone())) {
-                    self.stop();
-                }
-                self.store.remove_video(&path);
-                self.store.save();
-            }
+            Action::Open(paths) => self.open(paths, ctx),
+            Action::Play(index) => self.play(index, ctx),
+            Action::Remove(index) => self.remove(index, ctx),
+            Action::ClearPlaylist => self.clear_playlist(ctx),
             Action::SetWatched(path, watched) => {
                 if self.loaded && self.current_path() == Some(path.as_path()) {
                     // Keep the live position from overwriting the change.
@@ -453,19 +447,25 @@ impl App {
                 self.store.save();
             }
             Action::Next | Action::Prev => {
-                let target = match (&action, &self.current) {
-                    (Action::Next, Some(item)) => self.next_item(item),
-                    (Action::Prev, Some(item)) => self.prev_item(item),
-                    _ => self.continue_item(),
+                let next = matches!(action, Action::Next);
+                let target = match self.current {
+                    Some(i) if next => (i + 1 < self.playlist.len()).then_some(i + 1),
+                    Some(i) => i.checked_sub(1),
+                    None => self.continue_target(),
                 };
-                if let Some(item) = target {
-                    self.play(item, ctx);
+                match target {
+                    Some(index) => self.play(index, ctx),
+                    None if self.current.is_some() => {
+                        self.notify(if next { "This is the last video" } else { "This is the first video" });
+                    }
+                    None => {}
                 }
             }
             Action::ToggleFullscreen | Action::ExitFullscreen => {
                 let fullscreen = matches!(action, Action::ToggleFullscreen) && !self.fullscreen;
                 if fullscreen != self.fullscreen {
                     self.fullscreen = fullscreen;
+                    self.last_activity = Instant::now();
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
                 }
             }
@@ -475,8 +475,9 @@ impl App {
                     if let Ok(mpv) = &self.mpv {
                         let _ = mpv.command(&["cycle", "pause"]);
                     }
-                } else if let Some(item) = self.current.clone().or_else(|| self.continue_item()) {
-                    self.play(item, ctx);
+                    self.notify(if self.playback.paused { "Playing" } else { "Paused" });
+                } else if let Some(index) = self.current.or_else(|| self.continue_target()) {
+                    self.play(index, ctx);
                 }
             }
             action => self.apply_to_mpv(action),
@@ -485,28 +486,42 @@ impl App {
 
     fn apply_to_mpv(&mut self, action: Action) {
         let Ok(mpv) = &self.mpv else { return };
+        let duration = self.playback.duration;
         match action {
             Action::Seek { to, exact } if self.loaded => {
                 let flags = if exact { "absolute+exact" } else { "absolute+keyframes" };
                 let _ = mpv.command(&["seek", &format!("{to:.3}"), flags]);
+                if exact {
+                    self.notify(format!("{} / {}", format_time(to), format_time(duration)));
+                }
             }
             Action::SeekBy(by) if self.loaded => {
                 let _ = mpv.command(&["seek", &by.to_string(), "relative"]);
+                let to = (self.playback.position + by).clamp(0.0, duration);
+                let sign = if by < 0.0 { "−" } else { "+" };
+                self.notify(format!("{sign}{} s  ·  {} / {}", by.abs(), format_time(to), format_time(duration)));
             }
             Action::SetVolume(v) => {
                 mpv.set("volume", &format!("{v:.0}"));
                 mpv.set("mute", "no");
                 self.store.set_volume(v.round());
+                self.notify(format!("Volume {v:.0}%"));
             }
             Action::ToggleMute => {
                 let _ = mpv.command(&["cycle", "mute"]);
+                self.notify(if self.playback.muted { "Sound on" } else { "Muted" });
             }
             Action::SetTrack { kind, id } => {
                 let prop = if kind == "sub" { "sid" } else { "aid" };
                 mpv.set(prop, &id.map_or("no".into(), |id| id.to_string()));
             }
-            Action::CycleSubtitles => {
+            Action::CycleSubtitles if self.loaded => {
                 let _ = mpv.command(&["cycle", "sub"]);
+                let text = match mpv.tracks("sub").into_iter().find(|t| t.selected) {
+                    Some(track) => format!("Subtitles: {}", track.label),
+                    None => "Subtitles off".into(),
+                };
+                self.notify(text);
             }
             Action::LoadSubtitle if self.loaded => {
                 let mut dialog = rfd::FileDialog::new()
@@ -516,8 +531,9 @@ impl App {
                     dialog = dialog.set_directory(dir);
                 }
                 if let Some(file) = dialog.pick_file() {
-                    if let Err(e) = mpv.command(&["sub-add", &file.to_string_lossy(), "select"]) {
-                        self.message = Some(format!("Could not load subtitles: {e}"));
+                    match mpv.command(&["sub-add", &file.to_string_lossy(), "select"]) {
+                        Ok(()) => self.notify(format!("Subtitles: {}", display_name(&file))),
+                        Err(e) => self.warn(format!("Could not load subtitles: {e}")),
                     }
                 }
             }
@@ -525,8 +541,9 @@ impl App {
                 // Steps one frame and leaves playback paused.
                 let _ = mpv.command(&[if forward { "frame-step" } else { "frame-back-step" }]);
             }
-            Action::AdjustSubDelay(by) => {
+            Action::AdjustSubDelay(by) if self.loaded => {
                 let _ = mpv.command(&["add", "sub-delay", &by.to_string()]);
+                self.notify(format!("Subtitle delay {:+.1} s", self.playback.sub_delay + by));
             }
             _ => {}
         }
@@ -536,105 +553,50 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if icon_button(ui, icons::SIDEBAR, "Toggle sidebar (L)").clicked() {
+            if icon_button(ui, icons::SIDEBAR, "Show or hide the playlist (L)").clicked() {
                 self.actions.push(Action::ToggleSidebar);
             }
-            if ui.button(format!("{}  Add folder", icons::FOLDER_PLUS)).on_hover_text("Add a folder as playlist (Ctrl+N)").clicked() {
-                self.actions.push(Action::AddFolder);
+            let folder = ui.button(format!("{}  Open folder", icons::FOLDER_PLUS));
+            if folder.on_hover_text("Replace the playlist with a folder's videos (Ctrl+Shift+O)").clicked() {
+                self.actions.push(Action::OpenFolder);
             }
-            if ui.button(format!("{}  Open video", icons::FILE_VIDEO)).on_hover_text("Play a single video (Ctrl+O)").clicked() {
-                self.actions.push(Action::OpenVideo);
+            let videos = ui.button(format!("{}  Add videos", icons::FILE_VIDEO));
+            if videos.on_hover_text("Add videos to the playlist (Ctrl+O)").clicked() {
+                self.actions.push(Action::OpenVideos);
             }
-            let title = match &self.current {
-                Some(Item::Episode(l, id)) => self.playlists[*l].get(*id).map(|ep| (ep.name.clone(), Some(&self.playlists[*l].name))),
-                Some(Item::Video(path)) => Some((display_name(path), None)),
-                _ => None,
-            };
-            if let Some((name, playlist)) = title {
+            if let Some(path) = self.current_path() {
                 ui.separator();
-                if let Some(playlist) = playlist {
-                    ui.label(RichText::new(playlist).strong());
-                }
-                ui.label(RichText::new(name).weak());
+                ui.add(egui::Label::new(RichText::new(display_name(path)).strong()).truncate());
             }
         });
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
-        if self.playlists.is_empty() && self.store.videos.is_empty() {
-            ui.add_space(12.0);
-            ui.weak("Drop a folder here to add it as a playlist, or a video to play it.");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("PLAYLIST").small().weak());
+            if !self.playlist.is_empty() {
+                let watched = self.playlist.iter().filter(|p| self.store.get(p).watched).count();
+                ui.label(RichText::new(format!("{watched}/{}", self.playlist.len())).small().weak())
+                    .on_hover_text(format!("{watched} of {} watched", self.playlist.len()));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let clear = egui::Button::new(RichText::new(icons::TRASH).size(14.0)).frame_when_inactive(false);
+                    if ui.add(clear).on_hover_text("Clear the playlist (files are not touched)").clicked() {
+                        self.actions.push(Action::ClearPlaylist);
+                    }
+                });
+            }
+        });
+        if self.playlist.is_empty() {
+            ui.add_space(8.0);
+            ui.weak("Empty. Open a folder to play its videos, or add videos one by one.");
+            ui.add_space(4.0);
+            ui.weak("You can also drop them onto the window.");
             return;
         }
-        let reveal = self.reveal.take();
-        // Season to expand per playlist: the one playing, else the one to continue.
-        let focus: Vec<Option<usize>> = (0..self.playlists.len())
-            .map(|l| match &self.current {
-                Some(Item::Episode(cl, id)) if *cl == l => Some(id.season),
-                _ => self.continue_in(l).map(|id| id.season),
-            })
-            .collect();
-
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            if !self.playlists.is_empty() {
-                section_label(ui, "Playlists");
-            }
-            for (l, lib) in self.playlists.iter().enumerate() {
-                let episodes = || lib.seasons.iter().flat_map(|s| &s.episodes);
-                let watched = episodes().filter(|e| self.store.get(&e.path).watched).count();
-                let header = RichText::new(format!("{}   {watched}/{}", lib.name, episodes().count())).strong();
-                let playing_here = matches!(&self.current, Some(Item::Episode(cl, _)) if *cl == l);
-                let mut collapsing = egui::CollapsingHeader::new(header)
-                    .id_salt(("playlist", &lib.root))
-                    .default_open(playing_here);
-                if reveal == Some(l) {
-                    collapsing = collapsing.open(Some(true));
-                }
-                let resp = collapsing.show(ui, |ui| {
-                    if lib.seasons.is_empty() {
-                        ui.weak("Folder is missing or has no videos.");
-                    }
-                    let single = lib.seasons.len() == 1;
-                    for (s, season) in lib.seasons.iter().enumerate() {
-                        let mut rows = |ui: &mut egui::Ui| {
-                            for (e, ep) in season.episodes.iter().enumerate() {
-                                let item = Item::Episode(l, EpisodeId { season: s, episode: e });
-                                let selected = self.current.as_ref() == Some(&item);
-                                media_row(ui, &self.store, &mut self.actions, item, &ep.name, &ep.path, selected, false);
-                            }
-                        };
-                        if single {
-                            rows(ui);
-                            continue;
-                        }
-                        let watched = season.episodes.iter().filter(|e| self.store.get(&e.path).watched).count();
-                        egui::CollapsingHeader::new(format!("{}   {watched}/{}", season.name, season.episodes.len()))
-                            .id_salt(("season", &lib.root, s))
-                            .default_open(focus[l] == Some(s))
-                            .show(ui, |ui| rows(ui));
-                    }
-                });
-                resp.header_response.on_hover_text(lib.root.display().to_string()).context_menu(|ui| {
-                    if ui.button(format!("{}  Continue", icons::PLAY_CIRCLE)).clicked() {
-                        self.actions.push(Action::ContinuePlaylist(l));
-                    }
-                    if ui.button(format!("{}  Rescan folder", icons::REFRESH)).clicked() {
-                        self.actions.push(Action::RescanPlaylist(l));
-                    }
-                    if ui.button(format!("{}  Remove playlist", icons::TRASH)).clicked() {
-                        self.actions.push(Action::RemovePlaylist(l));
-                    }
-                });
-            }
-
-            if !self.store.videos.is_empty() {
-                ui.add_space(8.0);
-                section_label(ui, "Videos");
-                for path in &self.store.videos {
-                    let item = Item::Video(path.clone());
-                    let selected = self.current.as_ref() == Some(&item);
-                    media_row(ui, &self.store, &mut self.actions, item, &display_name(path), path, selected, true);
-                }
+            for (index, path) in self.playlist.iter().enumerate() {
+                playlist_row(ui, &self.store, &mut self.actions, index, path, self.current == Some(index));
             }
         });
     }
@@ -642,24 +604,29 @@ impl App {
     fn controls(&mut self, ui: &mut egui::Ui) {
         let Playback { position, duration, paused, muted, volume, .. } = self.playback;
         let position = self.scrub.unwrap_or(position);
-        let in_playlist = matches!(self.current, Some(Item::Episode(..)));
+        let has_prev = self.current.is_some_and(|i| i > 0);
+        let has_next = self.current.is_some_and(|i| i + 1 < self.playlist.len());
         ui.horizontal(|ui| {
-            if ui.add_enabled(in_playlist, transport_button(icons::SKIP_BACK)).on_hover_text("Previous (P)").clicked() {
+            if ui.add_enabled(has_prev, transport_button(icons::SKIP_BACK)).on_hover_text("Previous video (P)").clicked() {
                 self.actions.push(Action::Prev);
             }
-            let icon = if self.loaded && !paused { icons::PAUSE } else { icons::PLAY };
-            if ui.add(transport_button(icon)).on_hover_text("Play/pause (Space)").clicked() {
+            let (icon, tip) = if self.loaded && !paused { (icons::PAUSE, "Pause (Space)") } else { (icons::PLAY, "Play (Space)") };
+            if ui.add(transport_button(icon)).on_hover_text(tip).clicked() {
                 self.actions.push(Action::TogglePause);
             }
-            if ui.add_enabled(in_playlist, transport_button(icons::SKIP_FORWARD)).on_hover_text("Next (N)").clicked() {
+            if ui.add_enabled(has_next, transport_button(icons::SKIP_FORWARD)).on_hover_text("Next video (N)").clicked() {
                 self.actions.push(Action::Next);
             }
             ui.add_space(4.0);
             ui.monospace(format_time(if self.loaded { position } else { 0.0 }));
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let fs_icon = if self.fullscreen { icons::CORNERS_IN } else { icons::CORNERS_OUT };
-                if icon_button(ui, fs_icon, "Fullscreen (F11)").clicked() {
+                let (fs_icon, fs_tip) = if self.fullscreen {
+                    (icons::CORNERS_IN, "Exit fullscreen (F11 or Esc)")
+                } else {
+                    (icons::CORNERS_OUT, "Fullscreen (F11)")
+                };
+                if icon_button(ui, fs_icon, fs_tip).clicked() {
                     self.actions.push(Action::ToggleFullscreen);
                 }
                 self.track_menu(ui, "sub");
@@ -667,7 +634,7 @@ impl App {
 
                 let mut volume = volume;
                 let slider = egui::Slider::new(&mut volume, 0.0..=150.0).show_value(false);
-                if ui.add_sized([80.0, 18.0], slider).on_hover_text(format!("Volume {volume:.0}%")).changed() {
+                if ui.add_sized([80.0, 18.0], slider).on_hover_text(format!("Volume {volume:.0}% (Up/Down)")).changed() {
                     self.actions.push(Action::SetVolume(volume));
                 }
                 let speaker = match () {
@@ -675,7 +642,7 @@ impl App {
                     _ if volume < 50.0 => icons::SPEAKER_LOW,
                     _ => icons::SPEAKER_HIGH,
                 };
-                if icon_button(ui, speaker, "Mute (M)").clicked() {
+                if icon_button(ui, speaker, if muted { "Unmute (M)" } else { "Mute (M)" }).clicked() {
                     self.actions.push(Action::ToggleMute);
                 }
                 ui.monospace(format_time(if self.loaded { duration } else { 0.0 }));
@@ -728,6 +695,7 @@ impl App {
             let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
                 let Ok(mpv) = &self.mpv else { return };
                 let tracks = mpv.tracks(kind);
+                ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).small().weak());
                 if kind == "sub" {
                     let none_selected = !tracks.iter().any(|t| t.selected);
                     if ui.selectable_label(none_selected, "Off").clicked() {
@@ -739,8 +707,8 @@ impl App {
                         self.actions.push(Action::SetTrack { kind, id: Some(t.id) });
                     }
                 }
-                if tracks.is_empty() {
-                    ui.weak("No tracks");
+                if tracks.is_empty() && kind != "sub" {
+                    ui.weak("No audio tracks");
                 }
                 if kind == "sub" {
                     ui.separator();
@@ -748,11 +716,11 @@ impl App {
                         self.actions.push(Action::LoadSubtitle);
                     }
                     ui.horizontal(|ui| {
-                        ui.label(format!("Delay {:+.1}s", self.playback.sub_delay));
-                        if ui.small_button(icons::MINUS).on_hover_text("Z").clicked() {
+                        ui.label(format!("Delay {:+.1} s", self.playback.sub_delay));
+                        if ui.small_button(icons::MINUS).on_hover_text("Show earlier (Z)").clicked() {
                             self.actions.push(Action::AdjustSubDelay(-0.1));
                         }
-                        if ui.small_button(icons::PLUS).on_hover_text("X").clicked() {
+                        if ui.small_button(icons::PLUS).on_hover_text("Show later (X)").clicked() {
                             self.actions.push(Action::AdjustSubDelay(0.1));
                         }
                     });
@@ -765,7 +733,6 @@ impl App {
     fn video_area(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
         let resp = ui.interact(rect, egui::Id::unique("video"), Sense::click());
-
         if self.loaded {
             self.paint_frame(ui, rect);
             if resp.double_clicked() {
@@ -774,6 +741,7 @@ impl App {
         } else {
             self.placeholder(ui, rect);
         }
+        self.paint_notice(ui, rect);
     }
 
     /// Takes mpv's latest frame into the video texture.
@@ -802,13 +770,34 @@ impl App {
         }
     }
 
+    /// The current notice, as a pill in the top-left corner of the video.
+    fn paint_notice(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let Some(notice) = &self.notice else { return };
+        let now = Instant::now();
+        if now >= notice.until {
+            self.notice = None;
+            return;
+        }
+        // Fade out over the last 300 ms.
+        let left = (notice.until - now).as_secs_f32();
+        let alpha = (left / 0.3).min(1.0);
+        let color = if notice.warning { Color32::from_rgb(255, 196, 92) } else { Color32::WHITE };
+        let galley = ui.painter().layout(
+            notice.text.clone(),
+            egui::FontId::proportional(16.0),
+            color.gamma_multiply(alpha),
+            (rect.width() - 64.0).max(100.0),
+        );
+        let pos = rect.left_top() + vec2(20.0, 18.0);
+        let bg = egui::Rect::from_min_size(pos, galley.size()).expand2(vec2(12.0, 7.0));
+        ui.painter().rect_filled(bg, 8.0, Color32::from_black_alpha((170.0 * alpha) as u8));
+        ui.painter().galley(pos, galley, Color32::WHITE);
+        ui.ctx().request_repaint_after(Duration::from_millis(30).min(notice.until - now));
+    }
+
     fn placeholder(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Center)));
         child.add_space(rect.height() * 0.36);
-        if let Some(msg) = &self.message {
-            child.colored_label(child.visuals().warn_fg_color, msg);
-            child.add_space(8.0);
-        }
         if let Err(e) = &self.mpv {
             child.colored_label(child.visuals().error_fg_color, e);
             child.label("Place libmpv-2.dll next to the executable.");
@@ -818,45 +807,39 @@ impl App {
             child.weak("Loading…");
             return;
         }
-        if let Some(item) = self.continue_item() {
-            let Some(path) = self.item_path(&item) else { return };
-            let entry = self.store.get(path);
-            let (name, context) = match &item {
-                Item::Episode(l, id) => {
-                    let lib = &self.playlists[*l];
-                    let season = &lib.seasons[id.season].name;
-                    let context = if lib.seasons.len() > 1 { format!("{} · {season}", lib.name) } else { lib.name.clone() };
-                    (lib.get(*id).map(|e| e.name.clone()).unwrap_or_default(), Some(context))
-                }
-                Item::Video(path) => (display_name(path), None),
-            };
-            let verb = if entry.resume_position().is_some() { "Continue" } else { "Play" };
-            let text = RichText::new(format!("{}   {verb}: {name}", icons::PLAY)).size(18.0);
-            if child.button(text).clicked() {
-                self.actions.push(Action::Play(item.clone()));
+        if let Some(index) = self.continue_target() {
+            let path = &self.playlist[index];
+            let resume = self.store.get(path).resume_position();
+            let verb = if resume.is_some() { "Continue" } else { "Play" };
+            let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, display_name(path))).size(18.0);
+            if child.button(text).on_hover_text("Space").clicked() {
+                self.actions.push(Action::Play(index));
             }
-            let detail = [context, entry.resume_position().map(|p| format!("from {}", format_time(p)))]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
-            child.weak(detail);
+            if let Some(pos) = resume {
+                child.weak(format!("from {}", format_time(pos)));
+            }
             return;
         }
+
+        let (title, hint) = if self.playlist.is_empty() {
+            ("Drop a folder or videos here", "A folder plays all of its videos in order.")
+        } else {
+            ("Everything in the playlist is watched", "Pick a video to watch it again, or open something new.")
+        };
         child.label(RichText::new(icons::FOLDER_PLUS).size(44.0).weak());
         child.add_space(6.0);
-        child.label(RichText::new("Drop a folder or video here").size(18.0));
-        child.weak("A folder becomes a playlist; its subfolders are seasons.");
+        child.label(RichText::new(title).size(18.0));
+        child.weak(hint);
         child.add_space(10.0);
         child.horizontal(|ui| {
             // Center the two buttons.
-            let width = 260.0;
+            let width = 220.0;
             ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
-            if ui.button(format!("{}  Add folder", icons::FOLDER_PLUS)).clicked() {
-                self.actions.push(Action::AddFolder);
+            if ui.button(format!("{}  Open folder", icons::FOLDER_PLUS)).clicked() {
+                self.actions.push(Action::OpenFolder);
             }
-            if ui.button(format!("{}  Open video", icons::FILE_VIDEO)).clicked() {
-                self.actions.push(Action::OpenVideo);
+            if ui.button(format!("{}  Add videos", icons::FILE_VIDEO)).clicked() {
+                self.actions.push(Action::OpenVideos);
             }
         });
     }
@@ -872,7 +855,7 @@ impl App {
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Drop a folder to add a playlist, or a video to play it",
+            "Drop a folder to play it, or videos to add them to the playlist",
             egui::FontId::proportional(20.0),
             Color32::WHITE,
         );
@@ -888,12 +871,16 @@ impl eframe::App for App {
         self.handle_input(&ctx);
         self.update_frame(&ctx);
 
-        // In fullscreen, controls appear on mouse movement and hide after a moment.
+        // In fullscreen, controls appear on mouse movement and hide after a
+        // moment, but stay up while paused or idle.
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
         if moved {
             self.last_activity = Instant::now();
         }
-        let show_chrome = !self.fullscreen || self.last_activity.elapsed() < CONTROLS_HIDE_DELAY || !self.loaded;
+        let show_chrome = !self.fullscreen
+            || !self.loaded
+            || self.playback.paused
+            || self.last_activity.elapsed() < CONTROLS_HIDE_DELAY;
         if !show_chrome {
             ctx.set_cursor_icon(egui::CursorIcon::None);
         }
@@ -935,52 +922,39 @@ impl Drop for App {
     }
 }
 
-/// A row in the sidebar for an episode or a loose video, with its progress.
-#[allow(clippy::too_many_arguments)]
-fn media_row(
-    ui: &mut egui::Ui,
-    store: &Store,
-    actions: &mut Vec<Action>,
-    item: Item,
-    name: &str,
-    path: &Path,
-    selected: bool,
-    removable: bool,
-) {
+/// A playlist entry with its watch progress.
+fn playlist_row(ui: &mut egui::Ui, store: &Store, actions: &mut Vec<Action>, index: usize, path: &Path, playing: bool) {
     let entry = store.get(path);
+    let name = display_name(path);
     let text = if entry.watched {
         RichText::new(format!("{}  {name}", icons::CHECK)).weak()
     } else {
         RichText::new(name)
     };
-    let resp = ui.add_sized([ui.available_width(), 22.0], egui::Button::selectable(selected, "").left_text(text));
+    let resp = ui.add_sized([ui.available_width(), 22.0], egui::Button::selectable(playing, "").left_text(text));
     if (!entry.watched && entry.fraction() > 0.0) || entry.resume_position().is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
         let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
         ui.painter().line_segment([r.left_bottom(), end], (2.0, ui.visuals().selection.bg_fill));
     }
-    let resp = resp.on_hover_text(hover_text(&entry));
+    let resp = resp.on_hover_text(format!("{}\n{}", path.display(), hover_text(&entry)));
     if resp.clicked() {
-        actions.push(Action::Play(item.clone()));
+        actions.push(Action::Play(index));
     }
     resp.context_menu(|ui| {
         if ui.button(format!("{}  Play from start", icons::PLAY)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), false));
-            actions.push(Action::Play(item.clone()));
+            actions.push(Action::Play(index));
         }
         let (label, watched) = if entry.watched { ("Mark as unwatched", false) } else { ("Mark as watched", true) };
         if ui.button(format!("{}  {label}", icons::CHECK)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), watched));
         }
-        if removable && ui.button(format!("{}  Remove from list", icons::X)).clicked() {
-            actions.push(Action::RemoveVideo(path.to_path_buf()));
+        ui.separator();
+        if ui.button(format!("{}  Remove from playlist", icons::X)).on_hover_text("The file is not touched").clicked() {
+            actions.push(Action::Remove(index));
         }
     });
-}
-
-fn section_label(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(4.0);
-    ui.label(RichText::new(text.to_uppercase()).small().weak());
 }
 
 fn transport_button(icon: &str) -> egui::Button<'static> {
@@ -998,11 +972,11 @@ fn display_name(path: &Path) -> String {
 
 fn hover_text(entry: &progress::Entry) -> String {
     if entry.watched {
-        "Watched".into()
+        "Watched · right-click for options".into()
     } else if entry.position > 0.0 {
-        format!("{} / {}", format_time(entry.position), format_time(entry.duration))
+        format!("{} / {} · right-click for options", format_time(entry.position), format_time(entry.duration))
     } else {
-        "Not started".into()
+        "Not started · right-click for options".into()
     }
 }
 
@@ -1025,8 +999,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::REFRESH, icons::TRASH, icons::PLAY_CIRCLE,
-            icons::PLAY, "—", "·", "…",
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::PLAY, "—", "·", "…", "−",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));

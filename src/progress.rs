@@ -1,4 +1,4 @@
-//! Persistent state: watch progress, playlists and loose videos, stored as
+//! Persistent state: watch progress per video and the playlist, stored as
 //! JSON in the user's config folder.
 
 use std::collections::HashMap;
@@ -8,8 +8,6 @@ use serde::{Deserialize, Serialize};
 
 /// Fraction of a video after which it counts as watched.
 const WATCHED_FRACTION: f64 = 0.9;
-/// How many individually opened videos are remembered.
-const MAX_VIDEOS: usize = 50;
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Entry {
@@ -33,14 +31,10 @@ impl Entry {
 #[serde(default)]
 pub struct Store {
     pub entries: HashMap<String, Entry>,
-    /// Folders added as playlists, in the order they were added.
-    pub playlists: Vec<PathBuf>,
-    /// Videos opened on their own, most recent first.
-    pub videos: Vec<PathBuf>,
-    /// Last played episode per playlist folder.
-    pub last_episode: HashMap<String, PathBuf>,
-    /// The most recently played video, in a playlist or not.
-    pub last_played: Option<PathBuf>,
+    /// The playlist, in play order.
+    pub playlist: Vec<PathBuf>,
+    /// The playlist entry that was playing last.
+    pub current: Option<PathBuf>,
     pub volume: f64,
     #[serde(skip)]
     dirty: bool,
@@ -50,10 +44,8 @@ impl Default for Store {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
-            playlists: Vec::new(),
-            videos: Vec::new(),
-            last_episode: HashMap::new(),
-            last_played: None,
+            playlist: Vec::new(),
+            current: None,
             volume: 100.0,
             dirty: false,
         }
@@ -126,44 +118,14 @@ impl Store {
         self.dirty = true;
     }
 
-    pub fn add_playlist(&mut self, folder: &Path) {
-        if !self.playlists.iter().any(|p| p == folder) {
-            self.playlists.push(folder.to_path_buf());
-            self.dirty = true;
-        }
-    }
-
-    /// Forgets a playlist. Progress of its episodes is kept, so re-adding the
-    /// folder later restores it.
-    pub fn remove_playlist(&mut self, folder: &Path) {
-        self.playlists.retain(|p| p != folder);
-        self.last_episode.remove(&key(folder));
+    pub fn set_playlist(&mut self, playlist: &[PathBuf]) {
+        self.playlist = playlist.to_vec();
         self.dirty = true;
     }
 
-    /// Remembers an individually opened video, moving it to the top.
-    pub fn add_video(&mut self, path: &Path) {
-        self.videos.retain(|p| p != path);
-        self.videos.insert(0, path.to_path_buf());
-        self.videos.truncate(MAX_VIDEOS);
+    pub fn set_current(&mut self, current: Option<&Path>) {
+        self.current = current.map(Path::to_path_buf);
         self.dirty = true;
-    }
-
-    pub fn remove_video(&mut self, path: &Path) {
-        self.videos.retain(|p| p != path);
-        self.dirty = true;
-    }
-
-    pub fn set_played(&mut self, path: &Path, playlist: Option<&Path>) {
-        if let Some(folder) = playlist {
-            self.last_episode.insert(key(folder), path.to_path_buf());
-        }
-        self.last_played = Some(path.to_path_buf());
-        self.dirty = true;
-    }
-
-    pub fn last_episode(&self, folder: &Path) -> Option<&PathBuf> {
-        self.last_episode.get(&key(folder))
     }
 
     pub fn set_volume(&mut self, volume: f64) {
