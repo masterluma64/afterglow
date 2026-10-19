@@ -42,13 +42,6 @@ pub struct Store {
     /// The most recently played video, in a playlist or not.
     pub last_played: Option<PathBuf>,
     pub volume: f64,
-    /// Folders scanned for music.
-    pub music_folders: Vec<PathBuf>,
-    pub visualizer: crate::music::Visualizer,
-    /// Whether the music view was open last.
-    pub music_mode: bool,
-    /// Whether the visualizer moves to the next preset by itself.
-    pub viz_auto: bool,
     #[serde(skip)]
     dirty: bool,
 }
@@ -62,10 +55,6 @@ impl Default for Store {
             last_episode: HashMap::new(),
             last_played: None,
             volume: 100.0,
-            music_folders: Vec::new(),
-            visualizer: Default::default(),
-            music_mode: false,
-            viz_auto: true,
             dirty: false,
         }
     }
@@ -179,39 +168,6 @@ impl Store {
 
     pub fn set_volume(&mut self, volume: f64) {
         self.volume = volume;
-        self.dirty = true;
-    }
-}
-
-impl Store {
-    pub fn add_music_folder(&mut self, folder: &Path) -> bool {
-        if self.music_folders.iter().any(|p| p == folder) {
-            return false;
-        }
-        self.music_folders.push(folder.to_path_buf());
-        self.dirty = true;
-        true
-    }
-
-    pub fn remove_music_folder(&mut self, folder: &Path) {
-        self.music_folders.retain(|p| p != folder);
-        self.dirty = true;
-    }
-
-    pub fn set_visualizer(&mut self, visualizer: crate::music::Visualizer) {
-        self.visualizer = visualizer;
-        self.dirty = true;
-    }
-
-    pub fn set_music_mode(&mut self, music: bool) {
-        self.music_mode = music;
-        self.dirty = true;
-    }
-}
-
-impl Store {
-    pub fn set_viz_auto(&mut self, auto: bool) {
-        self.viz_auto = auto;
         self.dirty = true;
     }
 }

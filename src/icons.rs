@@ -27,15 +27,6 @@ pub const X: &str = "\u{E4F6}";
 pub const REFRESH: &str = "\u{E094}";
 pub const TRASH: &str = "\u{E4A6}";
 pub const PLAY_CIRCLE: &str = "\u{E3D2}";
-pub const MUSIC_NOTES: &str = "\u{E340}";
-pub const FILM_STRIP: &str = "\u{E792}";
-pub const SEARCH: &str = "\u{E30C}";
-pub const CARET_LEFT: &str = "\u{E138}";
-pub const CARET_UP: &str = "\u{E13C}";
-pub const CARET_DOWN: &str = "\u{E136}";
-pub const GRID: &str = "\u{E464}";
-pub const LIST: &str = "\u{E2F2}";
-pub const VINYL: &str = "\u{ECAC}";
 
 const FILL_FAMILY: &str = "phosphor-fill";
 

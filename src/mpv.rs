@@ -185,7 +185,6 @@ impl Mpv {
             ("slang", "en,eng"),
             ("volume-max", "150"),
             ("ytdl", "no"),
-            ("audio-display", "no"),
         ];
         for (k, v) in options {
             let (k, v) = (cstr(k), cstr(v));
@@ -292,19 +291,6 @@ impl Mpv {
 
     pub fn get_flag(&self, name: &str) -> bool {
         self.get_str(name).as_deref() == Some("yes")
-    }
-
-    /// Removes the `lavfi-complex` graph. While a graph is active mpv sets
-    /// `aid`/`vid` to "no", and clearing it doesn't restore them, which would
-    /// leave playback (and later files) silent. "auto" only applies when a
-    /// file loads, so the current file gets its first audio track explicitly.
-    pub fn clear_filter_graph(&self) {
-        self.set("lavfi-complex", "");
-        self.set("aid", "auto");
-        self.set("vid", "auto");
-        if let Some(track) = self.tracks("audio").first() {
-            self.set("aid", &track.id.to_string());
-        }
     }
 
     pub fn load_file(&self, path: &Path, start: f64) -> Result<(), String> {
@@ -480,77 +466,5 @@ mod tests {
         assert!(subs_ok, "subtitle track not selected");
         assert!(frames >= 10, "only got {frames} frames");
         assert!(mpv.get_f64("time-pos").unwrap() > 0.0);
-    }
-}
-
-
-#[cfg(test)]
-mod analysis_tests {
-    use super::*;
-    use crate::audio;
-    use std::time::{Duration, Instant};
-
-    fn mpv() -> Mpv {
-        let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let mut paths = vec![profile_dir];
-        paths.extend(std::env::split_paths(&path));
-        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
-        let mpv = Mpv::new(egui::Context::default()).expect("libmpv");
-        mpv.set("volume", "0");
-        mpv
-    }
-
-    fn wait_loaded(mpv: &Mpv) {
-        let deadline = Instant::now() + Duration::from_secs(8);
-        while Instant::now() < deadline {
-            if mpv.poll_events().iter().any(|e| matches!(e, Event::FileLoaded)) {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        panic!("file never loaded");
-    }
-
-    #[test]
-    fn analysis_frames_decode() {
-        let mpv = mpv();
-        mpv.set_render_size(audio::FRAME_SIZE[0], audio::FRAME_SIZE[1]);
-        mpv.set("lavfi-complex", audio::ANALYSIS_GRAPH);
-        mpv.command(&["loadfile", "av://lavfi:sine=frequency=220:duration=4,volume=0.8"]).unwrap();
-        wait_loaded(&mpv);
-        let deadline = Instant::now() + Duration::from_secs(6);
-        let mut decoded = Vec::new();
-        while Instant::now() < deadline && decoded.len() < 20 {
-            if let Some(img) = mpv.take_frame() {
-                decoded.push(audio::decode(&img).expect("frame has the analysis size"));
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        assert!(decoded.len() >= 10, "only {} frames", decoded.len());
-        let f = decoded.last().unwrap();
-        let fmt = |v: &[f32]| v.iter().map(|x| format!("{x:.2}")).collect::<Vec<_>>().join(" ");
-        println!("spectrum: {}", fmt(&f.spectrum));
-        println!("wave:     {}", fmt(&f.wave));
-        let peak = f.spectrum.iter().cloned().fold(0.0, f32::max);
-        let wave_range = f.wave.iter().cloned().fold(f32::MIN, f32::max) - f.wave.iter().cloned().fold(f32::MAX, f32::min);
-        assert!(peak > 0.3, "no spectrum peak");
-        // FFmpeg's sine source has an amplitude of 1/8.
-        assert!(wave_range > 0.1, "flat waveform");
-    }
-
-    /// Clearing the filter graph mid-playback must not leave audio deselected.
-    #[test]
-    fn audio_survives_clearing_graph() {
-        let mpv = mpv();
-        mpv.set("lavfi-complex", audio::ANALYSIS_GRAPH);
-        mpv.command(&["loadfile", "av://lavfi:sine=frequency=220:duration=6"]).unwrap();
-        wait_loaded(&mpv);
-        std::thread::sleep(Duration::from_millis(500));
-        println!("before: aid={:?} audio={:?}", mpv.get_str("aid"), mpv.get_str("current-tracks/audio/id"));
-        mpv.clear_filter_graph();
-        std::thread::sleep(Duration::from_millis(800));
-        println!("after:  aid={:?} audio={:?}", mpv.get_str("aid"), mpv.get_str("current-tracks/audio/id"));
-        assert!(mpv.get_str("current-tracks/audio/id").is_some(), "audio track deselected");
     }
 }

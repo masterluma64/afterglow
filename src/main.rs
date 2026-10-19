@@ -1,26 +1,17 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod audio;
-mod covers;
 mod icons;
 mod library;
 mod mpv;
-mod music;
-mod music_ui;
 mod progress;
-mod viz;
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Key, Layout, RichText, Sense, TextureHandle, TextureOptions, vec2};
 
 use library::{EpisodeId, Library};
-use covers::Covers;
 use mpv::Mpv;
-use music::{MusicLibrary, Visualizer};
-use music_ui::MusicUi;
 use progress::Store;
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
@@ -42,21 +33,16 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
-            let viz_ready = viz::install(cc);
-            let mut app = App::new(&cc.egui_ctx, open);
-            app.viz_ready = viz_ready;
-            Ok(Box::new(app))
+            Ok(Box::new(App::new(&cc.egui_ctx, open)))
         }),
     )
 }
 
-/// Something that can be played: an episode of a playlist, a video on its
-/// own, or a music track.
+/// Something that can be played: an episode of a playlist, or a video on its own.
 #[derive(Clone, PartialEq, Debug)]
 enum Item {
     Episode(usize, EpisodeId),
     Video(PathBuf),
-    Track(PathBuf),
 }
 
 enum Action {
@@ -85,21 +71,6 @@ enum Action {
     LoadSubtitle,
     AdjustSubDelay(f64),
     FrameStep { forward: bool },
-    SetMode(Mode),
-    AddMusicFolder,
-    RemoveMusicFolder(usize),
-    RescanMusic,
-    /// Plays `queue[start]`, continuing with the rest of the queue.
-    PlayTracks { queue: Vec<PathBuf>, start: usize },
-    SetVisualizer(Visualizer),
-    CycleVisualizer,
-    ToggleVizAuto,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    Videos,
-    Music,
 }
 
 /// Playback state sampled from mpv once per frame.
@@ -132,22 +103,6 @@ struct App {
     last_activity: Instant,
     message: Option<String>,
     actions: Vec<Action>,
-    mode: Mode,
-    music: MusicLibrary,
-    music_ui: MusicUi,
-    /// Pending result of a background library scan.
-    music_scan: Option<Receiver<Vec<music::Track>>>,
-    covers: Covers,
-    /// Tracks queued for playback, in order.
-    queue: Vec<PathBuf>,
-    analyzer: audio::Analyzer,
-    features: audio::Features,
-    /// Whether the GPU visualizer is available (wgpu backend).
-    viz_ready: bool,
-    /// Set while the visualizer is on screen, to keep animating.
-    viz_visible: bool,
-    viz_changed: Instant,
-    started: Instant,
 }
 
 impl App {
@@ -174,105 +129,21 @@ impl App {
             last_activity: Instant::now(),
             message: None,
             actions: Vec::new(),
-            mode: Mode::Videos,
-            music: MusicLibrary::default(),
-            music_ui: MusicUi::default(),
-            music_scan: None,
-            covers: Covers::new(ctx.clone()),
-            queue: Vec::new(),
-            analyzer: audio::Analyzer::default(),
-            features: audio::Analyzer::default().tick(0.0),
-            viz_ready: false,
-            viz_visible: false,
-            viz_changed: Instant::now(),
-            started: Instant::now(),
         };
-        if app.store.music_mode {
-            app.mode = Mode::Music;
-        }
-        app.rescan_music(ctx);
         for path in open {
             app.open(path, ctx);
         }
         app
     }
 
-    /// Opens a dropped or passed path: a folder of videos becomes a playlist, a
-    /// folder of music joins the music library, and files are played.
     fn open(&mut self, path: PathBuf, ctx: &egui::Context) {
         if path.is_dir() {
-            let has_videos = Library::scan(&path).is_ok_and(|lib| !lib.seasons.is_empty());
-            if !has_videos && contains_audio(&path) {
-                self.add_music_folder(path, ctx);
-            } else {
-                self.set_mode(Mode::Videos);
-                self.add_playlist(path);
-            }
+            self.add_playlist(path);
         } else if library::is_video(&path) {
-            self.set_mode(Mode::Videos);
             self.open_video(path, ctx);
-        } else if music::is_audio(&path) {
-            // A track from the library continues with the rest of its album.
-            let album = self.music.track_index(&path).and_then(|i| self.music.album_of(&self.music.tracks[i]));
-            let queue: Vec<PathBuf> = match album {
-                Some(album) => album.tracks.iter().map(|&t| self.music.tracks[t].path.clone()).collect(),
-                None => vec![path.clone()],
-            };
-            let start = queue.iter().position(|p| *p == path).unwrap_or(0);
-            self.play_tracks(queue, start, ctx);
         } else {
-            self.message = Some(format!("Not a folder, video or audio file: {}", path.display()));
+            self.message = Some(format!("Not a folder or video: {}", path.display()));
         }
-    }
-
-    fn set_mode(&mut self, mode: Mode) {
-        if self.mode != mode {
-            self.mode = mode;
-            self.store.set_music_mode(mode == Mode::Music);
-        }
-    }
-
-    fn add_music_folder(&mut self, folder: PathBuf, ctx: &egui::Context) {
-        self.set_mode(Mode::Music);
-        if self.store.add_music_folder(&folder) {
-            self.store.save();
-            self.rescan_music(ctx);
-        }
-    }
-
-    fn rescan_music(&mut self, ctx: &egui::Context) {
-        if !self.store.music_folders.is_empty() {
-            self.music_scan = Some(music::scan_in_background(self.store.music_folders.clone(), ctx.clone()));
-        } else {
-            self.music = MusicLibrary::default();
-        }
-    }
-
-    fn poll_music_scan(&mut self) {
-        let Some(rx) = &self.music_scan else { return };
-        match rx.try_recv() {
-            Ok(tracks) => {
-                self.music = MusicLibrary::new(tracks);
-                self.covers.clear();
-                self.music_scan = None;
-                // A track opened before the scan finished only queued itself;
-                // now that its album is known, continue with the album.
-                if let (Some(Item::Track(path)), 1) = (&self.current, self.queue.len()) {
-                    let album = self.music.track_index(path).and_then(|i| self.music.album_of(&self.music.tracks[i]));
-                    if let Some(album) = album {
-                        self.queue = album.tracks.iter().map(|&t| self.music.tracks[t].path.clone()).collect();
-                    }
-                }
-            }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => self.music_scan = None,
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-        }
-    }
-
-    fn play_tracks(&mut self, queue: Vec<PathBuf>, start: usize, ctx: &egui::Context) {
-        let Some(path) = queue.get(start).cloned() else { return };
-        self.queue = queue;
-        self.play(Item::Track(path), ctx);
     }
 
     fn add_playlist(&mut self, folder: PathBuf) {
@@ -336,7 +207,7 @@ impl App {
     fn item_path<'a>(&'a self, item: &'a Item) -> Option<&'a Path> {
         match item {
             Item::Episode(l, id) => Some(&self.playlists.get(*l)?.get(*id)?.path),
-            Item::Video(path) | Item::Track(path) => Some(path),
+            Item::Video(path) => Some(path),
         }
     }
 
@@ -375,9 +246,8 @@ impl App {
         (resumable && last.is_file()).then(|| Item::Video(last.clone()))
     }
 
-    /// Records the position of the playing video. Music has no resume point.
     fn save_current_progress(&mut self) {
-        if !self.loaded || self.playback.duration <= 0.0 || matches!(self.current, Some(Item::Track(_))) {
+        if !self.loaded || self.playback.duration <= 0.0 {
             return;
         }
         if let Some(path) = self.current_path().map(Path::to_path_buf) {
@@ -395,31 +265,15 @@ impl App {
                 (ep.path.clone(), format!("{} — {}", ep.name, lib.name), Some(lib.root.clone()))
             }
             Item::Video(path) => (path.clone(), display_name(path), None),
-            Item::Track(path) => {
-                let title = match self.music.track_index(path).map(|i| &self.music.tracks[i]) {
-                    Some(t) => format!("{} — {}", t.title, t.artist),
-                    None => display_name(path),
-                };
-                (path.clone(), title, None)
-            }
         };
 
-        let is_track = matches!(item, Item::Track(_));
-        let start = if is_track { 0.0 } else { self.store.get(&path).resume_position().unwrap_or(0.0) };
-        // Music is routed through the analysis graph that feeds the visualizer.
-        if is_track {
-            mpv.set("lavfi-complex", audio::ANALYSIS_GRAPH);
-        } else {
-            mpv.clear_filter_graph();
-        }
+        let start = self.store.get(&path).resume_position().unwrap_or(0.0);
         match mpv.load_file(&path, start) {
             Ok(()) => {
                 mpv.set("pause", "no");
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-                if !is_track {
-                    self.store.set_played(&path, playlist.as_deref());
-                    self.store.save();
-                }
+                self.store.set_played(&path, playlist.as_deref());
+                self.store.save();
                 // Drop the previous frame so it never shows under new content.
                 self.texture = None;
                 self.current = Some(item);
@@ -443,10 +297,6 @@ impl App {
         match item {
             Item::Episode(l, id) => self.playlists.get(*l)?.next(*id).map(|n| Item::Episode(*l, n)),
             Item::Video(_) => None,
-            Item::Track(path) => {
-                let i = self.queue.iter().position(|p| p == path)?;
-                self.queue.get(i + 1).cloned().map(Item::Track)
-            }
         }
     }
 
@@ -454,14 +304,6 @@ impl App {
         match item {
             Item::Episode(l, id) => self.playlists.get(*l)?.prev(*id).map(|n| Item::Episode(*l, n)),
             Item::Video(_) => None,
-            Item::Track(path) => {
-                // Like most music players: restart the song unless near its start.
-                if self.playback.position > 3.0 {
-                    return Some(item.clone());
-                }
-                let i = self.queue.iter().position(|p| p == path)?;
-                self.queue.get(i.checked_sub(1)?).cloned().map(Item::Track)
-            }
         }
     }
 
@@ -479,10 +321,8 @@ impl App {
                         continue;
                     }
                     let Some(current) = self.current.clone() else { continue };
-                    if !matches!(current, Item::Track(_)) {
-                        if let Some(path) = self.item_path(&current).map(Path::to_path_buf) {
-                            self.store.set_watched(&path, true);
-                        }
+                    if let Some(path) = self.item_path(&current).map(Path::to_path_buf) {
+                        self.store.set_watched(&path, true);
                     }
                     match self.next_item(&current) {
                         Some(next) => self.play(next, ctx),
@@ -549,7 +389,6 @@ impl App {
                 (M::NONE, Key::L, Action::ToggleSidebar),
                 (M::NONE, Key::Z, Action::AdjustSubDelay(-0.1)),
                 (M::NONE, Key::X, Action::AdjustSubDelay(0.1)),
-                (M::NONE, Key::V, Action::CycleVisualizer),
             ];
             // 0–9 jump to 0%–90% of the video.
             let digits = [
@@ -631,33 +470,6 @@ impl App {
                 }
             }
             Action::ToggleSidebar => self.show_sidebar = !self.show_sidebar,
-            Action::SetMode(mode) => self.set_mode(mode),
-            Action::AddMusicFolder => {
-                if let Some(folder) = rfd::FileDialog::new().set_title("Add music folder").pick_folder() {
-                    self.add_music_folder(folder, ctx);
-                }
-            }
-            Action::RemoveMusicFolder(index) => {
-                let folder = self.store.music_folders[index].clone();
-                self.store.remove_music_folder(&folder);
-                self.store.save();
-                self.rescan_music(ctx);
-            }
-            Action::RescanMusic => self.rescan_music(ctx),
-            Action::ToggleVizAuto => {
-                let auto = !self.store.viz_auto;
-                self.store.set_viz_auto(auto);
-                self.viz_changed = Instant::now();
-            }
-            Action::PlayTracks { queue, start } => self.play_tracks(queue, start, ctx),
-            Action::SetVisualizer(_) | Action::CycleVisualizer => {
-                let vis = match action {
-                    Action::SetVisualizer(vis) => vis,
-                    _ => self.store.visualizer.next(),
-                };
-                self.store.set_visualizer(vis);
-                self.viz_changed = Instant::now();
-            }
             Action::TogglePause => {
                 if self.loaded {
                     if let Ok(mpv) = &self.mpv {
@@ -726,21 +538,6 @@ impl App {
         ui.horizontal(|ui| {
             if icon_button(ui, icons::SIDEBAR, "Toggle sidebar (L)").clicked() {
                 self.actions.push(Action::ToggleSidebar);
-            }
-            for (mode, icon, label) in [(Mode::Videos, icons::FILM_STRIP, "Videos"), (Mode::Music, icons::MUSIC_NOTES, "Music")] {
-                let text = RichText::new(format!("{icon}  {label}")).strong();
-                if ui.selectable_label(self.mode == mode, text).clicked() {
-                    self.actions.push(Action::SetMode(mode));
-                }
-            }
-            ui.separator();
-            if self.mode == Mode::Music {
-                if ui.button(format!("{}  Add music folder", icons::FOLDER_PLUS)).clicked() {
-                    self.actions.push(Action::AddMusicFolder);
-                }
-                ui.separator();
-                self.music_toolbar(ui);
-                return;
             }
             if ui.button(format!("{}  Add folder", icons::FOLDER_PLUS)).on_hover_text("Add a folder as playlist (Ctrl+N)").clicked() {
                 self.actions.push(Action::AddFolder);
@@ -845,19 +642,18 @@ impl App {
     fn controls(&mut self, ui: &mut egui::Ui) {
         let Playback { position, duration, paused, muted, volume, .. } = self.playback;
         let position = self.scrub.unwrap_or(position);
-        let has_sequence = matches!(self.current, Some(Item::Episode(..) | Item::Track(_)));
+        let in_playlist = matches!(self.current, Some(Item::Episode(..)));
         ui.horizontal(|ui| {
-            if ui.add_enabled(has_sequence, transport_button(icons::SKIP_BACK)).on_hover_text("Previous (P)").clicked() {
+            if ui.add_enabled(in_playlist, transport_button(icons::SKIP_BACK)).on_hover_text("Previous (P)").clicked() {
                 self.actions.push(Action::Prev);
             }
             let icon = if self.loaded && !paused { icons::PAUSE } else { icons::PLAY };
             if ui.add(transport_button(icon)).on_hover_text("Play/pause (Space)").clicked() {
                 self.actions.push(Action::TogglePause);
             }
-            if ui.add_enabled(has_sequence, transport_button(icons::SKIP_FORWARD)).on_hover_text("Next (N)").clicked() {
+            if ui.add_enabled(in_playlist, transport_button(icons::SKIP_FORWARD)).on_hover_text("Next (N)").clicked() {
                 self.actions.push(Action::Next);
             }
-            self.now_playing_chip(ui);
             ui.add_space(4.0);
             ui.monospace(format_time(if self.loaded { position } else { 0.0 }));
 
@@ -970,47 +766,23 @@ impl App {
         let rect = ui.max_rect();
         let resp = ui.interact(rect, egui::Id::unique("video"), Sense::click());
 
-        if matches!(self.current, Some(Item::Track(_))) {
-            self.now_playing(ui);
-        } else if self.loaded {
+        if self.loaded {
             self.paint_frame(ui, rect);
+            if resp.double_clicked() {
+                self.actions.push(Action::ToggleFullscreen);
+            }
         } else {
             self.placeholder(ui, rect);
-            return;
-        }
-        if resp.double_clicked() {
-            self.actions.push(Action::ToggleFullscreen);
         }
     }
 
-    /// Takes mpv's latest frame: for videos it becomes the video texture, for
-    /// music it carries analysis data. Also advances the visualizer.
-    fn update_frames(&mut self, ctx: &egui::Context) {
+    /// Takes mpv's latest frame into the video texture.
+    fn update_frame(&mut self, ctx: &egui::Context) {
         let Ok(mpv) = &self.mpv else { return };
-        let is_track = matches!(self.current, Some(Item::Track(_)));
-        if is_track {
-            mpv.set_render_size(audio::FRAME_SIZE[0], audio::FRAME_SIZE[1]);
-        }
         if let Some(image) = mpv.take_frame() {
-            if is_track {
-                if let Some(frame) = audio::decode(&image) {
-                    self.analyzer.push(frame);
-                }
-            } else {
-                match &mut self.texture {
-                    Some(tex) => tex.set(image, TextureOptions::LINEAR),
-                    None => self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR)),
-                }
-            }
-        }
-        self.features = self.analyzer.tick(ctx.input(|i| i.unstable_dt));
-
-        // Auto-cycle: after a while, move to the next preset on a beat.
-        if self.store.viz_auto && is_track && self.store.visualizer.preset().is_some() {
-            let age = self.viz_changed.elapsed().as_secs_f32();
-            if age > 40.0 || (age > 25.0 && self.features.beat > 0.95) {
-                self.store.set_visualizer(self.store.visualizer.next_preset());
-                self.viz_changed = Instant::now();
+            match &mut self.texture {
+                Some(tex) => tex.set(image, TextureOptions::LINEAR),
+                None => self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR)),
             }
         }
     }
@@ -1056,7 +828,7 @@ impl App {
                     let context = if lib.seasons.len() > 1 { format!("{} · {season}", lib.name) } else { lib.name.clone() };
                     (lib.get(*id).map(|e| e.name.clone()).unwrap_or_default(), Some(context))
                 }
-                Item::Video(path) | Item::Track(path) => (display_name(path), None),
+                Item::Video(path) => (display_name(path), None),
             };
             let verb = if entry.resume_position().is_some() { "Continue" } else { "Play" };
             let text = RichText::new(format!("{}   {verb}: {name}", icons::PLAY)).size(18.0);
@@ -1100,7 +872,7 @@ impl App {
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Drop a folder of videos or music, or a single file to play it",
+            "Drop a folder to add a playlist, or a video to play it",
             egui::FontId::proportional(20.0),
             Color32::WHITE,
         );
@@ -1114,10 +886,7 @@ impl eframe::App for App {
         self.handle_mpv_events(&ctx);
         self.sample_playback();
         self.handle_input(&ctx);
-        self.poll_music_scan();
-        self.covers.poll(&ctx);
-
-        self.update_frames(&ctx);
+        self.update_frame(&ctx);
 
         // In fullscreen, controls appear on mouse movement and hide after a moment.
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
@@ -1142,26 +911,14 @@ impl eframe::App for App {
                 .resizable(true)
                 .default_size(280.0)
                 .size_range(180.0..=600.0)
-                .show(ui, |ui| match self.mode {
-                    Mode::Videos => self.sidebar(ui),
-                    Mode::Music => self.music_sidebar(ui),
-                });
+                .show(ui, |ui| self.sidebar(ui));
         }
-        if self.mode == Mode::Music && !self.fullscreen {
-            egui::CentralPanel::no_frame()
-                .frame(egui::Frame::central_panel(ui.style()).inner_margin(0))
-                .show(ui, |ui| self.music_browser(ui));
-        } else {
-            egui::CentralPanel::no_frame()
-                .frame(egui::Frame::NONE.fill(Color32::BLACK))
-                .show(ui, |ui| self.video_area(ui));
-        }
+        egui::CentralPanel::no_frame()
+            .frame(egui::Frame::NONE.fill(Color32::BLACK))
+            .show(ui, |ui| self.video_area(ui));
         self.drop_overlay(&ctx, window);
 
         self.apply_actions(&ctx);
-        if std::mem::take(&mut self.viz_visible) {
-            ctx.request_repaint();
-        }
 
         if self.loaded && !self.playback.paused {
             ctx.request_repaint_after(Duration::from_millis(250));
@@ -1235,15 +992,7 @@ fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
         .on_hover_text(tooltip)
 }
 
-/// Whether a folder (or any subfolder) contains audio files.
-fn contains_audio(dir: &Path) -> bool {
-    std::fs::read_dir(dir).into_iter().flatten().flatten().any(|e| {
-        let path = e.path();
-        if path.is_dir() { contains_audio(&path) } else { music::is_audio(&path) }
-    })
-}
-
-pub(crate) fn display_name(path: &Path) -> String {
+fn display_name(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
 
@@ -1257,7 +1006,7 @@ fn hover_text(entry: &progress::Entry) -> String {
     }
 }
 
-pub(crate) fn format_time(seconds: f64) -> String {
+fn format_time(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;
     let (h, m, s) = (s / 3600, (s / 60) % 60, s % 60);
     if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m:02}:{s:02}") }
@@ -1277,8 +1026,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::REFRESH, icons::TRASH, icons::PLAY_CIRCLE,
-            icons::PLAY, icons::MUSIC_NOTES, icons::FILM_STRIP, icons::SEARCH, icons::CARET_LEFT,
-            icons::CARET_UP, icons::CARET_DOWN, icons::GRID, icons::LIST, icons::VINYL, "—", "·", "…",
+            icons::PLAY, "—", "·", "…",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));
