@@ -543,11 +543,19 @@ impl App {
             Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include, ctx),
             Action::SetWatched(path, watched) => {
                 if self.loaded && self.current_path() == Some(path.as_path()) {
-                    // Keep the live position from overwriting the change.
+                    // Keep the live position from overwriting the change; a reset
+                    // video that is loaded also jumps back to its start.
                     self.playback.position = if watched { self.playback.duration } else { 0.0 };
+                    if !watched {
+                        if let Ok(mpv) = &self.mpv {
+                            let _ = mpv.command(&["seek", "0", "absolute+exact"]);
+                        }
+                    }
                 }
                 self.store.set_watched(&path, watched);
                 self.store.save();
+                let name = display_name(&path);
+                self.notify(if watched { format!("{name}: marked as watched") } else { format!("{name}: progress reset") });
             }
             Action::Next | Action::Prev => {
                 let next = matches!(action, Action::Next);
@@ -1110,9 +1118,15 @@ fn playlist_row(
             actions.push(Action::SetWatched(path.to_path_buf(), false));
             actions.push(Action::Play(index));
         }
-        let (label, watched) = if entry.watched { ("Mark as unwatched", false) } else { ("Mark as watched", true) };
-        if ui.button(format!("{}  {label}", icons::CHECK)).clicked() {
-            actions.push(Action::SetWatched(path.to_path_buf(), watched));
+        if !entry.watched && ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
+            actions.push(Action::SetWatched(path.to_path_buf(), true));
+        }
+        // Also offered for half-watched videos: resets progress without playing.
+        if entry.watched || entry.position > 0.0 {
+            let reset = ui.button(format!("{}  Mark as unwatched", icons::RESET)).on_hover_text("Reset its progress to the start");
+            if reset.clicked() {
+                actions.push(Action::SetWatched(path.to_path_buf(), false));
+            }
         }
         ui.separator();
         if ui.button(format!("{}  Remove from playlist", icons::X)).on_hover_text("The file is not touched").clicked() {
@@ -1184,7 +1198,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::PLAY, "—", "·", "…", "−",
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::PLAY, "—", "·", "…", "−",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));

@@ -25,6 +25,7 @@ pub const PLUS: &str = "\u{E3D4}";
 pub const MINUS: &str = "\u{E32A}";
 pub const X: &str = "\u{E4F6}";
 pub const TRASH: &str = "\u{E4A6}";
+pub const RESET: &str = "\u{E038}";
 
 const FILL_FAMILY: &str = "phosphor-fill";
 
