@@ -124,6 +124,12 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Records a video's length, found without playing it.
+    pub fn set_duration(&mut self, path: &Path, duration: f64) {
+        self.entries.entry(key(path)).or_default().duration = duration;
+        self.dirty = true;
+    }
+
     pub fn set_playlist(&mut self, playlist: &[PathBuf]) {
         self.playlist = playlist.to_vec();
         self.dirty = true;

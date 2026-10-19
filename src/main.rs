@@ -5,7 +5,9 @@ mod library;
 mod mpv;
 mod progress;
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Align, Color32, Key, Layout, RichText, Sense, TextureHandle, TextureOptions, vec2};
@@ -19,6 +21,7 @@ const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
 const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -78,6 +81,43 @@ struct Playback {
     sub_delay: f64,
 }
 
+/// Finds the length of videos that haven't been played yet, on a background
+/// thread with its own headless mpv.
+struct DurationProbe {
+    requests: Sender<PathBuf>,
+    results: Receiver<(PathBuf, Option<f64>)>,
+    pending: HashSet<PathBuf>,
+}
+
+impl DurationProbe {
+    fn new(ctx: egui::Context) -> Self {
+        let (requests, request_rx) = mpsc::channel::<PathBuf>();
+        let (result_tx, results) = mpsc::channel();
+        let spawned = std::thread::Builder::new().name("duration-probe".into()).spawn(move || {
+            let Ok(prober) = mpv::Prober::new() else { return };
+            for path in request_rx {
+                let duration = prober.duration(&path, PROBE_TIMEOUT);
+                if result_tx.send((path, duration)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+            }
+        });
+        if let Err(e) = spawned {
+            eprintln!("could not start the duration probe: {e}");
+        }
+        Self { requests, results, pending: HashSet::new() }
+    }
+
+    fn request(&mut self, path: &Path) {
+        // If the probe thread isn't running (e.g. mpv failed to start), the
+        // send fails and the video simply stays without a length.
+        if self.pending.insert(path.to_path_buf()) && self.requests.send(path.to_path_buf()).is_err() {
+            self.pending.remove(path);
+        }
+    }
+}
+
 /// A short message shown over the video: feedback for an action, or a warning.
 struct Notice {
     text: String,
@@ -103,6 +143,7 @@ struct App {
     last_activity: Instant,
     notice: Option<Notice>,
     actions: Vec<Action>,
+    durations: DurationProbe,
 }
 
 impl App {
@@ -129,10 +170,12 @@ impl App {
             last_activity: Instant::now(),
             notice: None,
             actions: Vec::new(),
+            durations: DurationProbe::new(ctx.clone()),
         };
         if !open.is_empty() {
             app.open(open, ctx);
         }
+        app.request_durations();
         app
     }
 
@@ -148,7 +191,26 @@ impl App {
         self.playlist.get(self.current?).map(PathBuf::as_path)
     }
 
+    /// Queues every playlist video whose length isn't known yet.
+    fn request_durations(&mut self) {
+        for path in &self.playlist {
+            if self.store.get(path).duration <= 0.0 {
+                self.durations.request(path);
+            }
+        }
+    }
+
+    fn receive_durations(&mut self) {
+        while let Ok((path, duration)) = self.durations.results.try_recv() {
+            self.durations.pending.remove(&path);
+            if let Some(d) = duration {
+                self.store.set_duration(&path, d);
+            }
+        }
+    }
+
     fn save_playlist(&mut self) {
+        self.request_durations();
         self.store.set_playlist(&self.playlist);
         let current = self.current_path().map(Path::to_path_buf);
         if current.is_some() {
@@ -606,9 +668,8 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new("PLAYLIST").small().weak());
             if !self.playlist.is_empty() {
-                let watched = self.playlist.iter().filter(|p| self.store.get(p).watched).count();
-                ui.label(RichText::new(format!("{watched}/{}", self.playlist.len())).small().weak())
-                    .on_hover_text(format!("{watched} of {} watched", self.playlist.len()));
+                let count = self.playlist.len();
+                ui.label(RichText::new(format!("{count} video{}", if count == 1 { "" } else { "s" })).small().weak());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let clear = egui::Button::new(RichText::new(icons::TRASH).size(14.0)).frame_when_inactive(false);
                     if ui.add(clear).on_hover_text("Clear the playlist (files are not touched)").clicked() {
@@ -617,6 +678,9 @@ impl App {
                 });
             }
         });
+        if !self.playlist.is_empty() {
+            self.playlist_summary(ui);
+        }
         let mut include = self.store.include_subfolders;
         let tip = "Also play videos in subfolders when opening a folder";
         if ui.checkbox(&mut include, "Include subfolders").on_hover_text(tip).changed() {
@@ -645,6 +709,39 @@ impl App {
                 playlist_row(ui, &self.store, &mut self.actions, index, path, &name, self.current == Some(index));
             }
         });
+    }
+
+    /// Total and watched running time of the playlist, with a progress bar.
+    fn playlist_summary(&self, ui: &mut egui::Ui) {
+        let (mut total, mut watched, mut unknown) = (0.0, 0.0, 0);
+        for path in &self.playlist {
+            let entry = self.store.get(path);
+            if entry.duration <= 0.0 {
+                unknown += 1;
+                continue;
+            }
+            total += entry.duration;
+            watched += if entry.watched { entry.duration } else { entry.position.clamp(0.0, entry.duration) };
+        }
+        let measuring = unknown > 0 && !self.durations.pending.is_empty();
+        let mut text = format!("{} of {} watched", format_total(watched), format_total(total));
+        if measuring {
+            text.push_str("  ·  measuring…");
+        } else if unknown > 0 {
+            text.push_str(&format!("  ·  {unknown} unknown"));
+        }
+        let tip = if unknown > 0 && !measuring {
+            format!("The length of {unknown} video(s) couldn't be read; they aren't counted.")
+        } else {
+            format!("{} left to watch", format_total(total - watched))
+        };
+        ui.label(RichText::new(text).weak()).on_hover_text(tip);
+        let fraction = if total > 0.0 { (watched / total) as f32 } else { 0.0 };
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
+        ui.painter().rect_filled(rect, 2.0, ui.visuals().widgets.inactive.bg_fill);
+        let filled = egui::Rect::from_min_size(rect.min, vec2(rect.width() * fraction, rect.height()));
+        ui.painter().rect_filled(filled, 2.0, ui.visuals().selection.bg_fill);
+        ui.add_space(2.0);
     }
 
     fn controls(&mut self, ui: &mut egui::Ui) {
@@ -915,6 +1012,7 @@ impl eframe::App for App {
         self.handle_mpv_events(&ctx);
         self.sample_playback();
         self.handle_input(&ctx);
+        self.receive_durations();
         self.update_frame(&ctx);
 
         // In fullscreen, controls appear on mouse movement and hide after a
@@ -984,7 +1082,9 @@ fn playlist_row(
     } else {
         RichText::new(name)
     };
-    let resp = ui.add_sized([ui.available_width(), 22.0], egui::Button::selectable(playing, "").left_text(text));
+    let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
+    let button = egui::Button::selectable(playing, "").left_text(text).right_text(RichText::new(length).weak());
+    let resp = ui.add_sized([ui.available_width(), 22.0], button);
     if (!entry.watched && entry.fraction() > 0.0) || entry.resume_position().is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
         let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
@@ -1033,6 +1133,17 @@ fn hover_text(entry: &progress::Entry) -> String {
     }
 }
 
+/// A running time for totals: "4 h 12 min", "42 min", "30 s".
+fn format_total(seconds: f64) -> String {
+    let s = seconds.max(0.0).round() as u64;
+    match (s / 3600, (s / 60) % 60) {
+        (0, 0) => format!("{s} s"),
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+
 fn format_time(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;
     let (h, m, s) = (s / 3600, (s / 60) % 60, s % 60);
@@ -1041,8 +1152,18 @@ fn format_time(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::icons;
+    use super::{format_time, format_total, icons};
     use eframe::egui::{Context, FontFamily, FontId};
+
+    #[test]
+    fn formats_times() {
+        assert_eq!(format_total(30.0), "30 s");
+        assert_eq!(format_total(42.0 * 60.0), "42 min");
+        assert_eq!(format_total(2.0 * 3600.0), "2 h");
+        assert_eq!(format_total(4.0 * 3600.0 + 12.0 * 60.0 + 20.0), "4 h 12 min");
+        assert_eq!(format_time(65.0), "01:05");
+        assert_eq!(format_time(3725.0), "1:02:05");
+    }
 
     #[test]
     fn icons_and_text_glyphs_exist() {
