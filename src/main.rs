@@ -28,6 +28,10 @@ const ICON_SIZE: f32 = 17.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Scroll distance, in points, of one mouse wheel notch.
 const SCROLL_NOTCH: f32 = 50.0;
+/// Tags the reply to a subtitle step sent to mpv.
+const SUB_STEP_TAG: u64 = 1;
+/// Tags the replies to subtitle files added back when a video is opened.
+const SUB_RESTORE_TAG: u64 = 2;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 
@@ -230,6 +234,18 @@ struct App {
     durations: DurationProbe,
     /// Chapters of the loaded video.
     chapters: Vec<mpv::Chapter>,
+    /// Audio, video and subtitle tracks of the loaded video.
+    tracks: Vec<mpv::Track>,
+    /// Whether track choices for this video were changed by hand, so they
+    /// are saved as they come in.
+    tracks_changed_by_user: bool,
+    /// Whether to announce the subtitle track once mpv reports it.
+    announce_subtitles: bool,
+    /// A subtitle step waiting for mpv to report whether there was a line.
+    announce_sub_step: Option<&'static str>,
+    /// Saved track choices being restored: how many subtitle files are still
+    /// loading, and the choices to apply after.
+    restoring: Option<(usize, progress::TrackPrefs)>,
     /// Seek-bar previews, started the first time they are needed.
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     up_next: Option<UpNext>,
@@ -260,6 +276,14 @@ impl App {
         let mpv = Mpv::new(ctx.clone(), gl);
         if let Ok(mpv) = &mpv {
             mpv.set("volume", &store.volume.to_string());
+            // Reading properties can block while mpv waits for the UI thread to
+            // draw a frame, so playback state comes in as events instead.
+            for name in [
+                "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed",
+                "chapter-list", "track-list",
+            ] {
+                mpv.observe(name);
+            }
         }
         // Files that disappeared since last time are dropped from the playlist.
         let playlist = store.playlist.iter().filter(|p| p.is_file()).cloned().collect();
@@ -282,6 +306,11 @@ impl App {
             actions: Vec::new(),
             durations: DurationProbe::new(ctx.clone()),
             chapters: Vec::new(),
+            tracks: Vec::new(),
+            tracks_changed_by_user: false,
+            announce_subtitles: false,
+            announce_sub_step: None,
+            restoring: None,
             thumbnails: None,
             up_next: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
@@ -641,25 +670,27 @@ impl App {
         let name = display_name(&path);
         let start = self.store.resume_position(&path);
         mpv.set("pause", if paused { "yes" } else { "no" });
-        match mpv.load_file(&path, start.unwrap_or(0.0)) {
-            Ok(()) => {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
-                // Drop the previous frame so it never shows under the new video.
-                self.texture = None;
-                mpv.forget_frame();
-                self.chapters.clear();
-                self.current = Some(index);
-                self.loaded = false;
-                self.store.set_current(Some(&path));
-                self.store.save();
-                match (paused, start) {
-                    (true, Some(pos)) => self.notify(format!("{name}  ·  paused at {}", format_time(pos))),
-                    (true, None) => self.notify(format!("{name}  ·  press Space to play")),
-                    (false, Some(pos)) => self.notify(format!("{name}  ·  resuming at {}", format_time(pos))),
-                    (false, None) => self.notify(name),
-                }
-            }
-            Err(e) => self.warn(format!("Could not play {name}: {e}")),
+        mpv.load_file(&path, start.unwrap_or(0.0));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
+        // Drop the previous frame so it never shows under the new video.
+        self.texture = None;
+        mpv.forget_frame();
+        self.chapters.clear();
+        // Until mpv reports the new video's values, don't let the previous
+        // one's be saved as this one's progress.
+        self.playback.position = start.unwrap_or(0.0);
+        self.playback.duration = 0.0;
+        self.restoring = None;
+        self.tracks_changed_by_user = false;
+        self.current = Some(index);
+        self.loaded = false;
+        self.store.set_current(Some(&path));
+        self.store.save();
+        match (paused, start) {
+            (true, Some(pos)) => self.notify(format!("{name}  ·  paused at {}", format_time(pos))),
+            (true, None) => self.notify(format!("{name}  ·  press Space to play")),
+            (false, Some(pos)) => self.notify(format!("{name}  ·  resuming at {}", format_time(pos))),
+            (false, None) => self.notify(name),
         }
     }
 
@@ -667,7 +698,7 @@ impl App {
         self.save_current_progress();
         if self.current.is_some() {
             if let Ok(mpv) = &self.mpv {
-                let _ = mpv.command(&["stop"]);
+                mpv.send(&["stop"]);
             }
         }
         self.finish(ctx);
@@ -684,39 +715,86 @@ impl App {
     fn file_loaded(&mut self) {
         let Ok(mpv) = &self.mpv else { return };
         self.loaded = true;
-        self.chapters = mpv.chapters();
         // Restore this video's track choices. The subtitle delay is global in
         // mpv, so it is always set, back to 0 if nothing was chosen.
         let prefs = self.current_path().and_then(|p| self.store.tracks(p)).cloned().unwrap_or_default();
-        for file in prefs.sub_files.iter().filter(|f| f.is_file()) {
-            let _ = mpv.command(&["sub-add", &file.to_string_lossy(), "auto"]);
+        mpv.set("sub-delay", &prefs.sub_delay.to_string());
+        mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
+        self.line_marks = [None, None];
+        // Subtitle files load in the background when sent without waiting, so
+        // the saved tracks are selected once they have all been added.
+        let files: Vec<PathBuf> = prefs.sub_files.iter().filter(|f| f.is_file()).cloned().collect();
+        for file in &files {
+            mpv.send_tagged(SUB_RESTORE_TAG, &["sub-add", &file.to_string_lossy(), "auto"]);
         }
+        self.restoring = Some((files.len(), prefs));
+        self.select_saved_tracks();
+    }
+
+    /// Selects the saved audio and subtitle tracks once the saved subtitle
+    /// files are loaded.
+    fn select_saved_tracks(&mut self) {
+        let (Ok(mpv), Some((0, prefs))) = (&self.mpv, &self.restoring) else { return };
         if let Some(aid) = &prefs.audio {
             mpv.set("aid", aid);
         }
         if let Some(sid) = &prefs.subtitle {
             mpv.set("sid", sid);
         }
-        mpv.set("sub-delay", &prefs.sub_delay.to_string());
-        mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
-        self.line_marks = [None, None];
+        self.restoring = None;
+    }
+
+    /// Takes in a changed property that was asked for with `observe`.
+    fn property_changed(&mut self, name: &str, value: mpv::Node) {
+        let p = &mut self.playback;
+        match name {
+            // Unavailable between videos: keep the last known position.
+            "time-pos" => p.position = value.as_f64().unwrap_or(p.position),
+            "duration" => p.duration = value.as_f64().unwrap_or(0.0),
+            "pause" => p.paused = value.as_bool().unwrap_or(p.paused),
+            "mute" => p.muted = value.as_bool().unwrap_or(p.muted),
+            "volume" => p.volume = value.as_f64().unwrap_or(p.volume),
+            "speed" => p.speed = value.as_f64().unwrap_or(1.0),
+            "sub-delay" => p.sub_delay = value.as_f64().unwrap_or(0.0),
+            "sub-speed" => p.sub_speed = value.as_f64().unwrap_or(1.0),
+            "chapter-list" => self.chapters = mpv::Chapter::list(&value),
+            "track-list" => {
+                self.tracks = mpv::Track::list(&value);
+                if std::mem::take(&mut self.announce_subtitles) {
+                    let text = match self.tracks.iter().find(|t| t.kind == "sub" && t.selected) {
+                        Some(track) => format!("Subtitles: {}", track.label),
+                        None => "Subtitles off".into(),
+                    };
+                    self.notify(text);
+                }
+            }
+            _ => {}
+        }
+        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed") {
+            self.remember_tracks();
+        }
+    }
+
+    /// The tracks of a kind ("audio" or "sub") in the loaded video.
+    fn tracks(&self, kind: &str) -> impl Iterator<Item = &mpv::Track> {
+        self.tracks.iter().filter(move |t| t.kind == kind)
     }
 
     /// Saves the playing video's current track choices.
     fn remember_tracks(&mut self) {
-        let Ok(mpv) = &self.mpv else { return };
         let Some(path) = self.current_path().map(Path::to_path_buf) else { return };
         if !self.loaded {
             return;
         }
-        let (audio, subtitle) = (mpv.get_str("aid"), mpv.get_str("sid"));
-        let sub_delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
-        let sub_speed = mpv.get_f64("sub-speed").filter(|s| (s - 1.0).abs() > 1e-6);
+        // In mpv's terms: a track id, or "no" for none.
+        let selected = |kind| self.tracks(kind).find(|t| t.selected).map_or("no".to_string(), |t| t.id.to_string());
+        let (audio, subtitle) = (selected("audio"), selected("sub"));
+        let Playback { sub_delay, sub_speed, .. } = self.playback;
         let prefs = self.store.tracks_mut(&path);
-        prefs.audio = audio;
-        prefs.subtitle = subtitle;
+        prefs.audio = Some(audio);
+        prefs.subtitle = Some(subtitle);
         prefs.sub_delay = sub_delay;
-        prefs.sub_speed = sub_speed;
+        prefs.sub_speed = ((sub_speed - 1.0).abs() > 1e-6).then_some(sub_speed);
     }
 
     fn handle_mpv_events(&mut self, ctx: &egui::Context) {
@@ -724,6 +802,19 @@ impl App {
         for event in mpv.poll_events() {
             match event {
                 mpv::Event::FileLoaded => self.file_loaded(),
+                mpv::Event::Property { name, value } => self.property_changed(&name, value),
+                mpv::Event::CommandDone { tag: SUB_STEP_TAG, ok } => {
+                    if let Some(which) = self.announce_sub_step.take() {
+                        self.notify(if ok { format!("{which} line shown now") } else { "No subtitle line to sync to".into() });
+                    }
+                }
+                mpv::Event::CommandDone { tag: SUB_RESTORE_TAG, .. } => {
+                    if let Some((left, _)) = &mut self.restoring {
+                        *left = left.saturating_sub(1);
+                    }
+                    self.select_saved_tracks();
+                }
+                mpv::Event::CommandDone { .. } => {}
                 mpv::Event::EndFile { eof, error } => {
                     self.loaded = false;
                     if error {
@@ -750,18 +841,10 @@ impl App {
         }
     }
 
+    /// Records the playing position (`playback` itself is kept up to date by
+    /// mpv's property events) and saves now and then.
     fn sample_playback(&mut self) {
-        let Ok(mpv) = &self.mpv else { return };
-        let p = &mut self.playback;
-        p.paused = mpv.get_flag("pause");
-        p.muted = mpv.get_flag("mute");
-        p.volume = mpv.get_f64("volume").unwrap_or(p.volume);
-        p.sub_delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
-        p.sub_speed = mpv.get_f64("sub-speed").unwrap_or(1.0);
-        p.speed = mpv.get_f64("speed").unwrap_or(1.0);
         if self.loaded {
-            p.position = mpv.get_f64("time-pos").unwrap_or(p.position);
-            p.duration = mpv.get_f64("duration").unwrap_or(0.0);
             self.save_current_progress();
         }
         if self.last_save.elapsed() >= SAVE_INTERVAL {
@@ -921,7 +1004,7 @@ impl App {
                     self.playback.position = if watched { self.playback.duration } else { 0.0 };
                     if !watched {
                         if let Ok(mpv) = &self.mpv {
-                            let _ = mpv.command(&["seek", "0", "absolute+exact"]);
+                            mpv.send(&["seek", "0", "absolute+exact"]);
                         }
                     }
                 }
@@ -948,7 +1031,7 @@ impl App {
                     // position doesn't write its progress back.
                     self.playback.position = 0.0;
                     if let Ok(mpv) = &self.mpv {
-                        let _ = mpv.command(&["seek", "0", "absolute+exact"]);
+                        mpv.send(&["seek", "0", "absolute+exact"]);
                     }
                 }
                 let reset = self.store.reset_progress();
@@ -996,7 +1079,7 @@ impl App {
             Action::TogglePause => {
                 if self.loaded {
                     if let Ok(mpv) = &self.mpv {
-                        let _ = mpv.command(&["cycle", "pause"]);
+                        mpv.send(&["cycle", "pause"]);
                     }
                     self.notify(if self.playback.paused { "Playing" } else { "Paused" });
                 } else if let Some(index) =
@@ -1017,10 +1100,9 @@ impl App {
                         | Action::MarkLine { .. }
                         | Action::SetSubSpeed(_)
                 );
+                // They are saved once mpv reports them (see `property_changed`).
+                self.tracks_changed_by_user |= changes_tracks;
                 self.apply_to_mpv(action);
-                if changes_tracks {
-                    self.remember_tracks();
-                }
             }
         }
     }
@@ -1031,13 +1113,13 @@ impl App {
         match action {
             Action::Seek { to, exact } if self.loaded => {
                 let flags = if exact { "absolute+exact" } else { "absolute+keyframes" };
-                let _ = mpv.command(&["seek", &format!("{to:.3}"), flags]);
+                mpv.send(&["seek", &format!("{to:.3}"), flags]);
                 if exact {
                     self.notify(format!("{} / {}", format_time(to), format_time(duration)));
                 }
             }
             Action::SeekBy(by) if self.loaded => {
-                let _ = mpv.command(&["seek", &by.to_string(), "relative"]);
+                mpv.send(&["seek", &by.to_string(), "relative"]);
                 let to = (self.playback.position + by).clamp(0.0, duration);
                 let sign = if by < 0.0 { "−" } else { "+" };
                 self.notify(format!("{sign}{} s  ·  {} / {}", by.abs(), format_time(to), format_time(duration)));
@@ -1049,7 +1131,7 @@ impl App {
                 self.notify(format!("Volume {v:.0}%"));
             }
             Action::ToggleMute => {
-                let _ = mpv.command(&["cycle", "mute"]);
+                mpv.send(&["cycle", "mute"]);
                 self.notify(if self.playback.muted { "Sound on" } else { "Muted" });
             }
             Action::SetTrack { kind, id } => {
@@ -1057,12 +1139,8 @@ impl App {
                 mpv.set(prop, &id.map_or("no".into(), |id| id.to_string()));
             }
             Action::CycleSubtitles if self.loaded => {
-                let _ = mpv.command(&["cycle", "sub"]);
-                let text = match mpv.tracks("sub").into_iter().find(|t| t.selected) {
-                    Some(track) => format!("Subtitles: {}", track.label),
-                    None => "Subtitles off".into(),
-                };
-                self.notify(text);
+                mpv.send(&["cycle", "sub"]);
+                self.announce_subtitles = true;
             }
             Action::LoadSubtitle if self.loaded => {
                 let mut dialog = rfd::FileDialog::new()
@@ -1088,31 +1166,30 @@ impl App {
             }
             Action::FrameStep { forward } if self.loaded => {
                 // Steps one frame and leaves playback paused.
-                let _ = mpv.command(&[if forward { "frame-step" } else { "frame-back-step" }]);
+                mpv.send(&[if forward { "frame-step" } else { "frame-back-step" }]);
             }
             Action::AdjustSubDelay(by) if self.loaded => {
-                let _ = mpv.command(&["add", "sub-delay", &by.to_string()]);
+                mpv.send(&["add", "sub-delay", &by.to_string()]);
                 self.notify(format!("Subtitle delay {:+.1} s", self.playback.sub_delay + by));
             }
             Action::SetSubDelay(delay) if self.loaded => {
                 mpv.set("sub-delay", &delay.to_string());
                 self.notify(format!("Subtitle delay {delay:+.1} s"));
             }
-            Action::SubStep(lines) if self.loaded => match mpv.command(&["sub-step", &lines.to_string()]) {
-                Ok(()) => {
-                    let delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
-                    let which = if lines < 0 { "Previous" } else { "Next" };
-                    self.notify(format!("{which} line shown now  ·  subtitle delay {delay:+.1} s"));
-                }
-                Err(_) => self.notify("No subtitle line to sync to"),
-            },
+            Action::SubStep(_) if self.loaded && !self.tracks.iter().any(|t| t.kind == "sub" && t.selected) => {
+                self.notify("Subtitles are off");
+            }
+            Action::SubStep(lines) if self.loaded => {
+                mpv.send_tagged(SUB_STEP_TAG, &["sub-step", &lines.to_string()]);
+                self.announce_sub_step = Some(if lines < 0 { "Previous" } else { "Next" });
+            }
             Action::MarkLine { spoken } if self.loaded => {
                 self.line_marks[usize::from(spoken)] = Some(self.playback.position);
                 match self.line_marks {
                     [Some(appeared), Some(spoken_at)] => {
                         // A line that appears early must be delayed, and vice versa.
                         let by = spoken_at - appeared;
-                        let _ = mpv.command(&["add", "sub-delay", &format!("{by:.3}")]);
+                        mpv.send(&["add", "sub-delay", &format!("{by:.3}")]);
                         self.line_marks = [None, None];
                         let delay = self.playback.sub_delay + by;
                         self.notify(format!("Subtitles shifted {by:+.1} s  ·  delay {delay:+.1} s"));
@@ -1135,7 +1212,7 @@ impl App {
                 match chapter_target(&self.chapters, self.playback.position, forward) {
                     Some(index) => {
                         let chapter = &self.chapters[index];
-                        let _ = mpv.command(&["seek", &format!("{:.3}", chapter.time), "absolute+exact"]);
+                        mpv.send(&["seek", &format!("{:.3}", chapter.time), "absolute+exact"]);
                         let text = format!("{}/{}  ·  {}", index + 1, self.chapters.len(), chapter.title);
                         self.notify(text);
                     }
@@ -1732,8 +1809,7 @@ impl App {
         ui.add_enabled_ui(self.loaded, |ui| {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
             let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                let Ok(mpv) = &self.mpv else { return };
-                let tracks = mpv.tracks(kind);
+                let tracks: Vec<mpv::Track> = self.tracks(kind).cloned().collect();
                 ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).small().weak());
                 if kind == "sub" {
                     let none_selected = !tracks.iter().any(|t| t.selected);

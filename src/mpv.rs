@@ -17,12 +17,19 @@ pub const DLL_NAME: &str = "libmpv-2.dll";
 /// Where Windows builds of libmpv can be downloaded.
 pub const DOWNLOAD_URL: &str = "https://github.com/shinchiro/mpv-winbuild-cmake/releases";
 
+const MPV_FORMAT_STRING: c_int = 1;
+const MPV_FORMAT_FLAG: c_int = 3;
 const MPV_FORMAT_INT64: c_int = 4;
 const MPV_FORMAT_DOUBLE: c_int = 5;
+const MPV_FORMAT_NODE: c_int = 6;
+const MPV_FORMAT_NODE_ARRAY: c_int = 7;
+const MPV_FORMAT_NODE_MAP: c_int = 8;
 
 const MPV_EVENT_NONE: c_int = 0;
 const MPV_EVENT_END_FILE: c_int = 7;
 const MPV_EVENT_FILE_LOADED: c_int = 8;
+const MPV_EVENT_PROPERTY_CHANGE: c_int = 22;
+const MPV_EVENT_COMMAND_REPLY: c_int = 5;
 const MPV_END_FILE_REASON_EOF: c_int = 0;
 const MPV_END_FILE_REASON_ERROR: c_int = 4;
 
@@ -84,9 +91,14 @@ struct Api {
     terminate_destroy: unsafe extern "C" fn(Handle),
     set_option_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(Handle, *mut *const c_char) -> c_int,
-    set_property_string: unsafe extern "C" fn(Handle, *const c_char, *const c_char) -> c_int,
+    command_async: unsafe extern "C" fn(Handle, u64, *mut *const c_char) -> c_int,
+    observe_property: unsafe extern "C" fn(Handle, u64, *const c_char, c_int) -> c_int,
+    set_property_async: unsafe extern "C" fn(Handle, u64, *const c_char, c_int, *mut c_void) -> c_int,
     get_property: unsafe extern "C" fn(Handle, *const c_char, c_int, *mut c_void) -> c_int,
+    // Only tests read properties as strings.
+    #[cfg_attr(not(test), allow(dead_code))]
     get_property_string: unsafe extern "C" fn(Handle, *const c_char) -> *mut c_char,
+    #[cfg_attr(not(test), allow(dead_code))]
     free: unsafe extern "C" fn(*mut c_void),
     error_string: unsafe extern "C" fn(c_int) -> *const c_char,
     wait_event: unsafe extern "C" fn(Handle, f64) -> *mut RawEvent,
@@ -132,8 +144,9 @@ impl Api {
             terminate_destroy: sym!(b"mpv_terminate_destroy\0"),
             set_option_string: sym!(b"mpv_set_option_string\0"),
             command: sym!(b"mpv_command\0"),
-            set_property_string: sym!(b"mpv_set_property_string\0"),
-            get_property: sym!(b"mpv_get_property\0"),
+            command_async: sym!(b"mpv_command_async\0"),
+            observe_property: sym!(b"mpv_observe_property\0"),
+            set_property_async: sym!(b"mpv_set_property_async\0"),            get_property: sym!(b"mpv_get_property\0"),
             get_property_string: sym!(b"mpv_get_property_string\0"),
             free: sym!(b"mpv_free\0"),
             error_string: sym!(b"mpv_error_string\0"),
@@ -161,13 +174,148 @@ pub enum Event {
     FileLoaded,
     /// Playback of a file ended. `eof` is true when it played to the end.
     EndFile { eof: bool, error: bool },
+    /// A command sent with [`Mpv::send_tagged`] finished.
+    CommandDone { tag: u64, ok: bool },
+    /// An observed property changed (see [`Mpv::observe`]). `Node::None`
+    /// means it is currently unavailable.
+    Property { name: String, value: Node },
+}
+
+/// A property value, converted from mpv's `mpv_node`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Node {
+    None,
+    Str(String),
+    Flag(bool),
+    Int(i64),
+    Double(f64),
+    Array(Vec<Node>),
+    Map(Vec<(String, Node)>),
+}
+
+impl Node {
+    pub fn as_f64(&self) -> Option<f64> {
+        match *self {
+            Node::Double(d) => Some(d),
+            Node::Int(i) => Some(i as f64),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match *self {
+            Node::Flag(b) => Some(b),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            Node::Str(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// The value of `key` in a map.
+    fn get(&self, key: &str) -> Option<&Node> {
+        match self {
+            Node::Map(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
+            _ => None,
+        }
+    }
+
+    fn items(&self) -> &[Node] {
+        match self {
+            Node::Array(items) => items,
+            _ => &[],
+        }
+    }
+}
+
+#[repr(C)]
+union RawNodeValue {
+    string: *const c_char,
+    flag: c_int,
+    int64: i64,
+    double: f64,
+    list: *const RawNodeList,
+}
+
+#[repr(C)]
+struct RawNode {
+    u: RawNodeValue,
+    format: c_int,
+}
+
+#[repr(C)]
+struct RawNodeList {
+    num: c_int,
+    values: *const RawNode,
+    keys: *const *const c_char,
+}
+
+#[repr(C)]
+struct RawEventProperty {
+    name: *const c_char,
+    format: c_int,
+    data: *const c_void,
+}
+
+/// Copies an `mpv_node` (which mpv frees itself) into a [`Node`].
+unsafe fn convert_node(raw: &RawNode) -> Node {
+    let text = |p: *const c_char| unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
+    unsafe {
+        match raw.format {
+            MPV_FORMAT_STRING => Node::Str(text(raw.u.string)),
+            MPV_FORMAT_FLAG => Node::Flag(raw.u.flag != 0),
+            MPV_FORMAT_INT64 => Node::Int(raw.u.int64),
+            MPV_FORMAT_DOUBLE => Node::Double(raw.u.double),
+            MPV_FORMAT_NODE_ARRAY | MPV_FORMAT_NODE_MAP if !raw.u.list.is_null() => {
+                let list = &*raw.u.list;
+                let values = (0..list.num.max(0) as usize).map(|i| convert_node(&*list.values.add(i)));
+                if raw.format == MPV_FORMAT_NODE_ARRAY {
+                    Node::Array(values.collect())
+                } else {
+                    let keys = (0..list.num.max(0) as usize).map(|i| text(*list.keys.add(i)));
+                    Node::Map(keys.zip(values).collect())
+                }
+            }
+            _ => Node::None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Track {
     pub id: i64,
+    /// "video", "audio" or "sub".
+    pub kind: String,
     pub label: String,
     pub selected: bool,
+}
+
+impl Track {
+    /// The tracks in mpv's `track-list` property.
+    pub fn list(node: &Node) -> Vec<Track> {
+        node.items()
+            .iter()
+            .filter_map(|t| {
+                let id = t.get("id")?.as_f64()? as i64;
+                let kind = t.get("type")?.as_str()?.to_string();
+                let text = |key: &str| t.get(key).and_then(Node::as_str).filter(|s| !s.is_empty());
+                let flag = |key: &str| t.get(key).and_then(Node::as_bool).unwrap_or(false);
+                let mut label = match (text("title"), text("lang")) {
+                    (Some(title), Some(lang)) => format!("{title} [{lang}]"),
+                    (Some(text), None) | (None, Some(text)) => text.to_string(),
+                    (None, None) => format!("Track {id}"),
+                };
+                if flag("external") {
+                    label.push_str(" (external)");
+                }
+                Some(Track { id, kind, label, selected: flag("selected") })
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -175,6 +323,25 @@ pub struct Chapter {
     pub title: String,
     /// Start time in seconds.
     pub time: f64,
+}
+
+impl Chapter {
+    /// The chapters in mpv's `chapter-list` property, in order.
+    pub fn list(node: &Node) -> Vec<Chapter> {
+        node.items()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| {
+                let time = c.get("time")?.as_f64()?;
+                let title = c
+                    .get("title")
+                    .and_then(Node::as_str)
+                    .filter(|t| !t.trim().is_empty())
+                    .map_or_else(|| format!("Chapter {}", i + 1), str::to_string);
+                Some(Chapter { title, time })
+            })
+            .collect()
+    }
 }
 
 /// Send/Sync wrapper for raw pointers whose API is documented as thread-safe.
@@ -376,6 +543,9 @@ impl Mpv {
             render.release(gl);
         }
     }
+    /// Runs a command and waits for it. Can block while mpv is busy (e.g.
+    /// seeking), so on the UI thread prefer [`Self::send`] where the result
+    /// isn't needed.
     pub fn command(&self, args: &[&str]) -> Result<(), String> {
         let owned: Vec<CString> = args.iter().map(|a| cstr(a)).collect();
         let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
@@ -383,11 +553,48 @@ impl Mpv {
         self.api.check(unsafe { (self.api.command)(self.handle.0, ptrs.as_mut_ptr()) })
     }
 
-    pub fn set(&self, name: &str, value: &str) {
-        let (n, v) = (cstr(name), cstr(value));
-        unsafe { (self.api.set_property_string)(self.handle.0, n.as_ptr(), v.as_ptr()) };
+    /// Queues a command without waiting for it to run. Commands and property
+    /// changes run in the order they were sent.
+    pub fn send(&self, args: &[&str]) {
+        let owned: Vec<CString> = args.iter().map(|a| cstr(a)).collect();
+        let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        ptrs.push(std::ptr::null());
+        unsafe { (self.api.command_async)(self.handle.0, 0, ptrs.as_mut_ptr()) };
     }
 
+    /// Like [`Self::send`], reporting the outcome as [`Event::CommandDone`]
+    /// with `tag` (which must not be 0).
+    pub fn send_tagged(&self, tag: u64, args: &[&str]) {
+        let owned: Vec<CString> = args.iter().map(|a| cstr(a)).collect();
+        let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
+        ptrs.push(std::ptr::null());
+        unsafe { (self.api.command_async)(self.handle.0, tag, ptrs.as_mut_ptr()) };
+    }
+
+    /// Sets a property without waiting for it to be applied.
+    pub fn set(&self, name: &str, value: &str) {
+        let (n, v) = (cstr(name), cstr(value));
+        let mut value = v.as_ptr();
+        unsafe {
+            (self.api.set_property_async)(
+                self.handle.0,
+                0,
+                n.as_ptr(),
+                MPV_FORMAT_STRING,
+                &mut value as *mut *const c_char as *mut c_void,
+            )
+        };
+    }
+
+    /// Asks for [`Event::Property`] whenever `name` changes, starting with
+    /// its current value. Reading properties directly can block the caller
+    /// while mpv is busy; observing never does.
+    pub fn observe(&self, name: &str) {
+        let n = cstr(name);
+        unsafe { (self.api.observe_property)(self.handle.0, 0, n.as_ptr(), MPV_FORMAT_NODE) };
+    }
+
+    #[cfg(test)]
     pub fn get_str(&self, name: &str) -> Option<String> {
         let n = cstr(name);
         let p = unsafe { (self.api.get_property_string)(self.handle.0, n.as_ptr()) };
@@ -399,6 +606,7 @@ impl Mpv {
         Some(s)
     }
 
+    #[cfg(test)]
     pub fn get_f64(&self, name: &str) -> Option<f64> {
         let n = cstr(name);
         let mut v = 0f64;
@@ -408,63 +616,15 @@ impl Mpv {
         (code >= 0).then_some(v)
     }
 
-    pub fn get_i64(&self, name: &str) -> Option<i64> {
-        let n = cstr(name);
-        let mut v = 0i64;
-        let code = unsafe {
-            (self.api.get_property)(self.handle.0, n.as_ptr(), MPV_FORMAT_INT64, &mut v as *mut i64 as *mut c_void)
-        };
-        (code >= 0).then_some(v)
-    }
-
+    #[cfg(test)]
     pub fn get_flag(&self, name: &str) -> bool {
         self.get_str(name).as_deref() == Some("yes")
     }
 
-    pub fn load_file(&self, path: &Path, start: f64) -> Result<(), String> {
+    pub fn load_file(&self, path: &Path, start: f64) {
         // `start` is a global option, so it has to be reset for every file.
         self.set("start", &if start > 0.0 { format!("{start:.3}") } else { "none".into() });
-        self.command(&["loadfile", &path.to_string_lossy(), "replace"])
-    }
-
-    pub fn tracks(&self, kind: &str) -> Vec<Track> {
-        let count = self.get_i64("track-list/count").unwrap_or(0);
-        (0..count)
-            .filter_map(|i| {
-                let p = |f: &str| self.get_str(&format!("track-list/{i}/{f}"));
-                let t = p("type")?;
-                if t != kind {
-                    return None;
-                }
-                let id = p("id")?.parse().ok()?;
-                let mut label = p("title").unwrap_or_default();
-                if let Some(lang) = p("lang") {
-                    label = if label.is_empty() { lang } else { format!("{label} [{lang}]") };
-                }
-                if label.is_empty() {
-                    label = format!("Track {id}");
-                }
-                if p("external").as_deref() == Some("yes") {
-                    label.push_str(" (external)");
-                }
-                Some(Track { id, label, selected: p("selected").as_deref() == Some("yes") })
-            })
-            .collect()
-    }
-
-    /// The loaded file's chapters, in order.
-    pub fn chapters(&self) -> Vec<Chapter> {
-        let count = self.get_i64("chapter-list/count").unwrap_or(0);
-        (0..count)
-            .filter_map(|i| {
-                let time = self.get_f64(&format!("chapter-list/{i}/time"))?;
-                let title = self
-                    .get_str(&format!("chapter-list/{i}/title"))
-                    .filter(|t| !t.trim().is_empty())
-                    .unwrap_or_else(|| format!("Chapter {}", i + 1));
-                Some(Chapter { title, time })
-            })
-            .collect()
+        self.send(&["loadfile", &path.to_string_lossy(), "replace"]);
     }
 
     pub fn poll_events(&self) -> Vec<Event> {
@@ -480,6 +640,18 @@ impl Mpv {
                         eof: end.reason == MPV_END_FILE_REASON_EOF,
                         error: end.reason == MPV_END_FILE_REASON_ERROR,
                     });
+                }
+                MPV_EVENT_COMMAND_REPLY if ev.reply_userdata != 0 => {
+                    out.push(Event::CommandDone { tag: ev.reply_userdata, ok: ev.error >= 0 });
+                }
+                MPV_EVENT_PROPERTY_CHANGE if !ev.data.is_null() => {
+                    let prop = unsafe { &*(ev.data as *const RawEventProperty) };
+                    let name = unsafe { CStr::from_ptr(prop.name) }.to_string_lossy().into_owned();
+                    let value = match prop.format {
+                        MPV_FORMAT_NODE if !prop.data.is_null() => unsafe { convert_node(&*(prop.data as *const RawNode)) },
+                        _ => Node::None,
+                    };
+                    out.push(Event::Property { name, value });
                 }
                 _ => {}
             }
@@ -915,6 +1087,7 @@ mod tests {
         let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("mute", "yes");
         mpv.set_render_size(320, 180);
+        mpv.observe("track-list");
         mpv.command(&["loadfile", "av://lavfi:testsrc=duration=5:size=640x360:rate=25"]).unwrap();
 
         let srt = std::env::temp_dir().join("afterglow-test.srt");
@@ -924,10 +1097,17 @@ mod tests {
         let (mut loaded, mut frames, mut subs_ok) = (false, 0, false);
         while Instant::now() < deadline && frames < 10 {
             for ev in mpv.poll_events() {
-                if let Event::FileLoaded = ev {
-                    loaded = true;
-                    mpv.command(&["sub-add", &srt.to_string_lossy(), "select"]).unwrap();
-                    subs_ok = mpv.tracks("sub").iter().any(|t| t.selected);
+                match ev {
+                    Event::FileLoaded => {
+                        loaded = true;
+                        mpv.command(&["sub-add", &srt.to_string_lossy(), "select"]).unwrap();
+                    }
+                    // The observed track list reports the added subtitle as selected.
+                    Event::Property { name, value } if name == "track-list" => {
+                        let tracks = Track::list(&value);
+                        subs_ok |= tracks.iter().any(|t| t.kind == "sub" && t.selected && t.label.contains("external"));
+                    }
+                    _ => {}
                 }
             }
             // Setting the render size draws an empty black frame before the
@@ -962,7 +1142,7 @@ mod thumbnailer_tests {
         let video = encode_test_video("afterglow-thumbnails.mkv", 10);
         let mpv = Mpv::thumbnailer(egui::Context::default()).expect("libmpv");
         mpv.set_render_size(224, 126);
-        mpv.load_file(&video, 2.0).unwrap();
+        mpv.load_file(&video, 2.0);
 
         let picture = |mpv: &Mpv| {
             let deadline = Instant::now() + Duration::from_secs(10);
@@ -1008,12 +1188,30 @@ mod subtitle_sync_tests {
 
         let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("pause", "yes");
-        mpv.load_file(&video, 5.0).unwrap();
+        mpv.load_file(&video, 5.0);
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline && !mpv.poll_events().iter().any(|e| matches!(e, Event::FileLoaded)) {
             std::thread::sleep(Duration::from_millis(10));
         }
-        mpv.command(&["sub-add", &srt.to_string_lossy(), "select"]).unwrap();
+        // Commands sent without waiting report back, with their tag.
+        let reply = |tag: u64| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                for ev in mpv.poll_events() {
+                    if let Event::CommandDone { tag: t, ok } = ev {
+                        if t == tag {
+                            return Some(ok);
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            None
+        };
+        mpv.send_tagged(7, &["sub-add", "afterglow-missing.srt"]);
+        assert_eq!(reply(7), Some(false), "failures are reported");
+        mpv.send_tagged(8, &["sub-add", &srt.to_string_lossy(), "select"]);
+        assert_eq!(reply(8), Some(true));
         std::thread::sleep(Duration::from_millis(300));
         let position = mpv.get_f64("time-pos").unwrap();
 
@@ -1021,13 +1219,13 @@ mod subtitle_sync_tests {
         mpv.command(&["sub-step", "1"]).unwrap();
         let delay = mpv.get_f64("sub-delay").unwrap();
         assert!((delay - (position - 6.0)).abs() < 0.1, "delay {delay} at {position}");
-        mpv.set("sub-delay", "0");
+        mpv.command(&["set", "sub-delay", "0"]).unwrap();
         // Line one (3 s) is the previous one: showing it now means 2 s later.
         mpv.command(&["sub-step", "-1"]).unwrap();
         let delay = mpv.get_f64("sub-delay").unwrap();
         assert!((delay - (position - 3.0)).abs() < 0.1, "delay {delay} at {position}");
 
-        mpv.set("sub-speed", &(25.0 / 23.976).to_string());
+        mpv.command(&["set", "sub-speed", &(25.0 / 23.976).to_string()]).unwrap();
         assert!((mpv.get_f64("sub-speed").unwrap() - 25.0 / 23.976).abs() < 1e-6);
         drop(mpv);
         std::fs::remove_file(video).unwrap();
@@ -1056,12 +1254,19 @@ mod chapter_tests {
 
         let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("pause", "yes");
-        mpv.load_file(&edl, 0.0).unwrap();
+        mpv.observe("chapter-list");
+        mpv.load_file(&edl, 0.0);
         let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline && !mpv.poll_events().iter().any(|e| matches!(e, Event::FileLoaded)) {
+        let mut chapters = Vec::new();
+        while Instant::now() < deadline && chapters.is_empty() {
+            for ev in mpv.poll_events() {
+                if let Event::Property { name, value } = ev {
+                    assert_eq!(name, "chapter-list");
+                    chapters = Chapter::list(&value);
+                }
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
-        let chapters = mpv.chapters();
         let titles: Vec<_> = chapters.iter().map(|c| c.title.as_str()).collect();
         assert_eq!(titles, ["Intro", "Middle", "End"]);
         let times: Vec<_> = chapters.iter().map(|c| c.time.round()).collect();

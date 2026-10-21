@@ -35,14 +35,12 @@ impl Thumbnails {
             self.loaded = false;
             self.texture = None;
             self.requested = Some(time);
-            if self.mpv.load_file(path, time).is_err() {
-                self.path = None;
-            }
+            self.mpv.load_file(path, time);
             return;
         }
         if self.loaded && self.requested != Some(time) {
             self.requested = Some(time);
-            let _ = self.mpv.command(&["seek", &format!("{time:.3}"), "absolute+keyframes"]);
+            self.mpv.send(&["seek", &format!("{time:.3}"), "absolute+keyframes"]);
         }
     }
 
@@ -57,7 +55,7 @@ impl Thumbnails {
                     self.loaded = false;
                     self.path = None;
                 }
-                mpv::Event::EndFile { .. } => {}
+                mpv::Event::EndFile { .. } | mpv::Event::Property { .. } | mpv::Event::CommandDone { .. } => {}
             }
         }
         if let Some(image) = self.mpv.take_frame() {
