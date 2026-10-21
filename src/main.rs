@@ -151,7 +151,7 @@ struct App {
 
 impl App {
     fn new(ctx: &egui::Context, open: Vec<PathBuf>) -> Self {
-        let store = Store::load();
+        let (store, load_warning) = Store::load();
         let mpv = Mpv::new(ctx.clone());
         if let Ok(mpv) = &mpv {
             mpv.set("volume", &store.volume.to_string());
@@ -183,6 +183,9 @@ impl App {
             app.load(index, true, ctx);
         }
         app.request_durations();
+        if let Some(warning) = load_warning {
+            app.warn(warning);
+        }
         app
     }
 

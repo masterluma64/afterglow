@@ -83,11 +83,31 @@ fn file_path() -> Option<PathBuf> {
 }
 
 impl Store {
-    pub fn load() -> Self {
-        file_path()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+    /// Loads the saved state. A file that can't be read is set aside as
+    /// `progress.bad.json` rather than overwritten, and a warning is returned.
+    pub fn load() -> (Self, Option<String>) {
+        let Some(path) = file_path() else { return (Self::default(), None) };
+        Self::load_from(&path)
+    }
+
+    fn load_from(path: &Path) -> (Self, Option<String>) {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::default(), None),
+            Err(e) => return (Self::default(), Some(format!("Could not read saved progress: {e}"))),
+        };
+        match serde_json::from_str(&text) {
+            Ok(store) => (store, None),
+            Err(e) => {
+                let backup = path.with_extension("bad.json");
+                let kept = std::fs::rename(path, &backup).is_ok();
+                let mut warning = format!("Saved progress was damaged and could not be loaded ({e}).");
+                if kept {
+                    warning.push_str(&format!(" A copy was kept as {}.", backup.display()));
+                }
+                (Self::default(), Some(warning))
+            }
+        }
     }
 
     pub fn save(&mut self) {
@@ -95,11 +115,20 @@ impl Store {
             return;
         }
         let Some(path) = file_path() else { return };
+        self.save_to(&path);
+    }
+
+    /// Writes to a temporary file that replaces the old one only once it is
+    /// fully on disk, so a crash mid-save never leaves a half-written file.
+    fn save_to(&mut self, path: &Path) {
         let write = || -> std::io::Result<()> {
             std::fs::create_dir_all(path.parent().unwrap())?;
             let tmp = path.with_extension("json.tmp");
-            std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
-            std::fs::rename(tmp, &path)
+            let mut file = std::fs::File::create(&tmp)?;
+            std::io::Write::write_all(&mut file, &serde_json::to_vec_pretty(self)?)?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(tmp, path)
         };
         match write() {
             Ok(()) => self.dirty = false,
@@ -196,5 +225,31 @@ mod tests {
             assert_eq!(entry.duration, length, "lengths are kept");
         }
         assert_eq!(store.playlist.len(), 3);
+    }
+
+    #[test]
+    fn saves_and_sets_aside_damaged_files() {
+        let dir = std::env::temp_dir().join(format!("afterglow-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("progress.json");
+
+        let mut store = Store::default();
+        store.update_position(Path::new("a.mkv"), 60.0, 600.0);
+        store.save_to(&path);
+        let (loaded, warning) = Store::load_from(&path);
+        assert!(warning.is_none());
+        assert_eq!(loaded.get(Path::new("a.mkv")).position, 60.0);
+        assert!(!dir.join("progress.json.tmp").exists());
+
+        std::fs::write(&path, "{ not json").unwrap();
+        let (loaded, warning) = Store::load_from(&path);
+        assert!(warning.is_some_and(|w| w.contains("progress.bad.json")));
+        assert!(loaded.entries.is_empty());
+        assert_eq!(std::fs::read_to_string(dir.join("progress.bad.json")).unwrap(), "{ not json");
+        assert!(!path.exists());
+
+        let (_, warning) = Store::load_from(&dir.join("missing.json"));
+        assert!(warning.is_none(), "a missing file is a fresh start, not an error");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
