@@ -17,8 +17,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     running time you've watched. Lengths of unplayed videos are read in the background
     by a headless mpv and remembered.
   - Right-click an entry to play it from the start, mark it (or everything above it)
-    watched, mark it unwatched or remove it; the
-    trash icon clears the playlist. Files on disk are never touched.
+    watched, mark it unwatched or remove it; the trash icon clears the playlist. Files on
+    disk are never touched.
   - Drag entries to reorder them, or sort the playlist by name, date modified or length
     (or reverse it) from the sort icon.
   - The search box (Ctrl+F) filters the playlist by name; Esc clears it.
@@ -30,6 +30,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
   `Movie.en.ass`, …) are picked up automatically, with English preferred. The subtitle
   menu switches tracks, loads a subtitle file, or adjusts the delay.
+- **Per-video choices**: the audio track, subtitle track, subtitle delay and subtitle files
+  you load are remembered for each video and restored when you open it again.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.
 - **Seek bar previews**: hovering the seek bar shows a preview frame and the time (and

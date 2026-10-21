@@ -27,10 +27,25 @@ impl Entry {
     }
 }
 
+/// Track choices made for one video, restored when it is opened again.
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrackPrefs {
+    /// mpv's `aid` / `sid` values ("no" for off). `None` keeps mpv's choice.
+    pub audio: Option<String>,
+    pub subtitle: Option<String>,
+    /// Seconds subtitles are shifted by.
+    pub sub_delay: f64,
+    /// Subtitle files loaded by hand, in the order they were added.
+    pub sub_files: Vec<PathBuf>,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(default)]
 pub struct Store {
     pub entries: HashMap<String, Entry>,
+    /// Track choices per video.
+    pub tracks: HashMap<String, TrackPrefs>,
     /// The playlist, in play order.
     pub playlist: Vec<PathBuf>,
     /// The playlist entry that was playing last.
@@ -50,6 +65,7 @@ impl Default for Store {
     fn default() -> Self {
         Self {
             entries: HashMap::new(),
+            tracks: HashMap::new(),
             playlist: Vec::new(),
             current: None,
             folder: None,
@@ -141,6 +157,15 @@ impl Store {
 
     pub fn get(&self, path: &Path) -> Entry {
         self.entries.get(&key(path)).copied().unwrap_or_default()
+    }
+
+    pub fn tracks(&self, path: &Path) -> Option<&TrackPrefs> {
+        self.tracks.get(&key(path))
+    }
+
+    pub fn tracks_mut(&mut self, path: &Path) -> &mut TrackPrefs {
+        self.dirty = true;
+        self.tracks.entry(key(path)).or_default()
     }
 
     pub fn update_position(&mut self, path: &Path, position: f64, duration: f64) {
@@ -243,10 +268,17 @@ mod tests {
 
         let mut store = Store::default();
         store.update_position(Path::new("a.mkv"), 60.0, 600.0);
+        let prefs = store.tracks_mut(Path::new("a.mkv"));
+        prefs.subtitle = Some("3".into());
+        prefs.sub_delay = -1.5;
+        prefs.sub_files.push(PathBuf::from("a.en.srt"));
         store.save_to(&path);
         let (loaded, warning) = Store::load_from(&path);
         assert!(warning.is_none());
         assert_eq!(loaded.get(Path::new("a.mkv")).position, 60.0);
+        let prefs = loaded.tracks(Path::new("a.mkv")).expect("track choices are saved");
+        assert_eq!((prefs.subtitle.as_deref(), prefs.audio.as_deref(), prefs.sub_delay), (Some("3"), None, -1.5));
+        assert_eq!(prefs.sub_files, [PathBuf::from("a.en.srt")]);
         assert!(!dir.join("progress.json.tmp").exists());
 
         std::fs::write(&path, "{ not json").unwrap();

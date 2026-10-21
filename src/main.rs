@@ -528,6 +528,34 @@ impl App {
         let Ok(mpv) = &self.mpv else { return };
         self.loaded = true;
         self.chapters = mpv.chapters();
+        // Restore this video's track choices. The subtitle delay is global in
+        // mpv, so it is always set, back to 0 if nothing was chosen.
+        let prefs = self.current_path().and_then(|p| self.store.tracks(p)).cloned().unwrap_or_default();
+        for file in prefs.sub_files.iter().filter(|f| f.is_file()) {
+            let _ = mpv.command(&["sub-add", &file.to_string_lossy(), "auto"]);
+        }
+        if let Some(aid) = &prefs.audio {
+            mpv.set("aid", aid);
+        }
+        if let Some(sid) = &prefs.subtitle {
+            mpv.set("sid", sid);
+        }
+        mpv.set("sub-delay", &prefs.sub_delay.to_string());
+    }
+
+    /// Saves the playing video's current track choices.
+    fn remember_tracks(&mut self) {
+        let Ok(mpv) = &self.mpv else { return };
+        let Some(path) = self.current_path().map(Path::to_path_buf) else { return };
+        if !self.loaded {
+            return;
+        }
+        let (audio, subtitle) = (mpv.get_str("aid"), mpv.get_str("sid"));
+        let sub_delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
+        let prefs = self.store.tracks_mut(&path);
+        prefs.audio = audio;
+        prefs.subtitle = subtitle;
+        prefs.sub_delay = sub_delay;
     }
 
     fn handle_mpv_events(&mut self, ctx: &egui::Context) {
@@ -770,7 +798,16 @@ impl App {
                     self.play(index, ctx);
                 }
             }
-            action => self.apply_to_mpv(action),
+            action => {
+                let changes_tracks = matches!(
+                    action,
+                    Action::SetTrack { .. } | Action::CycleSubtitles | Action::LoadSubtitle | Action::AdjustSubDelay(_)
+                );
+                self.apply_to_mpv(action);
+                if changes_tracks {
+                    self.remember_tracks();
+                }
+            }
         }
     }
 
@@ -822,7 +859,15 @@ impl App {
                 }
                 if let Some(file) = dialog.pick_file() {
                     match mpv.command(&["sub-add", &file.to_string_lossy(), "select"]) {
-                        Ok(()) => self.notify(format!("Subtitles: {}", display_name(&file))),
+                        Ok(()) => {
+                            if let Some(video) = self.current.and_then(|i| self.playlist.get(i)).cloned() {
+                                let files = &mut self.store.tracks_mut(&video).sub_files;
+                                if !files.contains(&file) {
+                                    files.push(file.clone());
+                                }
+                            }
+                            self.notify(format!("Subtitles: {}", display_name(&file)));
+                        }
                         Err(e) => self.warn(format!("Could not load subtitles: {e}")),
                     }
                 }
