@@ -24,6 +24,8 @@ const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Scroll distance, in points, of one mouse wheel notch.
+const SCROLL_NOTCH: f32 = 50.0;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 
@@ -214,6 +216,8 @@ struct App {
     last_activity: Instant,
     /// Where the floating fullscreen controls were last drawn.
     controls_rect: Option<egui::Rect>,
+    /// Scrolling over the video not yet turned into volume steps.
+    scroll_volume: f32,
     notice: Option<Notice>,
     actions: Vec<Action>,
     durations: DurationProbe,
@@ -259,6 +263,7 @@ impl App {
             last_save: Instant::now(),
             last_activity: Instant::now(),
             controls_rect: None,
+            scroll_volume: 0.0,
             notice: None,
             actions: Vec::new(),
             durations: DurationProbe::new(ctx.clone()),
@@ -1551,6 +1556,26 @@ impl App {
             self.paint_frame(ui, rect);
             if resp.double_clicked() {
                 self.actions.push(Action::ToggleFullscreen);
+            }
+            if resp.middle_clicked() {
+                self.actions.push(Action::TogglePause);
+            }
+            // Scrolling changes the volume, 5% per wheel notch.
+            if resp.hovered() {
+                self.scroll_volume += ui.input(|i| {
+                    let wheel = |e: &egui::Event| match e {
+                        egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, .. } => delta.y,
+                        egui::Event::MouseWheel { delta, .. } => delta.y * SCROLL_NOTCH,
+                        _ => 0.0,
+                    };
+                    i.raw.events.iter().map(wheel).sum::<f32>()
+                });
+                let notches = (self.scroll_volume / SCROLL_NOTCH).trunc();
+                if notches != 0.0 {
+                    self.scroll_volume -= notches * SCROLL_NOTCH;
+                    let volume = (self.playback.volume + 5.0 * f64::from(notches)).clamp(0.0, 150.0);
+                    self.actions.push(Action::SetVolume(volume));
+                }
             }
         } else {
             self.placeholder(ui, rect);

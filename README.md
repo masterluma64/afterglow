@@ -84,6 +84,8 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
 | G / H | Mark when a subtitle appears / when its line is spoken |
 | F11 / F / Alt+Enter / double-click video | Fullscreen (Esc to exit) |
+| Scroll over the video | Volume |
+| Middle-click the video | Play / pause |
 | Home | Back to the start |
 | PgUp / PgDn | Previous / next chapter |
 | 0–9 | Jump to 0%–90% |
