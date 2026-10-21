@@ -170,6 +170,13 @@ pub struct Track {
     pub selected: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct Chapter {
+    pub title: String,
+    /// Start time in seconds.
+    pub time: f64,
+}
+
 /// Send/Sync wrapper for raw pointers whose API is documented as thread-safe.
 #[derive(Clone, Copy)]
 struct Ptr(*mut c_void);
@@ -417,6 +424,21 @@ impl Mpv {
                     label.push_str(" (external)");
                 }
                 Some(Track { id, label, selected: p("selected").as_deref() == Some("yes") })
+            })
+            .collect()
+    }
+
+    /// The loaded file's chapters, in order.
+    pub fn chapters(&self) -> Vec<Chapter> {
+        let count = self.get_i64("chapter-list/count").unwrap_or(0);
+        (0..count)
+            .filter_map(|i| {
+                let time = self.get_f64(&format!("chapter-list/{i}/time"))?;
+                let title = self
+                    .get_str(&format!("chapter-list/{i}/title"))
+                    .filter(|t| !t.trim().is_empty())
+                    .unwrap_or_else(|| format!("Chapter {}", i + 1));
+                Some(Chapter { title, time })
             })
             .collect()
     }
@@ -800,15 +822,42 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    /// Plays a generated test pattern with a subtitle and checks that frames
-    /// come out of the software renderer. Needs libmpv-2.dll in target/<profile>.
-    #[test]
-    fn renders_frames_and_subtitles() {
+    /// Lets tests find libmpv-2.dll, which the build script puts in target/<profile>.
+    pub(super) fn use_built_dll() {
         let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
         let path = std::env::var_os("PATH").unwrap_or_default();
         let mut paths = vec![profile_dir];
         paths.extend(std::env::split_paths(&path));
         unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+    }
+
+    /// A silent 8 kHz mono WAV file in the temp folder. Its header states the exact length.
+    pub(super) fn silent_wav(name: &str, seconds: u32) -> std::path::PathBuf {
+        let data_len = 8000 * 2 * seconds;
+        let mut f = Vec::new();
+        f.extend_from_slice(b"RIFF");
+        f.extend_from_slice(&(36 + data_len).to_le_bytes());
+        f.extend_from_slice(b"WAVEfmt ");
+        f.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+        f.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        f.extend_from_slice(&1u16.to_le_bytes()); // mono
+        f.extend_from_slice(&8000u32.to_le_bytes()); // sample rate
+        f.extend_from_slice(&16000u32.to_le_bytes()); // bytes per second
+        f.extend_from_slice(&2u16.to_le_bytes()); // block align
+        f.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        f.extend_from_slice(b"data");
+        f.extend_from_slice(&data_len.to_le_bytes());
+        f.resize(f.len() + data_len as usize, 0);
+        let path = std::env::temp_dir().join(name);
+        std::fs::write(&path, f).unwrap();
+        path
+    }
+
+    /// Plays a generated test pattern with a subtitle and checks that frames
+    /// come out of the software renderer. Needs libmpv-2.dll in target/<profile>.
+    #[test]
+    fn renders_frames_and_subtitles() {
+        use_built_dll();
 
         let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("mute", "yes");
@@ -846,39 +895,51 @@ mod tests {
 }
 
 #[cfg(test)]
+mod chapter_tests {
+    use super::tests::{silent_wav, use_built_dll};
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// mpv turns each segment of an EDL playlist into a chapter.
+    #[test]
+    fn reads_chapters() {
+        use_built_dll();
+        let wav = silent_wav("afterglow-chapters.wav", 6);
+        let source = wav.to_string_lossy().into_owned();
+        let segment = |start: u32, title: &str| {
+            format!("%{}%{source},start={start},length=2,title={title}\n", source.len())
+        };
+        let edl = std::env::temp_dir().join("afterglow-chapters.edl");
+        let text = format!("# mpv EDL v0\n{}{}{}", segment(0, "Intro"), segment(2, "Middle"), segment(4, "End"));
+        std::fs::write(&edl, text).unwrap();
+
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        mpv.set("pause", "yes");
+        mpv.load_file(&edl, 0.0).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !mpv.poll_events().iter().any(|e| matches!(e, Event::FileLoaded)) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let chapters = mpv.chapters();
+        let titles: Vec<_> = chapters.iter().map(|c| c.title.as_str()).collect();
+        assert_eq!(titles, ["Intro", "Middle", "End"]);
+        let times: Vec<_> = chapters.iter().map(|c| c.time.round()).collect();
+        assert_eq!(times, [0.0, 2.0, 4.0]);
+        std::fs::remove_file(edl).unwrap();
+        std::fs::remove_file(wav).unwrap();
+    }
+}
+
+#[cfg(test)]
 mod prober_tests {
     use super::*;
+    use super::tests::{silent_wav, use_built_dll};
 
     #[test]
     fn reads_durations_and_rejects_bad_files() {
-        let profile_dir = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
-        let path = std::env::var_os("PATH").unwrap_or_default();
-        let mut paths = vec![profile_dir];
-        paths.extend(std::env::split_paths(&path));
-        unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
+        use_built_dll();
 
-        // Silent 8 kHz mono WAV files: their header states the exact length.
-        let wav = |name: &str, seconds: u32| {
-            let data_len = 8000 * 2 * seconds;
-            let mut f = Vec::new();
-            f.extend_from_slice(b"RIFF");
-            f.extend_from_slice(&(36 + data_len).to_le_bytes());
-            f.extend_from_slice(b"WAVEfmt ");
-            f.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
-            f.extend_from_slice(&1u16.to_le_bytes()); // PCM
-            f.extend_from_slice(&1u16.to_le_bytes()); // mono
-            f.extend_from_slice(&8000u32.to_le_bytes()); // sample rate
-            f.extend_from_slice(&16000u32.to_le_bytes()); // bytes per second
-            f.extend_from_slice(&2u16.to_le_bytes()); // block align
-            f.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-            f.extend_from_slice(b"data");
-            f.extend_from_slice(&data_len.to_le_bytes());
-            f.resize(f.len() + data_len as usize, 0);
-            let path = std::env::temp_dir().join(name);
-            std::fs::write(&path, f).unwrap();
-            path
-        };
-        let (seven, three) = (wav("afterglow-probe-7.wav", 7), wav("afterglow-probe-3.wav", 3));
+        let (seven, three) = (silent_wav("afterglow-probe-7.wav", 7), silent_wav("afterglow-probe-3.wav", 3));
 
         let prober = Prober::new().expect("libmpv");
         let timeout = std::time::Duration::from_secs(5);

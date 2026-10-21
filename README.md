@@ -27,6 +27,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   menu switches tracks, loads a subtitle file, or adjusts the delay.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.
+- **Chapters** show as marks on the seek bar, with the chapter name when hovering it.
 - Playback speed from 0.25× to 3× (pitch-corrected), audio track selection, volume
   (remembered), fullscreen with controls that hide while playing and stay up while paused.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
@@ -64,6 +65,7 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | Z / X | Subtitle delay −/+ 0.1 s |
 | F11 / F / Alt+Enter / double-click video | Fullscreen (Esc to exit) |
 | Home | Back to the start |
+| PgUp / PgDn | Previous / next chapter |
 | 0–9 | Jump to 0%–90% |
 | , / . | Previous / next frame (pauses) |
 | [ / ] | Slower / faster (Backspace: normal speed) |

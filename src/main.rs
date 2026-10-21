@@ -97,6 +97,8 @@ enum Action {
     AdjustSubDelay(f64),
     FrameStep { forward: bool },
     SetSpeed(f64),
+    /// Jumps to the next chapter, or back to the start of this or the previous one.
+    Chapter { forward: bool },
 }
 
 /// Playback state sampled from mpv once per frame.
@@ -174,6 +176,8 @@ struct App {
     notice: Option<Notice>,
     actions: Vec<Action>,
     durations: DurationProbe,
+    /// Chapters of the loaded video.
+    chapters: Vec<mpv::Chapter>,
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
 }
@@ -203,6 +207,7 @@ impl App {
             notice: None,
             actions: Vec::new(),
             durations: DurationProbe::new(ctx.clone()),
+            chapters: Vec::new(),
             confirm_reset: false,
         };
         if !open.is_empty() {
@@ -414,6 +419,7 @@ impl App {
                 // Drop the previous frame so it never shows under the new video.
                 self.texture = None;
                 mpv.forget_frame();
+                self.chapters.clear();
                 self.current = Some(index);
                 self.loaded = false;
                 self.store.set_current(Some(&path));
@@ -443,14 +449,21 @@ impl App {
     fn finish(&mut self, ctx: &egui::Context) {
         self.current = None;
         self.loaded = false;
+        self.chapters.clear();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(APP_NAME.into()));
+    }
+
+    fn file_loaded(&mut self) {
+        let Ok(mpv) = &self.mpv else { return };
+        self.loaded = true;
+        self.chapters = mpv.chapters();
     }
 
     fn handle_mpv_events(&mut self, ctx: &egui::Context) {
         let Ok(mpv) = &self.mpv else { return };
         for event in mpv.poll_events() {
             match event {
-                mpv::Event::FileLoaded => self.loaded = true,
+                mpv::Event::FileLoaded => self.file_loaded(),
                 mpv::Event::EndFile { eof, error } => {
                     self.loaded = false;
                     if error {
@@ -539,6 +552,8 @@ impl App {
                 (M::NONE, Key::OpenBracket, Action::SetSpeed(step_speed(speed, false))),
                 (M::NONE, Key::CloseBracket, Action::SetSpeed(step_speed(speed, true))),
                 (M::NONE, Key::Backspace, Action::SetSpeed(1.0)),
+                (M::NONE, Key::PageUp, Action::Chapter { forward: false }),
+                (M::NONE, Key::PageDown, Action::Chapter { forward: true }),
             ];
             // 0–9 jump to 0%–90% of the video.
             let digits = [
@@ -710,6 +725,20 @@ impl App {
             Action::AdjustSubDelay(by) if self.loaded => {
                 let _ = mpv.command(&["add", "sub-delay", &by.to_string()]);
                 self.notify(format!("Subtitle delay {:+.1} s", self.playback.sub_delay + by));
+            }
+            Action::Chapter { forward } if self.loaded => {
+                if self.chapters.is_empty() {
+                    return self.notify("This video has no chapters");
+                }
+                match chapter_target(&self.chapters, self.playback.position, forward) {
+                    Some(index) => {
+                        let chapter = &self.chapters[index];
+                        let _ = mpv.command(&["seek", &format!("{:.3}", chapter.time), "absolute+exact"]);
+                        let text = format!("{}/{}  ·  {}", index + 1, self.chapters.len(), chapter.title);
+                        self.notify(text);
+                    }
+                    None => self.notify("This is the last chapter"),
+                }
             }
             Action::SetSpeed(speed) => {
                 mpv.set("speed", &speed.to_string());
@@ -932,7 +961,12 @@ impl App {
                 }
             }
             if let Some(hover) = resp.hover_pos() {
-                resp.clone().on_hover_text_at_pointer(format_time(frac_at(hover.x) * duration));
+                let at = frac_at(hover.x) * duration;
+                let text = match chapter_at(&self.chapters, at) {
+                    Some(i) => format!("{}  ·  {}", format_time(at), self.chapters[i].title),
+                    None => format_time(at),
+                };
+                resp.clone().on_hover_text_at_pointer(text);
             }
         }
 
@@ -943,6 +977,12 @@ impl App {
             let frac = (position / duration).clamp(0.0, 1.0) as f32;
             let filled = egui::Rect::from_min_max(track.min, egui::pos2(track.left() + track.width() * frac, track.bottom()));
             ui.painter().rect_filled(filled, 2.0, visuals.selection.bg_fill);
+            // Chapter starts show as small gaps in the track.
+            for chapter in self.chapters.iter().filter(|c| c.time > 0.5 && c.time < duration) {
+                let x = track.left() + track.width() * (chapter.time / duration) as f32;
+                let gap = egui::Rect::from_center_size(egui::pos2(x, track.center().y), vec2(2.0, track.height() + 2.0));
+                ui.painter().rect_filled(gap, 0.0, visuals.panel_fill);
+            }
             if resp.hovered() || resp.dragged() {
                 ui.painter().circle_filled(egui::pos2(filled.right(), track.center().y), 6.0, visuals.selection.bg_fill);
             }
@@ -1299,6 +1339,30 @@ fn format_total(seconds: f64) -> String {
     }
 }
 
+/// Going back within this many seconds of a chapter's start goes to the
+/// previous chapter instead of restarting this one.
+const CHAPTER_BACK_THRESHOLD: f64 = 3.0;
+
+/// The chapter playing at `time`.
+fn chapter_at(chapters: &[mpv::Chapter], time: f64) -> Option<usize> {
+    chapters.iter().rposition(|c| c.time <= time + 0.01)
+}
+
+/// The chapter to jump to from `position`: the next one, or going back, the
+/// start of the current one (or the previous one if it just started).
+fn chapter_target(chapters: &[mpv::Chapter], position: f64, forward: bool) -> Option<usize> {
+    let current = chapter_at(chapters, position);
+    if forward {
+        let next = current.map_or(0, |i| i + 1);
+        return (next < chapters.len()).then_some(next);
+    }
+    match current {
+        Some(i) if position - chapters[i].time > CHAPTER_BACK_THRESHOLD => Some(i),
+        Some(i) => Some(i.saturating_sub(1)),
+        None => (!chapters.is_empty()).then_some(0),
+    }
+}
+
 const SPEEDS: [f64; 9] = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0];
 
 /// The next preset speed above (or below) `speed`, staying within the presets.
@@ -1325,7 +1389,7 @@ fn format_time(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_speed, format_time, format_total, icons, step_speed};
+    use super::{chapter_at, chapter_target, format_speed, format_time, format_total, icons, step_speed};
     use eframe::egui::{Context, FontFamily, FontId};
 
     #[test]
@@ -1336,6 +1400,22 @@ mod tests {
         assert_eq!(format_total(4.0 * 3600.0 + 12.0 * 60.0 + 20.0), "4 h 12 min");
         assert_eq!(format_time(65.0), "01:05");
         assert_eq!(format_time(3725.0), "1:02:05");
+    }
+
+    #[test]
+    fn finds_chapter_targets() {
+        let chapters: Vec<_> = [0.0, 60.0, 120.0]
+            .into_iter()
+            .map(|time| crate::mpv::Chapter { title: String::new(), time })
+            .collect();
+        assert_eq!(chapter_at(&chapters, 59.0), Some(0));
+        assert_eq!(chapter_at(&chapters, 60.0), Some(1));
+        assert_eq!(chapter_target(&chapters, 30.0, true), Some(1));
+        assert_eq!(chapter_target(&chapters, 130.0, true), None, "no chapter after the last");
+        assert_eq!(chapter_target(&chapters, 90.0, false), Some(1), "back to the start of this one");
+        assert_eq!(chapter_target(&chapters, 61.0, false), Some(0), "just started: the previous one");
+        assert_eq!(chapter_target(&chapters, 1.0, false), Some(0));
+        assert_eq!(chapter_target(&[], 1.0, false), None);
     }
 
     #[test]
