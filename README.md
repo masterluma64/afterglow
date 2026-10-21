@@ -48,6 +48,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   (remembered), fullscreen with controls that float over the video and hide while playing
   (they stay up while paused or while the pointer rests on them). The cursor also hides over
   the video when the mouse is still.
+- **Media keys**: play/pause, next, previous and stop work from the keyboard's media keys,
+  even when another window has focus, and Windows' media overlay shows what's playing.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
   into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).

@@ -2,6 +2,7 @@
 
 mod icons;
 mod library;
+mod media_keys;
 mod mpv;
 mod progress;
 mod thumbnails;
@@ -103,6 +104,8 @@ enum Action {
     SetAutoplayNext(bool),
     CancelUpNext,
     TogglePause,
+    /// Pauses or plays (starting a video if none is loaded).
+    SetPaused(bool),
     Seek { to: f64, exact: bool },
     SeekBy(f64),
     Next,
@@ -245,6 +248,8 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
+    /// The system media controls, set up once the window exists.
+    media_keys: Option<Result<media_keys::MediaKeys, String>>,
 }
 
 impl App {
@@ -286,6 +291,7 @@ impl App {
             confirm_reset: false,
             show_help: false,
             settings_open: false,
+            media_keys: None,
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
@@ -450,6 +456,56 @@ impl App {
         }
         self.playlist.remove(index);
         self.save_playlist();
+    }
+
+    /// Handles media keys and shows what's playing in Windows' media overlay.
+    fn media_controls(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if self.media_keys.is_none() {
+            let hwnd = match frame.window_handle().map(|h| h.as_raw()) {
+                Ok(RawWindowHandle::Win32(h)) => h.hwnd.get() as *mut std::ffi::c_void,
+                _ => return,
+            };
+            let keys = media_keys::MediaKeys::new(hwnd, ctx.clone());
+            if let Err(e) = &keys {
+                eprintln!("media keys unavailable: {e}");
+            }
+            self.media_keys = Some(keys);
+        }
+        let title = self.current_path().map(display_name);
+        let Playback { position, duration, paused, .. } = self.playback;
+        let playing = self.loaded && !paused;
+        let seek_long = self.store.settings.seek_long;
+        let Some(Ok(keys)) = &mut self.media_keys else { return };
+        keys.show(title.as_deref(), playing, position, duration);
+        use media_keys::{Event, SeekDirection};
+        for event in keys.events() {
+            let action = match event {
+                Event::Play => Action::SetPaused(false),
+                Event::Pause | Event::Stop => Action::SetPaused(true),
+                Event::Toggle => Action::TogglePause,
+                Event::Next => Action::Next,
+                Event::Previous => Action::Prev,
+                Event::Seek(direction) | Event::SeekBy(direction, _) => {
+                    let by = match event {
+                        Event::SeekBy(_, by) => by.as_secs_f64(),
+                        _ => seek_long,
+                    };
+                    Action::SeekBy(if direction == SeekDirection::Backward { -by } else { by })
+                }
+                Event::SetPosition(position) => Action::Seek { to: position.0.as_secs_f64(), exact: true },
+                Event::Raise => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    continue;
+                }
+                Event::Quit => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    continue;
+                }
+                Event::SetVolume(_) | Event::OpenUri(_) => continue,
+            };
+            self.actions.push(action);
+        }
     }
 
     /// Points the folder watch at the folder the playlist came from.
@@ -730,6 +786,7 @@ impl App {
         }
         let Playback { volume, duration, speed, .. } = self.playback;
         let (short, long) = (self.store.settings.seek_short, self.store.settings.seek_long);
+        let media_keys_work = matches!(self.media_keys, Some(Ok(_)));
         ctx.input_mut(|i| {
             use egui::Modifiers as M;
             // egui ignores extra Shift/Alt when matching, so more specific
@@ -776,6 +833,14 @@ impl App {
                 (M::NONE, Key::PageUp, Action::Chapter { forward: false }),
                 (M::NONE, Key::PageDown, Action::Chapter { forward: true }),
             ];
+            // The system media controls handle media keys, even without focus.
+            // Without them, the keys still work while the window has focus.
+            if !media_keys_work {
+                bindings.push((M::NONE, Key::MediaPlayPause, Action::TogglePause));
+                bindings.push((M::NONE, Key::MediaStop, Action::SetPaused(true)));
+                bindings.push((M::NONE, Key::MediaTrackNext, Action::Next));
+                bindings.push((M::NONE, Key::MediaTrackPrevious, Action::Prev));
+            }
             // 0–9 jump to 0%–90% of the video.
             let digits = [
                 Key::Num0, Key::Num1, Key::Num2, Key::Num3, Key::Num4,
@@ -919,6 +984,12 @@ impl App {
                 }
             }
             Action::ToggleSidebar => self.show_sidebar = !self.show_sidebar,
+            Action::SetPaused(paused) => {
+                let playing = self.loaded && !self.playback.paused;
+                if playing == paused {
+                    self.apply(Action::TogglePause, ctx);
+                }
+            }
             Action::TogglePause => {
                 if self.loaded {
                     if let Ok(mpv) = &self.mpv {
@@ -1879,12 +1950,13 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let window = ui.max_rect();
         self.handle_mpv_events(&ctx);
         self.sample_playback();
         self.handle_input(&ctx);
+        self.media_controls(&ctx, frame);
         self.receive_durations();
         self.receive_scans();
         self.update_frame(&ctx);
