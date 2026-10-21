@@ -92,6 +92,7 @@ enum Action {
     /// Rescans the playlist's folder now: adds new videos, drops missing ones.
     RefreshFolder,
     ClearRecentFolders,
+    ShowHelp,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
@@ -238,6 +239,8 @@ struct App {
     line_marks: [Option<f64>; 2],
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
+    /// Whether the keyboard shortcut overview is open.
+    show_help: bool,
 }
 
 impl App {
@@ -277,6 +280,7 @@ impl App {
             sync_panel: false,
             line_marks: [None, None],
             confirm_reset: false,
+            show_help: false,
         };
         if !open.is_empty() {
             app.open(open, ctx);
@@ -710,6 +714,13 @@ impl App {
         if ctx.egui_wants_keyboard_input() || self.confirm_reset {
             return;
         }
+        if self.show_help {
+            // Any of the keys that opened it closes it again (Esc is handled by the dialog).
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Questionmark) || i.consume_key(egui::Modifiers::NONE, Key::F1)) {
+                self.show_help = false;
+            }
+            return;
+        }
         let Playback { volume, duration, speed, .. } = self.playback;
         ctx.input_mut(|i| {
             use egui::Modifiers as M;
@@ -720,6 +731,8 @@ impl App {
                 (M::CTRL, Key::O, Action::OpenVideos),
                 (M::CTRL, Key::F, Action::FocusSearch),
                 (M::NONE, Key::F5, Action::RefreshFolder),
+                (M::NONE, Key::Questionmark, Action::ShowHelp),
+                (M::NONE, Key::F1, Action::ShowHelp),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
                 (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
                 (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
@@ -808,6 +821,7 @@ impl App {
             }
             Action::ReverseOrder => self.reorder(|list| list.reverse()),
             Action::RefreshFolder => self.refresh_folder(),
+            Action::ShowHelp => self.show_help = true,
             Action::ClearRecentFolders => {
                 self.store.clear_recent_folders();
                 self.store.save();
@@ -1093,6 +1107,10 @@ impl App {
                         self.actions.push(Action::SetAutoplayNext(autoplay));
                     }
                     ui.separator();
+                    let help = egui::Button::new(format!("{}  Keyboard shortcuts", icons::KEYBOARD)).shortcut_text("?");
+                    if ui.add(help).clicked() {
+                        self.actions.push(Action::ShowHelp);
+                    }
                     if ui.button(format!("{}  Reset all progress…", icons::RESET)).clicked() {
                         self.confirm_reset = true;
                     }
@@ -1140,10 +1158,10 @@ impl App {
                 ui.add_space(8.0);
                 ui.label(RichText::new("When you hear a line, show its subtitle now").small().weak());
                 ui.horizontal(|ui| {
-                    if ui.button("Previous line").on_hover_text("For subtitles that came too early (Ctrl+←)").clicked() {
+                    if ui.button("Previous line").on_hover_text("For subtitles that came too early (Ctrl+\u{E058})").clicked() {
                         self.actions.push(Action::SubStep(-1));
                     }
-                    if ui.button("Next line").on_hover_text("For subtitles that haven't appeared yet (Ctrl+→)").clicked() {
+                    if ui.button("Next line").on_hover_text("For subtitles that haven't appeared yet (Ctrl+\u{E06C})").clicked() {
                         self.actions.push(Action::SubStep(1));
                     }
                 });
@@ -1177,6 +1195,33 @@ impl App {
                 ui.weak("Changes are remembered for this video.");
             });
         self.sync_panel = open;
+    }
+
+    /// An overview of the keyboard shortcuts.
+    fn help_dialog(&mut self, ctx: &egui::Context) {
+        let modal = egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
+            ui.label(RichText::new(format!("{}  Keyboard shortcuts", icons::KEYBOARD)).size(18.0).strong());
+            ui.add_space(8.0);
+            ui.columns(2, |columns| {
+                for (column, groups) in columns.iter_mut().zip(SHORTCUTS.chunks(SHORTCUTS.len().div_ceil(2))) {
+                    for (title, keys) in groups {
+                        column.label(RichText::new(*title).small().weak());
+                        egui::Grid::new(title).num_columns(2).spacing([16.0, 4.0]).min_col_width(112.0).show(column, |ui| {
+                            for (key, action) in *keys {
+                                ui.label(RichText::new(*key).monospace().strong());
+                                ui.label(*action);
+                                ui.end_row();
+                            }
+                        });
+                        column.add_space(10.0);
+                    }
+                }
+            });
+            ui.weak("Press ? or Esc to close.");
+        });
+        if modal.should_close() {
+            self.show_help = false;
+        }
     }
 
     /// Confirmation before wiping every video's progress.
@@ -1800,6 +1845,9 @@ impl eframe::App for App {
         if self.confirm_reset {
             self.reset_dialog(&ctx);
         }
+        if self.show_help {
+            self.help_dialog(&ctx);
+        }
 
         if let Some(up_next) = &self.up_next {
             if Instant::now() >= up_next.at {
@@ -1919,6 +1967,45 @@ fn format_total(seconds: f64) -> String {
         (h, m) => format!("{h} h {m} min"),
     }
 }
+
+/// The keyboard shortcuts, by topic, as shown with `?`.
+/// Arrows are Phosphor icons (see `icons::ARROW_*`); the text font has none.
+const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
+    ("PLAYBACK", &[
+        ("Space / K", "Play / pause"),
+        ("\u{E058} / \u{E06C}", "Seek 5 s (Shift: 30 s)"),
+        ("Home", "Back to the start"),
+        ("0–9", "Jump to 0%–90%"),
+        (", / .", "Previous / next frame"),
+        ("[ / ]", "Slower / faster"),
+        ("Backspace", "Normal speed"),
+        ("PgUp / PgDn", "Previous / next chapter"),
+        ("N / P", "Next / previous video"),
+    ]),
+    ("SOUND", &[
+        ("\u{E08E} / \u{E03E}", "Volume"),
+        ("M", "Mute"),
+    ]),
+    ("SUBTITLES", &[
+        ("S", "Cycle subtitles"),
+        ("Z / X", "Delay −/+ 0.1 s (Shift: 1 s)"),
+        ("Ctrl+\u{E058} / \u{E06C}", "Show previous / next line now"),
+        ("G / H", "Mark subtitle shown / line spoken"),
+    ]),
+    ("WINDOW", &[
+        ("F / F11", "Fullscreen"),
+        ("Alt+Enter", "Fullscreen"),
+        ("Esc", "Leave fullscreen"),
+        ("L", "Show or hide the playlist"),
+        ("? / F1", "This overview"),
+    ]),
+    ("PLAYLIST", &[
+        ("Ctrl+Shift+O", "Open folder"),
+        ("Ctrl+O", "Add videos"),
+        ("Ctrl+F", "Search the playlist"),
+        ("F5", "Refresh the folder"),
+    ]),
+];
 
 /// Moves the item at `from` so it lands before the item now at `to`, or at
 /// the end when `to` is the length.
@@ -2054,13 +2141,17 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER,
+            icons::FOLDER, icons::KEYBOARD, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));
         let missing: Vec<_> = regular.iter().filter(|s| !has(FontFamily::Proportional, s)).collect();
         assert!(missing.is_empty(), "missing regular glyphs: {missing:?}");
+        let arrows = [icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP, icons::ARROW_DOWN];
+        let missing: Vec<_> = arrows.iter().filter(|s| !has(FontFamily::Monospace, s)).collect();
+        assert!(missing.is_empty(), "missing monospace glyphs: {missing:?}");
         let missing: Vec<_> = fill.iter().filter(|s| !has(FontFamily::Name("phosphor-fill".into()), s)).collect();
         assert!(missing.is_empty(), "missing fill glyphs: {missing:?}");
     }

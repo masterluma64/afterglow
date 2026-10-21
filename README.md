@@ -92,6 +92,7 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | , / . | Previous / next frame (pauses) |
 | [ / ] | Slower / faster (Backspace: normal speed) |
 | L | Show or hide the playlist |
+| ? / F1 | Keyboard shortcut overview (also in the ⋯ menu) |
 | Ctrl+Shift+O | Open folder as playlist |
 | Ctrl+O | Add videos to the playlist |
 | Ctrl+F | Search the playlist |

@@ -35,6 +35,16 @@ pub const TIMER: &str = "\u{E492}";
 pub const REFRESH: &str = "\u{E036}";
 pub const RECENT: &str = "\u{E1A0}";
 pub const FOLDER: &str = "\u{E24A}";
+pub const KEYBOARD: &str = "\u{E2D8}";
+// The text font has no arrows; shortcut texts use these code points inline.
+#[cfg(test)]
+pub const ARROW_LEFT: &str = "\u{E058}";
+#[cfg(test)]
+pub const ARROW_RIGHT: &str = "\u{E06C}";
+#[cfg(test)]
+pub const ARROW_UP: &str = "\u{E08E}";
+#[cfg(test)]
+pub const ARROW_DOWN: &str = "\u{E03E}";
 
 const FILL_FAMILY: &str = "phosphor-fill";
 
@@ -48,6 +58,8 @@ pub fn install(ctx: &egui::Context) {
         FILL_FAMILY.into(),
         Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Phosphor-Fill.ttf"))),
     );
+    // Monospace text (key names, times) can contain icons too.
+    fonts.families.entry(FontFamily::Monospace).or_default().push("phosphor".into());
     let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
     proportional.push("phosphor".into());
     let mut fill = vec![FILL_FAMILY.to_string()];
