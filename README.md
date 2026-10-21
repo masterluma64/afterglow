@@ -20,6 +20,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     trash icon clears the playlist. Files on disk are never touched.
   - Drag entries to reorder them, or sort the playlist by name, date modified or length
     (or reverse it) from the sort icon.
+  - The search box (Ctrl+F) filters the playlist by name; Esc clears it.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
   Videos count as watched at 90% or when they finish. The next one then starts after a
   5-second countdown (turn this off in the ⋯ menu).
@@ -76,3 +77,4 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | L | Show or hide the playlist |
 | Ctrl+Shift+O | Open folder as playlist |
 | Ctrl+O | Add videos to the playlist |
+| Ctrl+F | Search the playlist |

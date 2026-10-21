@@ -84,6 +84,7 @@ enum Action {
     /// Moves a playlist entry so it lands before the entry at `to` (or at the end).
     Move { from: usize, to: usize },
     Sort(SortBy),
+    FocusSearch,
     ReverseOrder,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
@@ -205,6 +206,9 @@ struct App {
     up_next: Option<UpNext>,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
+    /// Only playlist entries whose name contains this are listed.
+    search: String,
+    focus_search: bool,
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
 }
@@ -238,6 +242,8 @@ impl App {
             thumbnails: None,
             up_next: None,
             drag_row: None,
+            search: String::new(),
+            focus_search: false,
             confirm_reset: false,
         };
         if !open.is_empty() {
@@ -590,6 +596,7 @@ impl App {
             let mut bindings = vec![
                 (M::CTRL | M::SHIFT, Key::O, Action::OpenFolder),
                 (M::CTRL, Key::O, Action::OpenVideos),
+                (M::CTRL, Key::F, Action::FocusSearch),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
                 (M::SHIFT, Key::ArrowLeft, Action::SeekBy(-30.0)),
                 (M::SHIFT, Key::ArrowRight, Action::SeekBy(30.0)),
@@ -671,6 +678,10 @@ impl App {
                 self.notify(format!("Sorted by {what}"));
             }
             Action::ReverseOrder => self.reorder(|list| list.reverse()),
+            Action::FocusSearch => {
+                self.show_sidebar = true;
+                self.focus_search = true;
+            }
             Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include, ctx),
             Action::SetWatched(path, watched) => {
                 if self.loaded && self.current_path() == Some(path.as_path()) {
@@ -945,6 +956,8 @@ impl App {
             ui.weak("You can also drop them onto the window.");
             return;
         }
+        self.search_box(ui);
+        let query = self.search.trim().to_lowercase();
         let folder = self.store.folder.clone();
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             let mut rows = Vec::new();
@@ -957,14 +970,42 @@ impl App {
                     }
                     _ => display_name(path),
                 };
+                if !query.is_empty() && !name.to_lowercase().contains(&query) {
+                    continue;
+                }
                 let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, &name, self.current == Some(index));
                 if resp.drag_started() {
                     self.drag_row = Some(index);
                 }
                 rows.push((index, resp.rect));
             }
+            if rows.is_empty() {
+                ui.add_space(4.0);
+                ui.weak(format!("No videos match \"{}\".", self.search.trim()));
+            }
             self.drag_rows(ui, &rows);
         });
+    }
+
+    fn search_box(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { 24.0 };
+            let edit = egui::TextEdit::singleline(&mut self.search)
+                .hint_text(format!("{}  Search the playlist (Ctrl+F)", icons::SEARCH))
+                .desired_width(width);
+            let resp = ui.add(edit);
+            if std::mem::take(&mut self.focus_search) {
+                resp.request_focus();
+            }
+            // Esc clears the search; egui has already dropped focus by then.
+            if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
+                self.search.clear();
+            }
+            if !self.search.is_empty() && icon_button(ui, icons::X, "Clear the search").clicked() {
+                self.search.clear();
+            }
+        });
+        ui.add_space(2.0);
     }
 
     /// While a row is dragged, shows where it would land, and moves it there
@@ -1659,7 +1700,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT,
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH,
             "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];

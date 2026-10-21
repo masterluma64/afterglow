@@ -29,6 +29,7 @@ pub const RESET: &str = "\u{E038}";
 pub const MORE: &str = "\u{E1FE}";
 pub const WARNING: &str = "\u{E4E0}";
 pub const SORT: &str = "\u{E444}";
+pub const SEARCH: &str = "\u{E30C}";
 
 const FILL_FAMILY: &str = "phosphor-fill";
 
