@@ -1982,8 +1982,8 @@ impl App {
             child.weak("Then restart Afterglow.");
             return;
         }
+        // Opening a video: just black until it shows.
         if self.current.is_some() {
-            child.weak("Loading…");
             return;
         }
         if let Some(up_next) = &self.up_next {
