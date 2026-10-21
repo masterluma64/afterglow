@@ -4,6 +4,7 @@ mod icons;
 mod library;
 mod media_keys;
 mod mpv;
+mod power;
 mod progress;
 mod thumbnails;
 mod watch;
@@ -250,6 +251,7 @@ struct App {
     settings_open: bool,
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
+    sleep_blocker: power::SleepBlocker,
 }
 
 impl App {
@@ -292,6 +294,7 @@ impl App {
             show_help: false,
             settings_open: false,
             media_keys: None,
+            sleep_blocker: power::SleepBlocker::default(),
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
@@ -1957,6 +1960,7 @@ impl eframe::App for App {
         self.sample_playback();
         self.handle_input(&ctx);
         self.media_controls(&ctx, frame);
+        self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
         self.receive_scans();
         self.update_frame(&ctx);
