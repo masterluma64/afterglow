@@ -23,24 +23,51 @@ const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Set to run without OpenGL: the UI uses wgpu and video is rendered in software.
+const SOFTWARE_VIDEO_ENV: &str = "AFTERGLOW_SOFTWARE_VIDEO";
+
 fn main() -> eframe::Result {
+    // OpenGL lets mpv draw video straight into the window.
+    let software = std::env::var_os(SOFTWARE_VIDEO_ENV).is_some();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(APP_NAME)
             .with_inner_size([1280.0, 760.0])
             .with_min_inner_size([480.0, 300.0])
             .with_drag_and_drop(true),
+        renderer: if software { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow },
         ..Default::default()
     };
     let open: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
-    eframe::run_native(
+    let result = eframe::run_native(
         APP_NAME,
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
-            Ok(Box::new(App::new(&cc.egui_ctx, open)))
+            Ok(Box::new(App::new(&cc.egui_ctx, open, cc.get_proc_address.clone())))
         }),
-    )
+    );
+    // Without a usable OpenGL driver, start over without it. A window's event
+    // loop can't be created twice in one process, hence a new process.
+    let gl_failed = matches!(
+        result,
+        Err(eframe::Error::Glutin(_) | eframe::Error::NoGlutinConfigs(..) | eframe::Error::OpenGL(_))
+    );
+    if gl_failed && !software {
+        if let Err(e) = &result {
+            eprintln!("OpenGL is unavailable ({e}); restarting with software video");
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            let restarted = std::process::Command::new(exe)
+                .args(std::env::args_os().skip(1))
+                .env(SOFTWARE_VIDEO_ENV, "1")
+                .status();
+            if let Ok(status) = restarted {
+                std::process::exit(status.code().unwrap_or(0));
+            }
+        }
+    }
+    result
 }
 
 enum Action {
@@ -150,9 +177,9 @@ struct App {
 }
 
 impl App {
-    fn new(ctx: &egui::Context, open: Vec<PathBuf>) -> Self {
+    fn new(ctx: &egui::Context, open: Vec<PathBuf>, gl: Option<mpv::GetProcAddress>) -> Self {
         let (store, load_warning) = Store::load();
-        let mpv = Mpv::new(ctx.clone());
+        let mpv = Mpv::new(ctx.clone(), gl);
         if let Ok(mpv) = &mpv {
             mpv.set("volume", &store.volume.to_string());
         }
@@ -384,6 +411,7 @@ impl App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
                 // Drop the previous frame so it never shows under the new video.
                 self.texture = None;
+                mpv.forget_frame();
                 self.current = Some(index);
                 self.loaded = false;
                 self.store.set_current(Some(&path));
@@ -979,10 +1007,14 @@ impl App {
 
     /// Paints the latest video frame from mpv fitted into `rect`.
     fn paint_frame(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        if let Ok(mpv) = &self.mpv {
-            let ppp = ui.ctx().pixels_per_point();
-            mpv.set_render_size((rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32);
+        let Ok(mpv) = &self.mpv else { return };
+        // On the GPU, mpv fits the video into the rect itself.
+        if let Some(callback) = mpv.paint_callback(rect) {
+            ui.painter().add(callback);
+            return;
         }
+        let ppp = ui.ctx().pixels_per_point();
+        mpv.set_render_size((rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32);
         if let Some(tex) = &self.texture {
             let size = tex.size_vec2();
             let scale = (rect.width() / size.x).min(rect.height() / size.y);
@@ -1139,6 +1171,12 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(250));
         } else if self.fullscreen && show_chrome {
             ctx.request_repaint_after(CONTROLS_HIDE_DELAY);
+        }
+    }
+
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        if let (Ok(mpv), Some(gl)) = (&self.mpv, gl) {
+            mpv.release_gl(gl);
         }
     }
 }

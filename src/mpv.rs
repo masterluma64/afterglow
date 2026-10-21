@@ -1,7 +1,8 @@
 //! Minimal libmpv binding, loaded at runtime from `libmpv-2.dll`.
 //!
-//! Video is rendered with mpv's software render API on a dedicated thread and
-//! handed to the UI as an `egui::ColorImage`.
+//! Video is rendered with mpv's OpenGL render API straight into the UI's GL
+//! context when one is available. Otherwise mpv's software renderer draws on
+//! a dedicated thread and frames are handed to the UI as `egui::ColorImage`s.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::path::Path;
@@ -9,6 +10,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use eframe::egui::{self, Color32, ColorImage};
+use eframe::glow::{self, HasContext};
 use libloading::Library;
 
 pub const DLL_NAME: &str = "libmpv-2.dll";
@@ -26,6 +28,10 @@ const MPV_END_FILE_REASON_ERROR: c_int = 4;
 
 const MPV_RENDER_PARAM_INVALID: c_int = 0;
 const MPV_RENDER_PARAM_API_TYPE: c_int = 1;
+const MPV_RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
+const MPV_RENDER_PARAM_OPENGL_FBO: c_int = 3;
+const MPV_RENDER_PARAM_FLIP_Y: c_int = 4;
+const MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME: c_int = 12;
 const MPV_RENDER_PARAM_SW_SIZE: c_int = 17;
 const MPV_RENDER_PARAM_SW_FORMAT: c_int = 18;
 const MPV_RENDER_PARAM_SW_STRIDE: c_int = 19;
@@ -52,8 +58,25 @@ struct RenderParam {
     data: *mut c_void,
 }
 
+#[repr(C)]
+struct OpenGlInitParams {
+    get_proc_address: Option<unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void>,
+    get_proc_address_ctx: *mut c_void,
+}
+
+#[repr(C)]
+struct OpenGlFbo {
+    fbo: c_int,
+    w: c_int,
+    h: c_int,
+    internal_format: c_int,
+}
+
 type Handle = *mut c_void;
 type UpdateFn = unsafe extern "C" fn(*mut c_void);
+
+/// Looks up OpenGL functions in the UI's GL context.
+pub type GetProcAddress = Arc<dyn Fn(&CStr) -> *const c_void + Send + Sync>;
 
 struct Api {
     create: unsafe extern "C" fn() -> Handle,
@@ -182,16 +205,23 @@ unsafe extern "C" fn on_render_update(ctx: *mut c_void) {
     shared.poke(|_| {});
 }
 
+/// How video reaches the screen.
+enum Render {
+    Software { ctx: Ptr, shared: Arc<RenderShared>, thread: Option<JoinHandle<()>> },
+    OpenGl(Arc<GlRender>),
+}
+
 pub struct Mpv {
     api: Arc<Api>,
     handle: Ptr,
-    render_ctx: Ptr,
-    shared: Arc<RenderShared>,
-    render_thread: Option<JoinHandle<()>>,
+    render: Render,
 }
 
 impl Mpv {
-    pub fn new(egui_ctx: egui::Context) -> Result<Self, String> {
+    /// Starts mpv. With `gl`, video is rendered on the GPU in the UI's OpenGL
+    /// context, which must be current on this thread; without it (or if that
+    /// fails) it is rendered in software.
+    pub fn new(egui_ctx: egui::Context, gl: Option<GetProcAddress>) -> Result<Self, String> {
         let api = Arc::new(Api::load()?);
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
@@ -220,6 +250,27 @@ impl Mpv {
             return Err(format!("mpv_initialize failed: {e}"));
         }
 
+        let gl_render = gl.and_then(|gl| match GlRender::new(api.clone(), Ptr(handle), gl, egui_ctx.clone()) {
+            Ok(render) => Some(render),
+            Err(e) => {
+                eprintln!("OpenGL video output unavailable, rendering in software: {e}");
+                None
+            }
+        });
+        let render = match gl_render {
+            Some(render) => Render::OpenGl(render),
+            None => match Self::software_render(&api, handle, egui_ctx) {
+                Ok(render) => render,
+                Err(e) => {
+                    unsafe { (api.terminate_destroy)(handle) };
+                    return Err(e);
+                }
+            },
+        };
+        Ok(Self { api, handle: Ptr(handle), render })
+    }
+
+    fn software_render(api: &Arc<Api>, handle: Handle, egui_ctx: egui::Context) -> Result<Render, String> {
         let sw = cstr("sw");
         let mut params = [
             RenderParam { ty: MPV_RENDER_PARAM_API_TYPE, data: sw.as_ptr() as *mut c_void },
@@ -227,10 +278,7 @@ impl Mpv {
         ];
         let mut render_ctx = std::ptr::null_mut();
         let code = unsafe { (api.render_create)(&mut render_ctx, handle, params.as_mut_ptr()) };
-        if let Err(e) = api.check(code) {
-            unsafe { (api.terminate_destroy)(handle) };
-            return Err(format!("mpv_render_context_create failed: {e}"));
-        }
+        api.check(code).map_err(|e| format!("mpv_render_context_create failed: {e}"))?;
 
         let shared = Arc::new(RenderShared::default());
         unsafe {
@@ -241,38 +289,62 @@ impl Mpv {
             )
         };
 
-        let render_thread = {
+        let thread = {
             let api = api.clone();
             let shared = shared.clone();
             let render_ctx = Ptr(render_ctx);
             std::thread::Builder::new()
                 .name("mpv-render".into())
                 .spawn(move || render_loop(&api, render_ctx, &shared, &egui_ctx))
-                .map_err(|e| e.to_string())?
         };
-
-        Ok(Self {
-            api,
-            handle: Ptr(handle),
-            render_ctx: Ptr(render_ctx),
-            shared,
-            render_thread: Some(render_thread),
-        })
-    }
-
-    /// Size in physical pixels the video should be rendered at.
-    pub fn set_render_size(&self, w: u32, h: u32) {
-        let size = [w as i32, h as i32];
-        if self.shared.state.lock().unwrap().size != size {
-            self.shared.poke(|st| st.size = size);
+        match thread {
+            Ok(thread) => Ok(Render::Software { ctx: Ptr(render_ctx), shared, thread: Some(thread) }),
+            Err(e) => {
+                unsafe { (api.render_free)(render_ctx) };
+                Err(e.to_string())
+            }
         }
     }
 
-    /// Latest rendered frame, if a new one is available.
-    pub fn take_frame(&self) -> Option<ColorImage> {
-        self.shared.frame.lock().unwrap().take()
+    /// Size in physical pixels the video should be rendered at in software.
+    pub fn set_render_size(&self, w: u32, h: u32) {
+        let Render::Software { shared, .. } = &self.render else { return };
+        let size = [w as i32, h as i32];
+        if shared.state.lock().unwrap().size != size {
+            shared.poke(|st| st.size = size);
+        }
     }
 
+    /// Latest frame rendered in software, if a new one is available.
+    pub fn take_frame(&self) -> Option<ColorImage> {
+        let Render::Software { shared, .. } = &self.render else { return None };
+        shared.frame.lock().unwrap().take()
+    }
+
+    /// A callback that draws the video, fitted into `rect`, on the GPU. `None`
+    /// when rendering in software.
+    pub fn paint_callback(&self, rect: egui::Rect) -> Option<egui::PaintCallback> {
+        let Render::OpenGl(render) = &self.render else { return None };
+        let render = render.clone();
+        let callback = eframe::egui_glow::CallbackFn::new(move |info, painter| render.paint(&info, painter.gl()));
+        Some(egui::PaintCallback { rect, callback: Arc::new(callback) })
+    }
+
+    /// Stops showing the last frame drawn on the GPU until mpv draws a new one,
+    /// so a previous video never shows under the next.
+    pub fn forget_frame(&self) {
+        if let Render::OpenGl(render) = &self.render {
+            render.state.lock().unwrap().has_frame = false;
+        }
+    }
+
+    /// Frees GPU resources. Must be called with the UI's GL context current,
+    /// before the context goes away.
+    pub fn release_gl(&self, gl: &glow::Context) {
+        if let Render::OpenGl(render) = &self.render {
+            render.release(gl);
+        }
+    }
     pub fn command(&self, args: &[&str]) -> Result<(), String> {
         let owned: Vec<CString> = args.iter().map(|a| cstr(a)).collect();
         let mut ptrs: Vec<*const c_char> = owned.iter().map(|c| c.as_ptr()).collect();
@@ -372,15 +444,203 @@ impl Mpv {
 
 impl Drop for Mpv {
     fn drop(&mut self) {
-        self.shared.poke(|st| st.quit = true);
-        if let Some(t) = self.render_thread.take() {
-            let _ = t.join();
+        match &mut self.render {
+            Render::Software { ctx, shared, thread } => {
+                shared.poke(|st| st.quit = true);
+                if let Some(t) = thread.take() {
+                    let _ = t.join();
+                }
+                unsafe {
+                    (self.api.render_set_update_callback)(ctx.0, None, std::ptr::null_mut());
+                    (self.api.render_free)(ctx.0);
+                }
+            }
+            Render::OpenGl(render) => {
+                if render.state.lock().unwrap().ctx.is_some() {
+                    // The render context can only be freed with its GL context
+                    // current, and mpv must not be destroyed before it. This
+                    // only happens if `release_gl` was skipped, so leave both
+                    // to the end of the process.
+                    eprintln!("mpv: the GL renderer was not released");
+                    return;
+                }
+            }
+        }
+        unsafe { (self.api.terminate_destroy)(self.handle.0) };
+    }
+}
+
+unsafe extern "C" fn get_gl_proc_address(ctx: *mut c_void, name: *const c_char) -> *mut c_void {
+    let lookup = unsafe { &*(ctx as *const GetProcAddress) };
+    lookup(unsafe { CStr::from_ptr(name) }) as *mut c_void
+}
+
+unsafe extern "C" fn on_gl_render_update(ctx: *mut c_void) {
+    // Called from mpv's threads; must not call back into mpv.
+    let render = unsafe { &*(ctx as *const GlRender) };
+    render.egui_ctx.request_repaint();
+}
+
+/// An offscreen texture that mpv draws into, copied to the screen each paint.
+struct GlTarget {
+    fbo: glow::Framebuffer,
+    texture: glow::Texture,
+    size: [i32; 2],
+}
+
+struct GlState {
+    /// mpv's render context; `None` once released.
+    ctx: Option<Ptr>,
+    target: Option<GlTarget>,
+    /// Whether `target` holds a frame of the current video.
+    has_frame: bool,
+}
+
+/// Video rendered by mpv in the UI's OpenGL context. Every GL call happens on
+/// the UI thread with its context current: on creation, in paint callbacks
+/// and on release.
+struct GlRender {
+    api: Arc<Api>,
+    state: Mutex<GlState>,
+    egui_ctx: egui::Context,
+    /// mpv holds a pointer to this.
+    _get_proc_address: Box<GetProcAddress>,
+}
+
+impl GlRender {
+    fn new(api: Arc<Api>, handle: Ptr, get_proc_address: GetProcAddress, egui_ctx: egui::Context) -> Result<Arc<Self>, String> {
+        let get_proc_address = Box::new(get_proc_address);
+        let opengl = cstr("opengl");
+        let mut init = OpenGlInitParams {
+            get_proc_address: Some(get_gl_proc_address),
+            get_proc_address_ctx: &*get_proc_address as *const GetProcAddress as *mut c_void,
+        };
+        let mut params = [
+            RenderParam { ty: MPV_RENDER_PARAM_API_TYPE, data: opengl.as_ptr() as *mut c_void },
+            RenderParam { ty: MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, data: &mut init as *mut _ as *mut c_void },
+            RenderParam { ty: MPV_RENDER_PARAM_INVALID, data: std::ptr::null_mut() },
+        ];
+        let mut ctx = std::ptr::null_mut();
+        api.check(unsafe { (api.render_create)(&mut ctx, handle.0, params.as_mut_ptr()) })?;
+        let render = Arc::new(Self {
+            api,
+            state: Mutex::new(GlState { ctx: Some(Ptr(ctx)), target: None, has_frame: false }),
+            egui_ctx,
+            _get_proc_address: get_proc_address,
+        });
+        unsafe {
+            (render.api.render_set_update_callback)(ctx, Some(on_gl_render_update), Arc::as_ptr(&render) as *mut c_void)
+        };
+        Ok(render)
+    }
+
+    /// Renders a new frame if mpv has one (or the size changed), then copies
+    /// the latest frame into the callback's viewport.
+    fn paint(&self, info: &egui::PaintCallbackInfo, gl: &glow::Context) {
+        let mut st = self.state.lock().unwrap();
+        let Some(ctx) = st.ctx else { return };
+        let vp = info.viewport_in_pixels();
+        let size = [vp.width_px, vp.height_px];
+        if size[0] <= 0 || size[1] <= 0 {
+            return;
         }
         unsafe {
-            (self.api.render_set_update_callback)(self.render_ctx.0, None, std::ptr::null_mut());
-            (self.api.render_free)(self.render_ctx.0);
-            (self.api.terminate_destroy)(self.handle.0);
+            // egui may be drawing into its own framebuffer rather than the window's.
+            let draw_fb = gl.get_parameter_i32(glow::DRAW_FRAMEBUFFER_BINDING) as u32;
+            let draw_fb = std::num::NonZeroU32::new(draw_fb).map(glow::NativeFramebuffer);
+
+            let resized = st.target.as_ref().map(|t| t.size) != Some(size);
+            if resized {
+                if let Some(old) = st.target.take() {
+                    gl.delete_framebuffer(old.fbo);
+                    gl.delete_texture(old.texture);
+                }
+                match create_target(gl, size) {
+                    Ok(target) => st.target = Some(target),
+                    Err(e) => {
+                        eprintln!("could not create the video framebuffer: {e}");
+                        gl.bind_framebuffer(glow::FRAMEBUFFER, draw_fb);
+                        return;
+                    }
+                }
+            }
+            let fbo = st.target.as_ref().unwrap().fbo;
+
+            let flags = (self.api.render_update)(ctx.0);
+            let new_frame = flags & MPV_RENDER_UPDATE_FRAME != 0;
+            if resized || new_frame {
+                let mut target = OpenGlFbo { fbo: fbo.0.get() as c_int, w: size[0], h: size[1], internal_format: glow::RGBA8 as c_int };
+                // The framebuffer's origin is bottom-left, like the screen's.
+                let mut flip_y: c_int = 1;
+                // Never wait for the frame's display time: this is the UI thread.
+                let mut block: c_int = 0;
+                let mut params = [
+                    RenderParam { ty: MPV_RENDER_PARAM_OPENGL_FBO, data: &mut target as *mut _ as *mut c_void },
+                    RenderParam { ty: MPV_RENDER_PARAM_FLIP_Y, data: &mut flip_y as *mut _ as *mut c_void },
+                    RenderParam { ty: MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data: &mut block as *mut _ as *mut c_void },
+                    RenderParam { ty: MPV_RENDER_PARAM_INVALID, data: std::ptr::null_mut() },
+                ];
+                if (self.api.render_render)(ctx.0, params.as_mut_ptr()) >= 0 && new_frame {
+                    st.has_frame = true;
+                }
+                // Undo state mpv may leave behind that egui doesn't reset itself.
+                gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+                gl.bind_texture(glow::TEXTURE_2D, None);
+                gl.bind_vertex_array(None);
+            }
+
+            if st.has_frame {
+                let [w, h] = size;
+                gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
+                gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, draw_fb);
+                gl.blit_framebuffer(
+                    0, 0, w, h,
+                    vp.left_px, vp.from_bottom_px, vp.left_px + w, vp.from_bottom_px + h,
+                    glow::COLOR_BUFFER_BIT, glow::NEAREST,
+                );
+            }
+            gl.bind_framebuffer(glow::FRAMEBUFFER, draw_fb);
         }
+    }
+
+    fn release(&self, gl: &glow::Context) {
+        let mut st = self.state.lock().unwrap();
+        if let Some(ctx) = st.ctx.take() {
+            unsafe {
+                (self.api.render_set_update_callback)(ctx.0, None, std::ptr::null_mut());
+                (self.api.render_free)(ctx.0);
+            }
+        }
+        if let Some(target) = st.target.take() {
+            unsafe {
+                gl.delete_framebuffer(target.fbo);
+                gl.delete_texture(target.texture);
+            }
+        }
+    }
+}
+
+unsafe fn create_target(gl: &glow::Context, [w, h]: [i32; 2]) -> Result<GlTarget, String> {
+    unsafe {
+        let texture = gl.create_texture()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w, h, 0,
+            glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(None),
+        );
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        let fbo = gl.create_framebuffer()?;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(texture), 0);
+        let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+        if status != glow::FRAMEBUFFER_COMPLETE {
+            gl.delete_framebuffer(fbo);
+            gl.delete_texture(texture);
+            return Err(format!("framebuffer incomplete ({status:#x})"));
+        }
+        Ok(GlTarget { fbo, texture, size: [w, h] })
     }
 }
 
@@ -550,7 +810,7 @@ mod tests {
         paths.extend(std::env::split_paths(&path));
         unsafe { std::env::set_var("PATH", std::env::join_paths(paths).unwrap()) };
 
-        let mpv = Mpv::new(egui::Context::default()).expect("libmpv");
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("mute", "yes");
         mpv.set_render_size(320, 180);
         mpv.command(&["loadfile", "av://lavfi:testsrc=duration=5:size=640x360:rate=25"]).unwrap();

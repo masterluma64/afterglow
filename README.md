@@ -29,6 +29,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   short notice over the video, so keyboard control works without the controls visible.
 - Audio track selection, volume (remembered), fullscreen with controls that hide while
   playing and stay up while paused.
+- **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
+  into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
+  software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
 
 State is stored in `%APPDATA%\Afterglow\progress.json` (set `AFTERGLOW_DATA_DIR` to use
 another folder, e.g. for testing).
