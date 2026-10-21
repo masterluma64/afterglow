@@ -1021,8 +1021,22 @@ impl App {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Center)));
         child.add_space(rect.height() * 0.36);
         if let Err(e) = &self.mpv {
+            child.label(RichText::new(format!("{}  Afterglow can't play videos", icons::WARNING)).size(18.0));
+            child.add_space(6.0);
             child.colored_label(child.visuals().error_fg_color, e);
-            child.label("Place libmpv-2.dll next to the executable.");
+            child.add_space(6.0);
+            child.label(format!(
+                "It needs {} from an mpv build (the \"mpv-dev-x86_64\" archive), placed next to afterglow.exe.",
+                mpv::DLL_NAME
+            ));
+            child.add_space(6.0);
+            child.hyperlink_to("Download libmpv", mpv::DOWNLOAD_URL);
+            if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+                if child.button("Open Afterglow's folder").clicked() {
+                    let _ = std::process::Command::new("explorer").arg(dir).spawn();
+                }
+            }
+            child.weak("Then restart Afterglow.");
             return;
         }
         if self.current.is_some() {

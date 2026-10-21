@@ -11,6 +11,10 @@ use std::thread::JoinHandle;
 use eframe::egui::{self, Color32, ColorImage};
 use libloading::Library;
 
+pub const DLL_NAME: &str = "libmpv-2.dll";
+/// Where Windows builds of libmpv can be downloaded.
+pub const DOWNLOAD_URL: &str = "https://github.com/shinchiro/mpv-winbuild-cmake/releases";
+
 const MPV_FORMAT_INT64: c_int = 4;
 const MPV_FORMAT_DOUBLE: c_int = 5;
 
@@ -71,13 +75,32 @@ struct Api {
     _lib: Library,
 }
 
+/// The libmpv client API major version this binding is written against.
+const CLIENT_API_MAJOR: u64 = 2;
+
 impl Api {
     fn load() -> Result<Self, String> {
-        let lib = unsafe { Library::new("libmpv-2.dll") }
-            .map_err(|e| format!("Could not load libmpv-2.dll: {e}"))?;
+        let lib = unsafe { Library::new(DLL_NAME) }.map_err(|e| {
+            let beside_exe = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join(DLL_NAME)));
+            match beside_exe {
+                Some(path) if path.exists() => format!("{DLL_NAME} is there but could not be loaded: {e}"),
+                Some(path) => format!("{DLL_NAME} was not found. Afterglow looks for it at {}.", path.display()),
+                None => format!("{DLL_NAME} could not be loaded: {e}"),
+            }
+        })?;
+        let version: libloading::Symbol<unsafe extern "C" fn() -> std::ffi::c_ulong> =
+            unsafe { lib.get(b"mpv_client_api_version\0") }.map_err(|_| format!("{DLL_NAME} is not a libmpv library."))?;
+        let version = u64::from(unsafe { version() });
+        let (major, minor) = (version >> 16, version & 0xffff);
+        if major != CLIENT_API_MAJOR {
+            return Err(format!(
+                "{DLL_NAME} provides libmpv API {major}.{minor}, but Afterglow needs {CLIENT_API_MAJOR}.x."
+            ));
+        }
         macro_rules! sym {
             ($name:literal) => {
-                *unsafe { lib.get($name) }.map_err(|e| format!("libmpv is missing a symbol: {e}"))?
+                *unsafe { lib.get($name) }
+                    .map_err(|e| format!("{DLL_NAME} (API {major}.{minor}) is too old: {e}"))?
             };
         }
         Ok(Self {
