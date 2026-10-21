@@ -208,6 +208,8 @@ impl Mpv {
             ("slang", "en,eng"),
             ("volume-max", "150"),
             ("ytdl", "no"),
+            // Decode on the GPU where it is known to work, falling back to the CPU.
+            ("hwdec", "auto-safe"),
         ];
         for (k, v) in options {
             let (k, v) = (cstr(k), cstr(v));
