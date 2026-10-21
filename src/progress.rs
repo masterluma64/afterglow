@@ -36,6 +36,8 @@ pub struct TrackPrefs {
     pub subtitle: Option<String>,
     /// Seconds subtitles are shifted by.
     pub sub_delay: f64,
+    /// Factor subtitle timing is stretched by, if not 1.
+    pub sub_speed: Option<f64>,
     /// Subtitle files loaded by hand, in the order they were added.
     pub sub_files: Vec<PathBuf>,
 }

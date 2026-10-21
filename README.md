@@ -30,6 +30,11 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
   `Movie.en.ass`, …) are picked up automatically, with English preferred. The subtitle
   menu switches tracks, loads a subtitle file, or adjusts the delay.
+- **Subtitle sync**: the subtitle menu's *Sync subtitles* panel fixes subtitles that are out
+  of sync. When you hear a line, show the previous or next subtitle line right now
+  (Ctrl+← / Ctrl+→); or mark when a subtitle appears (G) and when the line is actually
+  spoken (H) to shift by the difference; or nudge the delay by 0.1 s or 1 s. Subtitles that
+  drift further off over time (made for 25 fps vs 23.976 fps video) can be retimed.
 - **Per-video choices**: the audio track, subtitle track, subtitle delay and subtitle files
   you load are remembered for each video and restored when you open it again.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
@@ -70,7 +75,9 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | M | Mute |
 | N / P | Next / previous video |
 | S | Cycle subtitles |
-| Z / X | Subtitle delay −/+ 0.1 s |
+| Z / X | Subtitle delay −/+ 0.1 s (Shift: 1 s) |
+| Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
+| G / H | Mark when a subtitle appears / when its line is spoken |
 | F11 / F / Alt+Enter / double-click video | Fullscreen (Esc to exit) |
 | Home | Back to the start |
 | PgUp / PgDn | Previous / next chapter |

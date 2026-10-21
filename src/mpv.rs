@@ -877,6 +877,35 @@ mod tests {
         path
     }
 
+    /// Encodes a test pattern into a seekable video file in the temp folder,
+    /// with a keyframe every second.
+    pub(super) fn encode_test_video(name: &str, seconds: u32) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_file(&path);
+        let api = Api::load().unwrap();
+        let handle = unsafe { (api.create)() };
+        let out = path.to_string_lossy().into_owned();
+        let options = [("o", out.as_str()), ("of", "matroska"), ("ovc", "mpeg4"), ("ovcopts", "g=25,qscale=5"), ("ao", "null")];
+        for (k, v) in options {
+            let (k, v) = (cstr(k), cstr(v));
+            unsafe { (api.set_option_string)(handle, k.as_ptr(), v.as_ptr()) };
+        }
+        api.check(unsafe { (api.initialize)(handle) }).unwrap();
+        let source = format!("av://lavfi:testsrc=duration={seconds}:size=640x360:rate=25");
+        let (cmd, file) = (cstr("loadfile"), cstr(&source));
+        let mut args = [cmd.as_ptr(), file.as_ptr(), std::ptr::null()];
+        api.check(unsafe { (api.command)(handle, args.as_mut_ptr()) }).unwrap();
+        loop {
+            let ev = unsafe { &*(api.wait_event)(handle, 30.0) };
+            if matches!(ev.event_id, MPV_EVENT_END_FILE | MPV_EVENT_NONE) {
+                break;
+            }
+        }
+        unsafe { (api.terminate_destroy)(handle) };
+        assert!(path.metadata().is_ok_and(|m| m.len() > 0), "encoding failed");
+        path
+    }
+
     /// Plays a generated test pattern with a subtitle and checks that frames
     /// come out of the software renderer. Needs libmpv-2.dll in target/<profile>.
     #[test]
@@ -920,7 +949,7 @@ mod tests {
 
 #[cfg(test)]
 mod thumbnailer_tests {
-    use super::tests::use_built_dll;
+    use super::tests::{encode_test_video, use_built_dll};
     use super::*;
     use std::time::{Duration, Instant};
 
@@ -959,33 +988,50 @@ mod thumbnailer_tests {
         std::fs::remove_file(video).unwrap();
     }
 
-    /// Encodes a test pattern into a seekable video file in the temp folder,
-    /// with a keyframe every second.
-    fn encode_test_video(name: &str, seconds: u32) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(name);
-        let _ = std::fs::remove_file(&path);
-        let api = Api::load().unwrap();
-        let handle = unsafe { (api.create)() };
-        let out = path.to_string_lossy().into_owned();
-        let options = [("o", out.as_str()), ("of", "matroska"), ("ovc", "mpeg4"), ("ovcopts", "g=25,qscale=5"), ("ao", "null")];
-        for (k, v) in options {
-            let (k, v) = (cstr(k), cstr(v));
-            unsafe { (api.set_option_string)(handle, k.as_ptr(), v.as_ptr()) };
+}
+
+#[cfg(test)]
+mod subtitle_sync_tests {
+    use super::tests::{encode_test_video, use_built_dll};
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// `sub-step` shifts the delay so the next or previous line starts now,
+    /// which the sync panel relies on.
+    #[test]
+    fn steps_to_subtitle_lines() {
+        use_built_dll();
+        let video = encode_test_video("afterglow-sync.mkv", 10);
+        let srt = std::env::temp_dir().join("afterglow-sync.srt");
+        let lines = "1\n00:00:03,000 --> 00:00:04,000\nOne\n\n2\n00:00:06,000 --> 00:00:07,000\nTwo\n";
+        std::fs::write(&srt, lines).unwrap();
+
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        mpv.set("pause", "yes");
+        mpv.load_file(&video, 5.0).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !mpv.poll_events().iter().any(|e| matches!(e, Event::FileLoaded)) {
+            std::thread::sleep(Duration::from_millis(10));
         }
-        api.check(unsafe { (api.initialize)(handle) }).unwrap();
-        let source = format!("av://lavfi:testsrc=duration={seconds}:size=640x360:rate=25");
-        let (cmd, file) = (cstr("loadfile"), cstr(&source));
-        let mut args = [cmd.as_ptr(), file.as_ptr(), std::ptr::null()];
-        api.check(unsafe { (api.command)(handle, args.as_mut_ptr()) }).unwrap();
-        loop {
-            let ev = unsafe { &*(api.wait_event)(handle, 30.0) };
-            if matches!(ev.event_id, MPV_EVENT_END_FILE | MPV_EVENT_NONE) {
-                break;
-            }
-        }
-        unsafe { (api.terminate_destroy)(handle) };
-        assert!(path.metadata().is_ok_and(|m| m.len() > 0), "encoding failed");
-        path
+        mpv.command(&["sub-add", &srt.to_string_lossy(), "select"]).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let position = mpv.get_f64("time-pos").unwrap();
+
+        // At ~5 s, line two (6 s) is next: showing it now means 1 s earlier.
+        mpv.command(&["sub-step", "1"]).unwrap();
+        let delay = mpv.get_f64("sub-delay").unwrap();
+        assert!((delay - (position - 6.0)).abs() < 0.1, "delay {delay} at {position}");
+        mpv.set("sub-delay", "0");
+        // Line one (3 s) is the previous one: showing it now means 2 s later.
+        mpv.command(&["sub-step", "-1"]).unwrap();
+        let delay = mpv.get_f64("sub-delay").unwrap();
+        assert!((delay - (position - 3.0)).abs() < 0.1, "delay {delay} at {position}");
+
+        mpv.set("sub-speed", &(25.0 / 23.976).to_string());
+        assert!((mpv.get_f64("sub-speed").unwrap() - 25.0 / 23.976).abs() < 1e-6);
+        drop(mpv);
+        std::fs::remove_file(video).unwrap();
+        std::fs::remove_file(srt).unwrap();
     }
 }
 

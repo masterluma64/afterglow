@@ -107,6 +107,15 @@ enum Action {
     CycleSubtitles,
     LoadSubtitle,
     AdjustSubDelay(f64),
+    SetSubDelay(f64),
+    /// Shifts subtitles so the previous (-1) or next (1) line shows right now.
+    SubStep(i32),
+    /// Marks the moment a subtitle line appears, or when it is actually
+    /// spoken. Once both are marked, subtitles shift by the difference.
+    MarkLine { spoken: bool },
+    /// Stretches subtitle timing, for subtitles made for another frame rate.
+    SetSubSpeed(f64),
+    ToggleSyncPanel,
     FrameStep { forward: bool },
     SetSpeed(f64),
     /// Jumps to the next chapter, or back to the start of this or the previous one.
@@ -129,6 +138,7 @@ struct Playback {
     muted: bool,
     volume: f64,
     sub_delay: f64,
+    sub_speed: f64,
     speed: f64,
 }
 
@@ -211,6 +221,10 @@ struct App {
     /// Only playlist entries whose name contains this are listed.
     search: String,
     focus_search: bool,
+    /// Whether the subtitle sync panel is open.
+    sync_panel: bool,
+    /// When a subtitle line appeared and when it was spoken, for syncing.
+    line_marks: [Option<f64>; 2],
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
 }
@@ -246,6 +260,8 @@ impl App {
             drag_row: None,
             search: String::new(),
             focus_search: false,
+            sync_panel: false,
+            line_marks: [None, None],
             confirm_reset: false,
         };
         if !open.is_empty() {
@@ -541,6 +557,8 @@ impl App {
             mpv.set("sid", sid);
         }
         mpv.set("sub-delay", &prefs.sub_delay.to_string());
+        mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
+        self.line_marks = [None, None];
     }
 
     /// Saves the playing video's current track choices.
@@ -552,10 +570,12 @@ impl App {
         }
         let (audio, subtitle) = (mpv.get_str("aid"), mpv.get_str("sid"));
         let sub_delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
+        let sub_speed = mpv.get_f64("sub-speed").filter(|s| (s - 1.0).abs() > 1e-6);
         let prefs = self.store.tracks_mut(&path);
         prefs.audio = audio;
         prefs.subtitle = subtitle;
         prefs.sub_delay = sub_delay;
+        prefs.sub_speed = sub_speed;
     }
 
     fn handle_mpv_events(&mut self, ctx: &egui::Context) {
@@ -596,6 +616,7 @@ impl App {
         p.muted = mpv.get_flag("mute");
         p.volume = mpv.get_f64("volume").unwrap_or(p.volume);
         p.sub_delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
+        p.sub_speed = mpv.get_f64("sub-speed").unwrap_or(1.0);
         p.speed = mpv.get_f64("speed").unwrap_or(1.0);
         if self.loaded {
             p.position = mpv.get_f64("time-pos").unwrap_or(p.position);
@@ -628,6 +649,8 @@ impl App {
                 (M::CTRL, Key::O, Action::OpenVideos),
                 (M::CTRL, Key::F, Action::FocusSearch),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
+                (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
+                (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
                 (M::SHIFT, Key::ArrowLeft, Action::SeekBy(-30.0)),
                 (M::SHIFT, Key::ArrowRight, Action::SeekBy(30.0)),
                 (M::NONE, Key::ArrowLeft, Action::SeekBy(-5.0)),
@@ -647,8 +670,12 @@ impl App {
                 (M::NONE, Key::P, Action::Prev),
                 (M::NONE, Key::S, Action::CycleSubtitles),
                 (M::NONE, Key::L, Action::ToggleSidebar),
+                (M::SHIFT, Key::Z, Action::AdjustSubDelay(-1.0)),
+                (M::SHIFT, Key::X, Action::AdjustSubDelay(1.0)),
                 (M::NONE, Key::Z, Action::AdjustSubDelay(-0.1)),
                 (M::NONE, Key::X, Action::AdjustSubDelay(0.1)),
+                (M::NONE, Key::G, Action::MarkLine { spoken: false }),
+                (M::NONE, Key::H, Action::MarkLine { spoken: true }),
                 (M::NONE, Key::OpenBracket, Action::SetSpeed(step_speed(speed, false))),
                 (M::NONE, Key::CloseBracket, Action::SetSpeed(step_speed(speed, true))),
                 (M::NONE, Key::Backspace, Action::SetSpeed(1.0)),
@@ -708,6 +735,7 @@ impl App {
                 self.notify(format!("Sorted by {what}"));
             }
             Action::ReverseOrder => self.reorder(|list| list.reverse()),
+            Action::ToggleSyncPanel => self.sync_panel = !self.sync_panel,
             Action::FocusSearch => {
                 self.show_sidebar = true;
                 self.focus_search = true;
@@ -801,7 +829,14 @@ impl App {
             action => {
                 let changes_tracks = matches!(
                     action,
-                    Action::SetTrack { .. } | Action::CycleSubtitles | Action::LoadSubtitle | Action::AdjustSubDelay(_)
+                    Action::SetTrack { .. }
+                        | Action::CycleSubtitles
+                        | Action::LoadSubtitle
+                        | Action::AdjustSubDelay(_)
+                        | Action::SetSubDelay(_)
+                        | Action::SubStep(_)
+                        | Action::MarkLine { .. }
+                        | Action::SetSubSpeed(_)
                 );
                 self.apply_to_mpv(action);
                 if changes_tracks {
@@ -880,6 +915,40 @@ impl App {
                 let _ = mpv.command(&["add", "sub-delay", &by.to_string()]);
                 self.notify(format!("Subtitle delay {:+.1} s", self.playback.sub_delay + by));
             }
+            Action::SetSubDelay(delay) if self.loaded => {
+                mpv.set("sub-delay", &delay.to_string());
+                self.notify(format!("Subtitle delay {delay:+.1} s"));
+            }
+            Action::SubStep(lines) if self.loaded => match mpv.command(&["sub-step", &lines.to_string()]) {
+                Ok(()) => {
+                    let delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
+                    let which = if lines < 0 { "Previous" } else { "Next" };
+                    self.notify(format!("{which} line shown now  ·  subtitle delay {delay:+.1} s"));
+                }
+                Err(_) => self.notify("No subtitle line to sync to"),
+            },
+            Action::MarkLine { spoken } if self.loaded => {
+                self.line_marks[usize::from(spoken)] = Some(self.playback.position);
+                match self.line_marks {
+                    [Some(appeared), Some(spoken_at)] => {
+                        // A line that appears early must be delayed, and vice versa.
+                        let by = spoken_at - appeared;
+                        let _ = mpv.command(&["add", "sub-delay", &format!("{by:.3}")]);
+                        self.line_marks = [None, None];
+                        let delay = self.playback.sub_delay + by;
+                        self.notify(format!("Subtitles shifted {by:+.1} s  ·  delay {delay:+.1} s"));
+                    }
+                    _ if spoken => self.notify("Marked when the line was spoken  ·  press G when its subtitle appears"),
+                    _ => self.notify("Marked when the subtitle appeared  ·  press H when the line is spoken"),
+                }
+            }
+            Action::SetSubSpeed(speed) if self.loaded => {
+                mpv.set("sub-speed", &speed.to_string());
+                self.notify(match SUB_TIMINGS.iter().find(|(s, _)| (s - speed).abs() < 1e-6) {
+                    Some((_, label)) => format!("Subtitle timing: {label}"),
+                    None => format!("Subtitle speed {speed:.4}"),
+                });
+            }
             Action::Chapter { forward } if self.loaded => {
                 if self.chapters.is_empty() {
                     return self.notify("This video has no chapters");
@@ -939,6 +1008,76 @@ impl App {
                 });
             });
         });
+    }
+
+    /// Tools for subtitles that are out of sync, in a panel over the video.
+    fn sync_panel(&mut self, ctx: &egui::Context, video: egui::Rect) {
+        let mut open = self.sync_panel;
+        let Playback { sub_delay, sub_speed, .. } = self.playback;
+        egui::Window::new(format!("{}  Sync subtitles", icons::TIMER))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_pos(video.left_bottom() + vec2(16.0, -16.0))
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .show(ctx, |ui| {
+                ui.set_width(330.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Delay {sub_delay:+.1} s")).strong());
+                    for (by, label, tip) in [
+                        (-1.0, "−1 s", "Show subtitles 1 s earlier (Shift+Z)"),
+                        (-0.1, "−0.1", "Show subtitles 0.1 s earlier (Z)"),
+                        (0.1, "+0.1", "Show subtitles 0.1 s later (X)"),
+                        (1.0, "+1 s", "Show subtitles 1 s later (Shift+X)"),
+                    ] {
+                        if ui.small_button(label).on_hover_text(tip).clicked() {
+                            self.actions.push(Action::AdjustSubDelay(by));
+                        }
+                    }
+                    if sub_delay != 0.0 && ui.small_button(icons::RESET).on_hover_text("No delay").clicked() {
+                        self.actions.push(Action::SetSubDelay(0.0));
+                    }
+                });
+                ui.add_space(8.0);
+                ui.label(RichText::new("When you hear a line, show its subtitle now").small().weak());
+                ui.horizontal(|ui| {
+                    if ui.button("Previous line").on_hover_text("For subtitles that came too early (Ctrl+←)").clicked() {
+                        self.actions.push(Action::SubStep(-1));
+                    }
+                    if ui.button("Next line").on_hover_text("For subtitles that haven't appeared yet (Ctrl+→)").clicked() {
+                        self.actions.push(Action::SubStep(1));
+                    }
+                });
+                ui.add_space(8.0);
+                ui.label(RichText::new("Or mark one line, in either order").small().weak());
+                ui.horizontal(|ui| {
+                    let mark = |marked: Option<f64>, label: &str| match marked {
+                        Some(at) => format!("{}  {label} at {}", icons::CHECK, format_time(at)),
+                        None => label.to_string(),
+                    };
+                    let [appeared, spoken] = self.line_marks;
+                    if ui.button(mark(appeared, "Subtitle appeared")).on_hover_text("G").clicked() {
+                        self.actions.push(Action::MarkLine { spoken: false });
+                    }
+                    if ui.button(mark(spoken, "Line spoken")).on_hover_text("H").clicked() {
+                        self.actions.push(Action::MarkLine { spoken: true });
+                    }
+                });
+                ui.add_space(8.0);
+                ui.label(RichText::new("Drifting further out of sync over time?").small().weak());
+                ui.horizontal(|ui| {
+                    for (speed, label) in SUB_TIMINGS {
+                        let selected = (sub_speed - speed).abs() < 1e-6;
+                        let text = label[..1].to_uppercase() + &label[1..];
+                        if ui.selectable_label(selected, text).clicked() && !selected {
+                            self.actions.push(Action::SetSubSpeed(speed));
+                        }
+                    }
+                });
+                ui.add_space(4.0);
+                ui.weak("Changes are remembered for this video.");
+            });
+        self.sync_panel = open;
     }
 
     /// Confirmation before wiping every video's progress.
@@ -1286,6 +1425,9 @@ impl App {
                             self.actions.push(Action::AdjustSubDelay(0.1));
                         }
                     });
+                    if ui.button(format!("{}  Sync subtitles…", icons::TIMER)).clicked() {
+                        self.actions.push(Action::ToggleSyncPanel);
+                    }
                 }
             });
             response.on_hover_text(tip);
@@ -1509,9 +1651,15 @@ impl eframe::App for App {
                 .size_range(180.0..=600.0)
                 .show(ui, |ui| self.sidebar(ui));
         }
-        egui::CentralPanel::no_frame()
+        let video = egui::CentralPanel::no_frame()
             .frame(egui::Frame::NONE.fill(Color32::BLACK))
-            .show(ui, |ui| self.video_area(ui));
+            .show(ui, |ui| self.video_area(ui))
+            .response
+            .rect;
+        // Hidden, but kept open, while switching videos.
+        if self.sync_panel && self.loaded {
+            self.sync_panel(&ctx, video);
+        }
         self.drop_overlay(&ctx, window);
         if self.confirm_reset {
             self.reset_dialog(&ctx);
@@ -1647,6 +1795,14 @@ fn move_item<T>(list: &mut Vec<T>, from: usize, to: usize) {
     list.insert(if to > from { to - 1 } else { to }, item);
 }
 
+/// Subtitle speeds that fix subtitles timed for a different frame rate,
+/// whose lines drift further out of sync as the video goes on.
+const SUB_TIMINGS: [(f64, &str); 3] = [
+    (1.0, "normal"),
+    (25.0 / 23.976, "made for 25 fps"),
+    (23.976 / 25.0, "made for 23.976 fps"),
+];
+
 /// Going back within this many seconds of a chapter's start goes to the
 /// previous chapter instead of restarting this one.
 const CHAPTER_BACK_THRESHOLD: f64 = 3.0;
@@ -1762,7 +1918,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS,
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER,
             "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
