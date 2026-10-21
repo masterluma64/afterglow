@@ -23,6 +23,8 @@ const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the next video is announced before it starts by itself.
+const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 
 /// Set to run without OpenGL: the UI uses wgpu and video is rendered in software.
 const SOFTWARE_VIDEO_ENV: &str = "AFTERGLOW_SOFTWARE_VIDEO";
@@ -82,6 +84,8 @@ enum Action {
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     ResetAllProgress,
+    SetAutoplayNext(bool),
+    CancelUpNext,
     TogglePause,
     Seek { to: f64, exact: bool },
     SeekBy(f64),
@@ -151,6 +155,12 @@ impl DurationProbe {
     }
 }
 
+/// The video that starts by itself once the countdown ends.
+struct UpNext {
+    index: usize,
+    at: Instant,
+}
+
 /// A short message shown over the video: feedback for an action, or a warning.
 struct Notice {
     text: String,
@@ -181,6 +191,7 @@ struct App {
     chapters: Vec<mpv::Chapter>,
     /// Seek-bar previews, started the first time they are needed.
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
+    up_next: Option<UpNext>,
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
 }
@@ -212,6 +223,7 @@ impl App {
             durations: DurationProbe::new(ctx.clone()),
             chapters: Vec::new(),
             thumbnails: None,
+            up_next: None,
             confirm_reset: false,
         };
         if !open.is_empty() {
@@ -258,6 +270,8 @@ impl App {
     }
 
     fn save_playlist(&mut self) {
+        // Indices may have shifted.
+        self.up_next = None;
         self.request_durations();
         self.store.set_playlist(&self.playlist);
         let current = self.current_path().map(Path::to_path_buf);
@@ -411,6 +425,7 @@ impl App {
     /// Loads a playlist video at its saved position. With `paused`, it only
     /// shows that frame, ready to continue.
     fn load(&mut self, index: usize, paused: bool, ctx: &egui::Context) {
+        self.up_next = None;
         self.save_current_progress();
         let Ok(mpv) = &self.mpv else { return };
         let Some(path) = self.playlist.get(index).cloned() else { return };
@@ -482,11 +497,11 @@ impl App {
                     if let Some(path) = self.playlist.get(index).cloned() {
                         self.store.set_watched(&path, true);
                     }
-                    if index + 1 < self.playlist.len() {
-                        self.play(index + 1, ctx);
-                    } else {
+                    self.finish(ctx);
+                    if index + 1 >= self.playlist.len() {
                         self.notify("End of the playlist");
-                        self.finish(ctx);
+                    } else if self.store.autoplay_next {
+                        self.up_next = Some(UpNext { index: index + 1, at: Instant::now() + AUTOPLAY_DELAY });
                     }
                     self.store.save();
                 }
@@ -631,6 +646,14 @@ impl App {
                 self.store.save();
                 self.notify(format!("Progress reset for {reset} video{}", if reset == 1 { "" } else { "s" }));
             }
+            Action::SetAutoplayNext(autoplay) => {
+                self.store.set_autoplay_next(autoplay);
+                self.store.save();
+                if !autoplay {
+                    self.up_next = None;
+                }
+            }
+            Action::CancelUpNext => self.up_next = None,
             Action::Next | Action::Prev => {
                 let next = matches!(action, Action::Next);
                 let target = match self.current {
@@ -661,7 +684,9 @@ impl App {
                         let _ = mpv.command(&["cycle", "pause"]);
                     }
                     self.notify(if self.playback.paused { "Playing" } else { "Paused" });
-                } else if let Some(index) = self.current.or_else(|| self.continue_target()) {
+                } else if let Some(index) =
+                    self.current.or(self.up_next.as_ref().map(|u| u.index)).or_else(|| self.continue_target())
+                {
                     self.play(index, ctx);
                 }
             }
@@ -769,6 +794,12 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
                 let (response, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                    let mut autoplay = self.store.autoplay_next;
+                    let tip = "When a video ends, start the next one after a short countdown";
+                    if ui.checkbox(&mut autoplay, "Play next video automatically").on_hover_text(tip).changed() {
+                        self.actions.push(Action::SetAutoplayNext(autoplay));
+                    }
+                    ui.separator();
                     if ui.button(format!("{}  Reset all progress…", icons::RESET)).clicked() {
                         self.confirm_reset = true;
                     }
@@ -1163,6 +1194,27 @@ impl App {
             child.weak("Loading…");
             return;
         }
+        if let Some(up_next) = &self.up_next {
+            let (index, left) = (up_next.index, up_next.at.saturating_duration_since(Instant::now()));
+            child.label(RichText::new("Up next").weak());
+            child.add_space(4.0);
+            child.label(RichText::new(display_name(&self.playlist[index])).size(20.0).strong());
+            child.add_space(4.0);
+            child.weak(format!("Starts in {} s", left.as_secs_f32().ceil() as u32));
+            child.add_space(10.0);
+            child.horizontal(|ui| {
+                // Centre the two buttons under the text.
+                ui.add_space((ui.available_width() - 150.0).max(0.0) / 2.0);
+                if ui.button(format!("{}  Play now", icons::PLAY)).on_hover_text("Space").clicked() {
+                    self.actions.push(Action::Play(index));
+                }
+                if ui.button("Cancel").clicked() {
+                    self.actions.push(Action::CancelUpNext);
+                }
+            });
+            child.ctx().request_repaint_after(Duration::from_millis(200).min(left));
+            return;
+        }
         if let Some(index) = self.continue_target() {
             let path = &self.playlist[index];
             let resume = self.store.get(path).resume_position();
@@ -1256,6 +1308,12 @@ impl eframe::App for App {
             self.reset_dialog(&ctx);
         }
 
+        if let Some(up_next) = &self.up_next {
+            if Instant::now() >= up_next.at {
+                let index = up_next.index;
+                self.actions.push(Action::Play(index));
+            }
+        }
         self.apply_actions(&ctx);
 
         if self.loaded && !self.playback.paused {

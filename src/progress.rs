@@ -40,6 +40,8 @@ pub struct Store {
     /// Whether opening a folder also includes videos in its subfolders.
     pub include_subfolders: bool,
     pub volume: f64,
+    /// Whether the next video starts by itself when one finishes.
+    pub autoplay_next: bool,
     #[serde(skip)]
     dirty: bool,
 }
@@ -53,6 +55,7 @@ impl Default for Store {
             folder: None,
             include_subfolders: false,
             volume: 100.0,
+            autoplay_next: true,
             dirty: false,
         }
     }
@@ -200,6 +203,11 @@ impl Store {
 
     pub fn set_volume(&mut self, volume: f64) {
         self.volume = volume;
+        self.dirty = true;
+    }
+
+    pub fn set_autoplay_next(&mut self, autoplay: bool) {
+        self.autoplay_next = autoplay;
         self.dirty = true;
     }
 }
