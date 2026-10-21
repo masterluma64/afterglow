@@ -127,20 +127,37 @@ fn key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// The app's folder in the user's config directory (or `AFTERGLOW_DATA_DIR`,
-/// e.g. for testing). Data from before the rename to Afterglow is moved over
-/// the first time.
+/// Where the app keeps its data: a `data` folder next to the executable, so
+/// the app is portable (or `AFTERGLOW_DATA_DIR`, e.g. for testing).
 pub fn data_dir() -> Option<PathBuf> {
-    if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
-        return Some(PathBuf::from(dir));
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
+            return Some(PathBuf::from(dir));
+        }
+        let dir = std::env::current_exe().ok()?.parent()?.join("data");
+        copy_from_appdata(&dir);
+        Some(dir)
+    })
+    .clone()
+}
+
+/// Earlier versions kept their data in the user's AppData folder (first as
+/// "minimal-video-player"). Copies it next to the executable the first time,
+/// leaving the original in place.
+fn copy_from_appdata(dir: &Path) {
+    let target = dir.join("progress.json");
+    if target.exists() {
+        return;
     }
-    let config = dirs::config_dir()?;
-    let dir = config.join("Afterglow");
-    let old = config.join("minimal-video-player");
-    if !dir.exists() && old.is_dir() {
-        let _ = std::fs::rename(&old, &dir);
+    let Some(config) = dirs::config_dir() else { return };
+    let old = ["Afterglow", "minimal-video-player"].iter().map(|name| config.join(name).join("progress.json")).find(|p| p.is_file());
+    if let Some(old) = old {
+        let copied = std::fs::create_dir_all(dir).and_then(|()| std::fs::copy(&old, &target));
+        if let Err(e) = copied {
+            eprintln!("could not copy {} to {}: {e}", old.display(), target.display());
+        }
     }
-    Some(dir)
 }
 
 fn file_path() -> Option<PathBuf> {

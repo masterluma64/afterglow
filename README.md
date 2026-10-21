@@ -58,8 +58,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Settings** (⋯ menu or Ctrl+,): seek steps, when a video counts as watched, auto-play,
   preferred subtitle and audio languages, hardware decoding and the theme.
 
-State is stored in `%APPDATA%\Afterglow\progress.json` (set `AFTERGLOW_DATA_DIR` to use
-another folder, e.g. for testing).
+Afterglow is portable: its state is stored in `data\progress.json` next to `afterglow.exe`,
+so the whole folder can be moved or carried on a USB stick. Data from earlier versions in
+`%APPDATA%\Afterglow` is copied over on first start (the original is left in place). Set
+`AFTERGLOW_DATA_DIR` to use another folder, e.g. for testing.
 
 ## Building
 
@@ -72,7 +74,8 @@ cargo run --release
 cargo run --release -- "D:\Shows\Foo"    # play a folder
 ```
 
-To distribute, ship `afterglow.exe` together with `libmpv-2.dll`.
+To distribute, ship `afterglow.exe` together with `libmpv-2.dll`, in a folder the user can
+write to (the `data` folder is created next to them).
 
 Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fonts`.
 
