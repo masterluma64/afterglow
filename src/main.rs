@@ -93,6 +93,8 @@ enum Action {
     RefreshFolder,
     ClearRecentFolders,
     ShowHelp,
+    OpenSettings,
+    SetSettings(progress::Settings),
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
@@ -241,6 +243,8 @@ struct App {
     confirm_reset: bool,
     /// Whether the keyboard shortcut overview is open.
     show_help: bool,
+    /// Whether the settings dialog is open.
+    settings_open: bool,
 }
 
 impl App {
@@ -281,7 +285,10 @@ impl App {
             line_marks: [None, None],
             confirm_reset: false,
             show_help: false,
+            settings_open: false,
         };
+        // Before opening anything, so language preferences apply to it.
+        app.apply_settings(ctx);
         if !open.is_empty() {
             app.open(open, ctx);
         } else if let Some(index) = app.continue_target() {
@@ -544,7 +551,7 @@ impl App {
         let watched = |i: usize| self.store.get(&self.playlist[i]).watched;
         let last = self.store.current.as_ref().and_then(|c| self.playlist.iter().position(|p| p == c));
         let start = match last {
-            Some(i) if !watched(i) || self.store.get(&self.playlist[i]).resume_position().is_some() => return Some(i),
+            Some(i) if !watched(i) || self.store.resume_position(&self.playlist[i]).is_some() => return Some(i),
             Some(i) => i + 1,
             None => 0,
         };
@@ -573,7 +580,7 @@ impl App {
         let Ok(mpv) = &self.mpv else { return };
         let Some(path) = self.playlist.get(index).cloned() else { return };
         let name = display_name(&path);
-        let start = self.store.get(&path).resume_position();
+        let start = self.store.resume_position(&path);
         mpv.set("pause", if paused { "yes" } else { "no" });
         match mpv.load_file(&path, start.unwrap_or(0.0)) {
             Ok(()) => {
@@ -711,7 +718,7 @@ impl App {
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open {
             return;
         }
         if self.show_help {
@@ -722,6 +729,7 @@ impl App {
             return;
         }
         let Playback { volume, duration, speed, .. } = self.playback;
+        let (short, long) = (self.store.settings.seek_short, self.store.settings.seek_long);
         ctx.input_mut(|i| {
             use egui::Modifiers as M;
             // egui ignores extra Shift/Alt when matching, so more specific
@@ -730,16 +738,17 @@ impl App {
                 (M::CTRL | M::SHIFT, Key::O, Action::OpenFolder),
                 (M::CTRL, Key::O, Action::OpenVideos),
                 (M::CTRL, Key::F, Action::FocusSearch),
+                (M::CTRL, Key::Comma, Action::OpenSettings),
                 (M::NONE, Key::F5, Action::RefreshFolder),
                 (M::NONE, Key::Questionmark, Action::ShowHelp),
                 (M::NONE, Key::F1, Action::ShowHelp),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
                 (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
                 (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
-                (M::SHIFT, Key::ArrowLeft, Action::SeekBy(-30.0)),
-                (M::SHIFT, Key::ArrowRight, Action::SeekBy(30.0)),
-                (M::NONE, Key::ArrowLeft, Action::SeekBy(-5.0)),
-                (M::NONE, Key::ArrowRight, Action::SeekBy(5.0)),
+                (M::SHIFT, Key::ArrowLeft, Action::SeekBy(-long)),
+                (M::SHIFT, Key::ArrowRight, Action::SeekBy(long)),
+                (M::NONE, Key::ArrowLeft, Action::SeekBy(-short)),
+                (M::NONE, Key::ArrowRight, Action::SeekBy(short)),
                 (M::NONE, Key::ArrowUp, Action::SetVolume((volume + 5.0).min(150.0))),
                 (M::NONE, Key::ArrowDown, Action::SetVolume((volume - 5.0).max(0.0))),
                 (M::NONE, Key::Space, Action::TogglePause),
@@ -822,6 +831,11 @@ impl App {
             Action::ReverseOrder => self.reorder(|list| list.reverse()),
             Action::RefreshFolder => self.refresh_folder(),
             Action::ShowHelp => self.show_help = true,
+            Action::OpenSettings => self.settings_open = true,
+            Action::SetSettings(settings) => {
+                self.store.set_settings(settings);
+                self.apply_settings(ctx);
+            }
             Action::ClearRecentFolders => {
                 self.store.clear_recent_folders();
                 self.store.save();
@@ -1101,12 +1115,11 @@ impl App {
                     if ui.add_enabled(self.store.folder.is_some(), refresh).on_hover_text(tip).clicked() {
                         self.actions.push(Action::RefreshFolder);
                     }
-                    let mut autoplay = self.store.autoplay_next;
-                    let tip = "When a video ends, start the next one after a short countdown";
-                    if ui.checkbox(&mut autoplay, "Play next video automatically").on_hover_text(tip).changed() {
-                        self.actions.push(Action::SetAutoplayNext(autoplay));
-                    }
                     ui.separator();
+                    let settings = egui::Button::new(format!("{}  Settings…", icons::GEAR)).shortcut_text("Ctrl+,");
+                    if ui.add(settings).clicked() {
+                        self.actions.push(Action::OpenSettings);
+                    }
                     let help = egui::Button::new(format!("{}  Keyboard shortcuts", icons::KEYBOARD)).shortcut_text("?");
                     if ui.add(help).clicked() {
                         self.actions.push(Action::ShowHelp);
@@ -1195,6 +1208,96 @@ impl App {
                 ui.weak("Changes are remembered for this video.");
             });
         self.sync_panel = open;
+    }
+
+    /// Applies the settings to the UI and to mpv.
+    fn apply_settings(&self, ctx: &egui::Context) {
+        let settings = &self.store.settings;
+        ctx.set_theme(match settings.theme {
+            progress::Theme::System => egui::ThemePreference::System,
+            progress::Theme::Dark => egui::ThemePreference::Dark,
+            progress::Theme::Light => egui::ThemePreference::Light,
+        });
+        if let Ok(mpv) = &self.mpv {
+            mpv.set("slang", &settings.sub_languages);
+            mpv.set("alang", &settings.audio_languages);
+            mpv.set("hwdec", if settings.hardware_decoding { "auto-safe" } else { "no" });
+        }
+    }
+
+    fn settings_dialog(&mut self, ctx: &egui::Context) {
+        let mut settings = self.store.settings.clone();
+        let mut autoplay = self.store.autoplay_next;
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
+            ui.set_width(420.0);
+            ui.label(RichText::new(format!("{}  Settings", icons::GEAR)).size(18.0).strong());
+            ui.add_space(10.0);
+            let section = |ui: &mut egui::Ui, title: &str| {
+                ui.label(RichText::new(title).small().weak());
+                ui.end_row();
+            };
+            egui::Grid::new("settings").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
+                section(ui, "PLAYBACK");
+                ui.label("Seek step");
+                ui.add(egui::DragValue::new(&mut settings.seek_short).range(1.0..=120.0).suffix(" s").speed(0.2));
+                ui.end_row();
+                ui.label("Seek step with Shift");
+                ui.add(egui::DragValue::new(&mut settings.seek_long).range(1.0..=600.0).suffix(" s").speed(1.0));
+                ui.end_row();
+                ui.label("Count as watched at");
+                ui.add(egui::Slider::new(&mut settings.watched_percent, 50.0..=100.0).suffix("%").integer());
+                ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut autoplay, "Play the next video automatically");
+                ui.end_row();
+                section(ui, "LANGUAGES");
+                ui.label("Subtitles");
+                ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).hint_text("e.g. en,eng").desired_width(200.0))
+                    .on_hover_text("Language codes in order of preference, separated by commas. Applies to the next video.");
+                ui.end_row();
+                ui.label("Audio");
+                ui.add(egui::TextEdit::singleline(&mut settings.audio_languages).hint_text("the file's default").desired_width(200.0))
+                    .on_hover_text("Language codes in order of preference, e.g. ja,jpn. Applies to the next video.");
+                ui.end_row();
+                section(ui, "VIDEO AND APPEARANCE");
+                ui.label("");
+                ui.checkbox(&mut settings.hardware_decoding, "Decode video on the GPU")
+                    .on_hover_text("Turn off if videos show glitches; uses more CPU");
+                ui.end_row();
+                ui.label("Theme");
+                ui.horizontal(|ui| {
+                    for (theme, label) in [
+                        (progress::Theme::System, "System"),
+                        (progress::Theme::Dark, "Dark"),
+                        (progress::Theme::Light, "Light"),
+                    ] {
+                        ui.selectable_value(&mut settings.theme, theme, label);
+                    }
+                });
+                ui.end_row();
+            });
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                if ui.button("Done").clicked() {
+                    close = true;
+                }
+                if ui.button("Restore defaults").clicked() {
+                    settings = progress::Settings::default();
+                    autoplay = true;
+                }
+            });
+        });
+        if settings != self.store.settings {
+            self.actions.push(Action::SetSettings(settings));
+        }
+        if autoplay != self.store.autoplay_next {
+            self.actions.push(Action::SetAutoplayNext(autoplay));
+        }
+        if close || modal.should_close() {
+            self.settings_open = false;
+            self.store.save();
+        }
     }
 
     /// An overview of the keyboard shortcuts.
@@ -1685,6 +1788,8 @@ impl App {
 
     fn placeholder(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Center)));
+        // The video area is black in either theme.
+        child.style_mut().visuals = egui::Visuals::dark();
         child.add_space(rect.height() * 0.36);
         if let Err(e) = &self.mpv {
             child.label(RichText::new(format!("{}  Afterglow can't play videos", icons::WARNING)).size(18.0));
@@ -1732,7 +1837,7 @@ impl App {
         }
         if let Some(index) = self.continue_target() {
             let path = &self.playlist[index];
-            let resume = self.store.get(path).resume_position();
+            let resume = self.store.resume_position(path);
             let verb = if resume.is_some() { "Continue" } else { "Play" };
             let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, display_name(path))).size(18.0);
             if child.button(text).on_hover_text("Space").clicked() {
@@ -1824,6 +1929,7 @@ impl eframe::App for App {
                 .fixed_pos(window.left_bottom())
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .show(&ctx, |ui| {
+                    ui.style_mut().visuals = egui::Visuals::dark();
                     egui::Frame::NONE
                         .fill(Color32::from_black_alpha(190))
                         .inner_margin(egui::Margin::symmetric(12, 8))
@@ -1847,6 +1953,9 @@ impl eframe::App for App {
         }
         if self.show_help {
             self.help_dialog(&ctx);
+        }
+        if self.settings_open {
+            self.settings_dialog(&ctx);
         }
 
         if let Some(up_next) = &self.up_next {
@@ -1899,7 +2008,7 @@ fn playlist_row(
         .right_text(RichText::new(length).weak())
         .sense(Sense::click_and_drag());
     let resp = ui.add_sized([ui.available_width(), 22.0], button);
-    if (!entry.watched && entry.fraction() > 0.0) || entry.resume_position().is_some() {
+    if (!entry.watched && entry.fraction() > 0.0) || store.resume_position(path).is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
         let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
         ui.painter().line_segment([r.left_bottom(), end], (2.0, ui.visuals().selection.bg_fill));
@@ -1998,6 +2107,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("Esc", "Leave fullscreen"),
         ("L", "Show or hide the playlist"),
         ("? / F1", "This overview"),
+        ("Ctrl+,", "Settings"),
     ]),
     ("PLAYLIST", &[
         ("Ctrl+Shift+O", "Open folder"),
@@ -2141,7 +2251,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

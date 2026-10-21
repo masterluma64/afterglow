@@ -26,8 +26,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     (or reverse it) from the sort icon.
   - The search box (Ctrl+F) filters the playlist by name; Esc clears it.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
-  Videos count as watched at 90% or when they finish. The next one then starts after a
-  5-second countdown (turn this off in the ⋯ menu).
+  Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
+  5-second countdown (this can be turned off in Settings).
   On startup the video you were watching is opened, paused on the exact frame where you
   left off.
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
@@ -52,6 +52,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
 
+- **Settings** (⋯ menu or Ctrl+,): seek steps, when a video counts as watched, auto-play,
+  preferred subtitle and audio languages, hardware decoding and the theme.
+
 State is stored in `%APPDATA%\Afterglow\progress.json` (set `AFTERGLOW_DATA_DIR` to use
 another folder, e.g. for testing).
 
@@ -75,7 +78,7 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | Key | Action |
 | --- | --- |
 | Space / K | Play / pause |
-| ← / → | Seek 5 s (Shift: 30 s) |
+| ← / → | Seek 5 s (Shift: 30 s; adjustable in Settings) |
 | ↑ / ↓ | Volume |
 | M | Mute |
 | N / P | Next / previous video |
@@ -93,6 +96,7 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | [ / ] | Slower / faster (Backspace: normal speed) |
 | L | Show or hide the playlist |
 | ? / F1 | Keyboard shortcut overview (also in the ⋯ menu) |
+| Ctrl+, | Settings |
 | Ctrl+Shift+O | Open folder as playlist |
 | Ctrl+O | Add videos to the playlist |
 | Ctrl+F | Search the playlist |

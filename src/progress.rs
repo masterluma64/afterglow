@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Fraction of a video after which it counts as watched.
-const WATCHED_FRACTION: f64 = 0.9;
 /// How many recently opened folders are remembered.
 const RECENT_FOLDERS: usize = 10;
 
@@ -19,14 +17,53 @@ pub struct Entry {
 }
 
 impl Entry {
-    /// Where playback should resume, if anywhere.
-    pub fn resume_position(&self) -> Option<f64> {
-        (self.position > 5.0 && self.position < self.duration * WATCHED_FRACTION).then_some(self.position)
+    /// Where playback should resume, if anywhere, given the fraction of a
+    /// video after which it counts as watched.
+    fn resume_position(&self, watched_fraction: f64) -> Option<f64> {
+        (self.position > 5.0 && self.position < self.duration * watched_fraction).then_some(self.position)
     }
 
     pub fn fraction(&self) -> f32 {
         if self.duration > 0.0 { (self.position / self.duration).clamp(0.0, 1.0) as f32 } else { 0.0 }
     }
+}
+
+/// Preferences from the settings dialog.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Settings {
+    /// Seconds the arrow keys seek, and with Shift.
+    pub seek_short: f64,
+    pub seek_long: f64,
+    /// How far into a video (in percent) it counts as watched.
+    pub watched_percent: f64,
+    pub theme: Theme,
+    /// Preferred languages, as mpv's comma-separated `slang` / `alang` lists.
+    pub sub_languages: String,
+    pub audio_languages: String,
+    pub hardware_decoding: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            seek_short: 5.0,
+            seek_long: 30.0,
+            watched_percent: 90.0,
+            theme: Theme::System,
+            sub_languages: "en,eng".into(),
+            audio_languages: String::new(),
+            hardware_decoding: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub enum Theme {
+    #[default]
+    System,
+    Dark,
+    Light,
 }
 
 /// Track choices made for one video, restored when it is opened again.
@@ -61,6 +98,7 @@ pub struct Store {
     /// Whether opening a folder also includes videos in its subfolders.
     pub include_subfolders: bool,
     pub volume: f64,
+    pub settings: Settings,
     /// Whether the next video starts by itself when one finishes.
     pub autoplay_next: bool,
     #[serde(skip)]
@@ -79,6 +117,7 @@ impl Default for Store {
             include_subfolders: false,
             volume: 100.0,
             autoplay_next: true,
+            settings: Settings::default(),
             dirty: false,
         }
     }
@@ -175,11 +214,22 @@ impl Store {
         self.tracks.entry(key(path)).or_default()
     }
 
+    /// Fraction of a video after which it counts as watched.
+    pub fn watched_fraction(&self) -> f64 {
+        self.settings.watched_percent.clamp(50.0, 100.0) / 100.0
+    }
+
+    /// Where a video should resume, if anywhere.
+    pub fn resume_position(&self, path: &Path) -> Option<f64> {
+        self.get(path).resume_position(self.watched_fraction())
+    }
+
     pub fn update_position(&mut self, path: &Path, position: f64, duration: f64) {
+        let watched_fraction = self.watched_fraction();
         let entry = self.entries.entry(key(path)).or_default();
         entry.position = position;
         entry.duration = duration;
-        if duration > 0.0 && position >= duration * WATCHED_FRACTION {
+        if duration > 0.0 && position >= duration * watched_fraction {
             entry.watched = true;
         }
         self.dirty = true;
@@ -248,6 +298,11 @@ impl Store {
         self.dirty = true;
     }
 
+    pub fn set_settings(&mut self, settings: Settings) {
+        self.settings = settings;
+        self.dirty = true;
+    }
+
     pub fn set_autoplay_next(&mut self, autoplay: bool) {
         self.autoplay_next = autoplay;
         self.dirty = true;
@@ -275,6 +330,19 @@ mod tests {
             assert_eq!(entry.duration, length, "lengths are kept");
         }
         assert_eq!(store.playlist.len(), 3);
+    }
+
+    #[test]
+    fn uses_the_watched_threshold_setting() {
+        let mut store = Store::default();
+        let video = Path::new("a.mkv");
+        store.update_position(video, 60.0, 100.0);
+        assert!(!store.get(video).watched);
+        assert_eq!(store.resume_position(video), Some(60.0));
+        store.settings.watched_percent = 50.0;
+        assert_eq!(store.resume_position(video), None, "past the threshold: nothing to resume");
+        store.update_position(video, 61.0, 100.0);
+        assert!(store.get(video).watched);
     }
 
     #[test]
