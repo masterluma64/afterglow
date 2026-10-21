@@ -543,10 +543,13 @@ mod tests {
                     subs_ok = mpv.tracks("sub").iter().any(|t| t.selected);
                 }
             }
+            // Setting the render size draws an empty black frame before the
+            // file is loaded, so only frames with picture in them count.
             if let Some(img) = mpv.take_frame() {
                 assert_eq!(img.size, [320, 180]);
-                assert!(img.pixels.iter().any(|p| *p != Color32::BLACK), "frame is all black");
-                frames += 1;
+                if img.pixels.iter().any(|p| *p != Color32::BLACK) {
+                    frames += 1;
+                }
             }
             std::thread::sleep(Duration::from_millis(10));
         }
