@@ -32,6 +32,7 @@ pub const SORT: &str = "\u{E444}";
 pub const SEARCH: &str = "\u{E30C}";
 pub const CHECKS: &str = "\u{E53A}";
 pub const TIMER: &str = "\u{E492}";
+pub const REFRESH: &str = "\u{E036}";
 
 const FILL_FAMILY: &str = "phosphor-fill";
 

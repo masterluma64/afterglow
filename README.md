@@ -11,6 +11,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
     Tick *Include subfolders* to also pick up videos in subfolders; changing it rescans
     the opened folder right away.
+    New videos saved into the folder are added to the end of the playlist by themselves;
+    *Refresh folder* (F5, in the ⋯ menu) also drops videos whose files are gone.
   - *Add videos* (Ctrl+O, or drop videos) appends them; if nothing is playing, the first
     one starts.
   - Each video shows its length, and the header shows how much of the playlist's total
@@ -88,3 +90,4 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | Ctrl+Shift+O | Open folder as playlist |
 | Ctrl+O | Add videos to the playlist |
 | Ctrl+F | Search the playlist |
+| F5 | Refresh the playlist's folder |

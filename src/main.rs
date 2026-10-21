@@ -5,6 +5,7 @@ mod library;
 mod mpv;
 mod progress;
 mod thumbnails;
+mod watch;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -86,6 +87,8 @@ enum Action {
     Sort(SortBy),
     FocusSearch,
     ReverseOrder,
+    /// Rescans the playlist's folder now: adds new videos, drops missing ones.
+    RefreshFolder,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
@@ -216,6 +219,7 @@ struct App {
     /// Seek-bar previews, started the first time they are needed.
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     up_next: Option<UpNext>,
+    watch: watch::FolderWatch,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
     /// Only playlist entries whose name contains this are listed.
@@ -257,6 +261,7 @@ impl App {
             chapters: Vec::new(),
             thumbnails: None,
             up_next: None,
+            watch: watch::FolderWatch::new(ctx.clone(), None),
             drag_row: None,
             search: String::new(),
             focus_search: false,
@@ -271,6 +276,7 @@ impl App {
             app.load(index, true, ctx);
         }
         app.request_durations();
+        app.sync_watch();
         if let Some(warning) = load_warning {
             app.warn(warning);
         }
@@ -346,6 +352,7 @@ impl App {
         }
         // Remember a single opened folder, so the subfolder setting can rescan it.
         self.store.set_folder((folders.len() == 1).then(|| folders[0].as_path()));
+        self.sync_watch();
         self.replace_playlist(list, ctx);
     }
 
@@ -355,6 +362,7 @@ impl App {
     fn set_include_subfolders(&mut self, include: bool, ctx: &egui::Context) {
         self.store.set_include_subfolders(include);
         self.store.save();
+        self.sync_watch();
         let Some(folder) = self.store.folder.clone() else { return };
         let scanned = match library::scan_folder(&folder, include) {
             Ok(scanned) => scanned,
@@ -424,6 +432,59 @@ impl App {
         self.save_playlist();
     }
 
+    /// Points the folder watch at the folder the playlist came from.
+    fn sync_watch(&self) {
+        self.watch.set_target(self.store.folder.clone().map(|f| (f, self.store.include_subfolders)));
+    }
+
+    /// Takes in background rescans of the playlist's folder.
+    fn receive_scans(&mut self) {
+        while let Ok((folder, found)) = self.watch.scans.try_recv() {
+            if self.store.folder.as_ref() == Some(&folder) {
+                self.append_new(found);
+            }
+        }
+    }
+
+    /// Adds the videos that aren't in the playlist yet to its end, returning
+    /// how many there were.
+    fn append_new(&mut self, found: Vec<PathBuf>) -> usize {
+        let new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
+        if new.is_empty() {
+            return 0;
+        }
+        let count = new.len();
+        // Appending shifts no indices, so a countdown to the next video stays.
+        self.playlist.extend(new);
+        self.store.set_playlist(&self.playlist);
+        self.request_durations();
+        self.store.save();
+        self.notify(format!("{count} new video{} in the folder", if count == 1 { "" } else { "s" }));
+        count
+    }
+
+    fn refresh_folder(&mut self) {
+        let Some(folder) = self.store.folder.clone() else {
+            return self.notify("The playlist wasn't opened from a folder");
+        };
+        let found = match library::scan_folder(&folder, self.store.include_subfolders) {
+            Ok(found) => found,
+            Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
+        };
+        let before = self.playlist.len();
+        let playing = self.current_path().map(Path::to_path_buf);
+        self.reorder(|list| list.retain(|p| p.is_file() || Some(p) == playing.as_ref()));
+        let removed = before - self.playlist.len();
+        let added = self.append_new(found);
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        self.notify(match (added, removed) {
+            (0, 0) => "No changes in the folder".to_string(),
+            (a, 0) => format!("{a} new video{}", plural(a)),
+            (0, r) => format!("Removed {r} missing video{}", plural(r)),
+            (a, r) => format!("{a} new video{}, removed {r} missing", plural(a)),
+        });
+    }
+
     /// Rearranges the playlist, keeping track of the playing video.
     fn reorder(&mut self, rearrange: impl FnOnce(&mut Vec<PathBuf>)) {
         let playing = self.current_path().map(Path::to_path_buf);
@@ -460,6 +521,7 @@ impl App {
         self.store.set_current(None);
         self.store.set_folder(None);
         self.save_playlist();
+        self.sync_watch();
     }
 
     /// The video to offer when nothing is playing: the last one played if it is
@@ -648,6 +710,7 @@ impl App {
                 (M::CTRL | M::SHIFT, Key::O, Action::OpenFolder),
                 (M::CTRL, Key::O, Action::OpenVideos),
                 (M::CTRL, Key::F, Action::FocusSearch),
+                (M::NONE, Key::F5, Action::RefreshFolder),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
                 (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
                 (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
@@ -735,6 +798,7 @@ impl App {
                 self.notify(format!("Sorted by {what}"));
             }
             Action::ReverseOrder => self.reorder(|list| list.reverse()),
+            Action::RefreshFolder => self.refresh_folder(),
             Action::ToggleSyncPanel => self.sync_panel = !self.sync_panel,
             Action::FocusSearch => {
                 self.show_sidebar = true;
@@ -988,6 +1052,11 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
                 let (response, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                    let refresh = egui::Button::new(format!("{}  Refresh folder", icons::REFRESH)).shortcut_text("F5");
+                    let tip = "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.";
+                    if ui.add_enabled(self.store.folder.is_some(), refresh).on_hover_text(tip).clicked() {
+                        self.actions.push(Action::RefreshFolder);
+                    }
                     let mut autoplay = self.store.autoplay_next;
                     let tip = "When a video ends, start the next one after a short countdown";
                     if ui.checkbox(&mut autoplay, "Play next video automatically").on_hover_text(tip).changed() {
@@ -1617,6 +1686,7 @@ impl eframe::App for App {
         self.sample_playback();
         self.handle_input(&ctx);
         self.receive_durations();
+        self.receive_scans();
         self.update_frame(&ctx);
         if let Some(Ok(thumbnails)) = &mut self.thumbnails {
             thumbnails.update(&ctx);
@@ -1918,7 +1988,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER,
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH,
             "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
