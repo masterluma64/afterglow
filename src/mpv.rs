@@ -229,6 +229,30 @@ impl Mpv {
     /// context, which must be current on this thread; without it (or if that
     /// fails) it is rendered in software.
     pub fn new(egui_ctx: egui::Context, gl: Option<GetProcAddress>) -> Result<Self, String> {
+        Self::create(egui_ctx, gl, &[])
+    }
+
+    /// A silent, paused instance rendering small frames in software, for
+    /// previews: load a file and seek, then take the frames.
+    pub fn thumbnailer(egui_ctx: egui::Context) -> Result<Self, String> {
+        let options = [
+            ("pause", "yes"),
+            ("ao", "null"),
+            ("aid", "no"),
+            ("sid", "no"),
+            ("sub-auto", "no"),
+            ("hwdec", "no"),
+            // Speed over quality: previews are small and short-lived.
+            ("hr-seek", "no"),
+            ("vd-lavc-fast", "yes"),
+            ("vd-lavc-skiploopfilter", "all"),
+            ("demuxer-readahead-secs", "0"),
+            ("cache", "no"),
+        ];
+        Self::create(egui_ctx, None, &options)
+    }
+
+    fn create(egui_ctx: egui::Context, gl: Option<GetProcAddress>, extra: &[(&str, &str)]) -> Result<Self, String> {
         let api = Arc::new(Api::load()?);
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
@@ -248,7 +272,7 @@ impl Mpv {
             // Decode on the GPU where it is known to work, falling back to the CPU.
             ("hwdec", "auto-safe"),
         ];
-        for (k, v) in options {
+        for (k, v) in options.iter().chain(extra) {
             let (k, v) = (cstr(k), cstr(v));
             unsafe { (api.set_option_string)(handle, k.as_ptr(), v.as_ptr()) };
         }
@@ -891,6 +915,77 @@ mod tests {
         assert!(subs_ok, "subtitle track not selected");
         assert!(frames >= 10, "only got {frames} frames");
         assert!(mpv.get_f64("time-pos").unwrap() > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod thumbnailer_tests {
+    use super::tests::use_built_dll;
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The previewer stays paused but still shows a frame after loading and
+    /// after each seek.
+    #[test]
+    fn renders_frames_while_paused() {
+        use_built_dll();
+        // Generated sources can't seek, so encode a real file first.
+        let video = encode_test_video("afterglow-thumbnails.mkv", 10);
+        let mpv = Mpv::thumbnailer(egui::Context::default()).expect("libmpv");
+        mpv.set_render_size(224, 126);
+        mpv.load_file(&video, 2.0).unwrap();
+
+        let picture = |mpv: &Mpv| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while Instant::now() < deadline {
+                mpv.poll_events();
+                if let Some(img) = mpv.take_frame() {
+                    if img.pixels.iter().any(|p| *p != Color32::BLACK) {
+                        return Some(img);
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            None
+        };
+        let first = picture(&mpv).expect("a frame after loading");
+        assert_eq!(first.size, [224, 126]);
+        assert!(mpv.get_flag("pause"));
+        mpv.command(&["seek", "6", "absolute+keyframes"]).unwrap();
+        let second = picture(&mpv).expect("a frame after seeking");
+        assert_ne!(first.pixels, second.pixels, "the seek shows a different frame");
+        assert!((mpv.get_f64("time-pos").unwrap() - 6.0).abs() < 1.0);
+        drop(mpv);
+        std::fs::remove_file(video).unwrap();
+    }
+
+    /// Encodes a test pattern into a seekable video file in the temp folder,
+    /// with a keyframe every second.
+    fn encode_test_video(name: &str, seconds: u32) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(name);
+        let _ = std::fs::remove_file(&path);
+        let api = Api::load().unwrap();
+        let handle = unsafe { (api.create)() };
+        let out = path.to_string_lossy().into_owned();
+        let options = [("o", out.as_str()), ("of", "matroska"), ("ovc", "mpeg4"), ("ovcopts", "g=25,qscale=5"), ("ao", "null")];
+        for (k, v) in options {
+            let (k, v) = (cstr(k), cstr(v));
+            unsafe { (api.set_option_string)(handle, k.as_ptr(), v.as_ptr()) };
+        }
+        api.check(unsafe { (api.initialize)(handle) }).unwrap();
+        let source = format!("av://lavfi:testsrc=duration={seconds}:size=640x360:rate=25");
+        let (cmd, file) = (cstr("loadfile"), cstr(&source));
+        let mut args = [cmd.as_ptr(), file.as_ptr(), std::ptr::null()];
+        api.check(unsafe { (api.command)(handle, args.as_mut_ptr()) }).unwrap();
+        loop {
+            let ev = unsafe { &*(api.wait_event)(handle, 30.0) };
+            if matches!(ev.event_id, MPV_EVENT_END_FILE | MPV_EVENT_NONE) {
+                break;
+            }
+        }
+        unsafe { (api.terminate_destroy)(handle) };
+        assert!(path.metadata().is_ok_and(|m| m.len() > 0), "encoding failed");
+        path
     }
 }
 

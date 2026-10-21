@@ -4,6 +4,7 @@ mod icons;
 mod library;
 mod mpv;
 mod progress;
+mod thumbnails;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -178,6 +179,8 @@ struct App {
     durations: DurationProbe,
     /// Chapters of the loaded video.
     chapters: Vec<mpv::Chapter>,
+    /// Seek-bar previews, started the first time they are needed.
+    thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
 }
@@ -208,6 +211,7 @@ impl App {
             actions: Vec::new(),
             durations: DurationProbe::new(ctx.clone()),
             chapters: Vec::new(),
+            thumbnails: None,
             confirm_reset: false,
         };
         if !open.is_empty() {
@@ -966,7 +970,14 @@ impl App {
                     Some(i) => format!("{}  ·  {}", format_time(at), self.chapters[i].title),
                     None => format_time(at),
                 };
-                resp.clone().on_hover_text_at_pointer(text);
+                let preview = self.preview(ui.ctx(), at, duration);
+                resp.clone().on_hover_ui_at_pointer(|ui| {
+                    if let Some(texture) = preview {
+                        let size = vec2(thumbnails::SIZE[0] as f32, thumbnails::SIZE[1] as f32);
+                        ui.image((texture, size / ui.ctx().pixels_per_point().max(1.0)));
+                    }
+                    ui.label(text);
+                });
             }
         }
 
@@ -987,6 +998,16 @@ impl App {
                 ui.painter().circle_filled(egui::pos2(filled.right(), track.center().y), 6.0, visuals.selection.bg_fill);
             }
         }
+    }
+
+    /// A preview frame of the playing video near `at`, starting the previewer
+    /// on first use. The frame may still be from a moment ago.
+    fn preview(&mut self, ctx: &egui::Context, at: f64, duration: f64) -> Option<egui::TextureId> {
+        let path = self.current_path()?.to_path_buf();
+        let thumbnails = self.thumbnails.get_or_insert_with(|| thumbnails::Thumbnails::new(ctx)).as_mut().ok()?;
+        // About 300 distinct previews along the video, at most one per second.
+        thumbnails.request(&path, at, (duration / 300.0).max(1.0));
+        thumbnails.texture(&path).map(TextureHandle::id)
     }
 
     fn track_menu(&mut self, ui: &mut egui::Ui, kind: &'static str) {
@@ -1194,6 +1215,9 @@ impl eframe::App for App {
         self.handle_input(&ctx);
         self.receive_durations();
         self.update_frame(&ctx);
+        if let Some(Ok(thumbnails)) = &mut self.thumbnails {
+            thumbnails.update(&ctx);
+        }
 
         // In fullscreen, controls appear on mouse movement and hide after a
         // moment, but stay up while paused or idle.
