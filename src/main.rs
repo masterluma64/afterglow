@@ -1653,31 +1653,21 @@ impl App {
         let frac_at = |x: f32| ((x - rect.left()) / rect.width()).clamp(0.0, 1.0) as f64;
 
         if active {
+            // Dragging only moves the preview; the video jumps on release.
             if let Some(pos) = resp.interact_pointer_pos() {
                 let to = frac_at(pos.x) * duration;
                 if resp.dragged() {
                     self.scrub = Some(to);
-                    self.actions.push(Action::Seek { to, exact: false });
                 }
                 if resp.drag_stopped() || resp.clicked() {
                     self.scrub = None;
                     self.actions.push(Action::Seek { to, exact: true });
                 }
             }
-            if let Some(hover) = resp.hover_pos() {
-                let at = frac_at(hover.x) * duration;
-                let text = match chapter_at(&self.chapters, at) {
-                    Some(i) => format!("{}  ·  {}", format_time(at), self.chapters[i].title),
-                    None => format_time(at),
-                };
-                let preview = self.preview(ui.ctx(), at, duration);
-                resp.clone().on_hover_ui_at_pointer(|ui| {
-                    if let Some(texture) = preview {
-                        let size = vec2(thumbnails::SIZE[0] as f32, thumbnails::SIZE[1] as f32);
-                        ui.image((texture, size / ui.ctx().pixels_per_point().max(1.0)));
-                    }
-                    ui.label(text);
-                });
+            let pointer = if resp.dragged() { resp.interact_pointer_pos() } else { resp.hover_pos() };
+            if let Some(pointer) = pointer {
+                let at = frac_at(pointer.x) * duration;
+                self.seek_preview(ui.ctx(), egui::pos2(pointer.x, rect.top() - 8.0), at, duration);
             }
         }
 
@@ -1698,6 +1688,33 @@ impl App {
                 ui.painter().circle_filled(egui::pos2(filled.right(), track.center().y), 6.0, visuals.selection.bg_fill);
             }
         }
+    }
+
+    /// A popup above the seek bar at `anchor` with a preview frame, the time
+    /// and the chapter at `at`.
+    fn seek_preview(&mut self, ctx: &egui::Context, anchor: egui::Pos2, at: f64, duration: f64) {
+        let text = match chapter_at(&self.chapters, at) {
+            Some(i) => format!("{}  ·  {}", format_time(at), self.chapters[i].title),
+            None => format_time(at),
+        };
+        let preview = self.preview(ctx, at, duration);
+        egui::Area::new(egui::Id::unique("seek-preview"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(anchor)
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .constrain(true)
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        if let Some(texture) = preview {
+                            let size = vec2(thumbnails::SIZE[0] as f32, thumbnails::SIZE[1] as f32);
+                            ui.image((texture, size / ctx.pixels_per_point().max(1.0)));
+                        }
+                        ui.label(text);
+                    });
+                });
+            });
     }
 
     /// A preview frame of the playing video near `at`, starting the previewer

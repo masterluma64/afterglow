@@ -42,8 +42,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   you load are remembered for each video and restored when you open it again.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.
-- **Seek bar previews**: hovering the seek bar shows a preview frame and the time (and
-  chapter name). Chapters show as marks on the seek bar.
+- **Seek bar previews**: hovering or dragging the seek bar shows a preview frame and the
+  time (and chapter name). While dragging, only the preview moves; the video jumps there
+  when you let go. Chapters show as marks on the seek bar.
 - Playback speed from 0.25× to 3× (pitch-corrected), audio track selection, volume
   (remembered), fullscreen with controls that float over the video and hide while playing
   (they stay up while paused or while the pointer rests on them). The cursor also hides over
