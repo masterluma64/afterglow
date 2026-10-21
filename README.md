@@ -13,6 +13,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     the opened folder right away.
     New videos saved into the folder are added to the end of the playlist by themselves;
     *Refresh folder* (F5, in the ⋯ menu) also drops videos whose files are gone.
+  - The ⋯ menu lists recently opened folders.
   - *Add videos* (Ctrl+O, or drop videos) appends them; if nothing is playing, the first
     one starts.
   - Each video shows its length, and the header shows how much of the playlist's total

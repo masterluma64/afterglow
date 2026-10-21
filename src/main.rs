@@ -89,6 +89,7 @@ enum Action {
     ReverseOrder,
     /// Rescans the playlist's folder now: adds new videos, drops missing ones.
     RefreshFolder,
+    ClearRecentFolders,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
@@ -799,6 +800,10 @@ impl App {
             }
             Action::ReverseOrder => self.reorder(|list| list.reverse()),
             Action::RefreshFolder => self.refresh_folder(),
+            Action::ClearRecentFolders => {
+                self.store.clear_recent_folders();
+                self.store.save();
+            }
             Action::ToggleSyncPanel => self.sync_panel = !self.sync_panel,
             Action::FocusSearch => {
                 self.show_sidebar = true;
@@ -1052,6 +1057,23 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
                 let (response, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                    let recent = self.store.recent_folders.clone();
+                    ui.add_enabled_ui(!recent.is_empty(), |ui| {
+                        ui.menu_button(format!("{}  Recent folders", icons::RECENT), |ui| {
+                            for folder in &recent {
+                                let exists = folder.is_dir();
+                                let tip = if exists { folder.display().to_string() } else { format!("{} (not found)", folder.display()) };
+                                let label = format!("{}  {}", icons::FOLDER, display_name(folder));
+                                if ui.add_enabled(exists, egui::Button::new(label)).on_hover_text(tip).clicked() {
+                                    self.actions.push(Action::Open(vec![folder.clone()]));
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("Clear this list").clicked() {
+                                self.actions.push(Action::ClearRecentFolders);
+                            }
+                        });
+                    });
                     let refresh = egui::Button::new(format!("{}  Refresh folder", icons::REFRESH)).shortcut_text("F5");
                     let tip = "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.";
                     if ui.add_enabled(self.store.folder.is_some(), refresh).on_hover_text(tip).clicked() {
@@ -1988,7 +2010,8 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH,
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
+            icons::FOLDER,
             "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];

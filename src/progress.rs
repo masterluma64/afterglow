@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 /// Fraction of a video after which it counts as watched.
 const WATCHED_FRACTION: f64 = 0.9;
+/// How many recently opened folders are remembered.
+const RECENT_FOLDERS: usize = 10;
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Entry {
@@ -54,6 +56,8 @@ pub struct Store {
     pub current: Option<PathBuf>,
     /// The folder the playlist was opened from, if any.
     pub folder: Option<PathBuf>,
+    /// Folders opened recently, most recent first.
+    pub recent_folders: Vec<PathBuf>,
     /// Whether opening a folder also includes videos in its subfolders.
     pub include_subfolders: bool,
     pub volume: f64,
@@ -71,6 +75,7 @@ impl Default for Store {
             playlist: Vec::new(),
             current: None,
             folder: None,
+            recent_folders: Vec::new(),
             include_subfolders: false,
             volume: 100.0,
             autoplay_next: true,
@@ -220,6 +225,16 @@ impl Store {
 
     pub fn set_folder(&mut self, folder: Option<&Path>) {
         self.folder = folder.map(Path::to_path_buf);
+        if let Some(folder) = folder {
+            self.recent_folders.retain(|f| f != folder);
+            self.recent_folders.insert(0, folder.to_path_buf());
+            self.recent_folders.truncate(RECENT_FOLDERS);
+        }
+        self.dirty = true;
+    }
+
+    pub fn clear_recent_folders(&mut self) {
+        self.recent_folders.clear();
         self.dirty = true;
     }
 
@@ -260,6 +275,20 @@ mod tests {
             assert_eq!(entry.duration, length, "lengths are kept");
         }
         assert_eq!(store.playlist.len(), 3);
+    }
+
+    #[test]
+    fn remembers_recent_folders() {
+        let mut store = Store::default();
+        for i in 0..12 {
+            store.set_folder(Some(Path::new(&format!("folder {i}"))));
+        }
+        store.set_folder(Some(Path::new("folder 5")));
+        store.set_folder(None);
+        let names: Vec<_> = store.recent_folders.iter().map(|f| f.to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), RECENT_FOLDERS);
+        assert_eq!(names[..3], ["folder 5", "folder 11", "folder 10"], "most recent first, without duplicates");
+        assert!(!names.contains(&"folder 0".to_string()), "the oldest are forgotten");
     }
 
     #[test]
