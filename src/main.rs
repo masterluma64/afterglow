@@ -674,7 +674,7 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
         // Drop the previous frame so it never shows under the new video.
         self.texture = None;
-        mpv.forget_frame();
+        mpv.hide_frames();
         self.chapters.clear();
         // Until mpv reports the new video's values, don't let the previous
         // one's be saved as this one's progress.
@@ -802,6 +802,11 @@ impl App {
         for event in mpv.poll_events() {
             match event {
                 mpv::Event::FileLoaded => self.file_loaded(),
+                mpv::Event::PlaybackRestart => {
+                    if let Ok(mpv) = &self.mpv {
+                        mpv.show_frames();
+                    }
+                }
                 mpv::Event::Property { name, value } => self.property_changed(&name, value),
                 mpv::Event::CommandDone { tag: SUB_STEP_TAG, ok } => {
                     if let Some(which) = self.announce_sub_step.take() {

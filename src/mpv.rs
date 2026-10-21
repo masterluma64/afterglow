@@ -28,6 +28,7 @@ const MPV_FORMAT_NODE_MAP: c_int = 8;
 const MPV_EVENT_NONE: c_int = 0;
 const MPV_EVENT_END_FILE: c_int = 7;
 const MPV_EVENT_FILE_LOADED: c_int = 8;
+const MPV_EVENT_PLAYBACK_RESTART: c_int = 21;
 const MPV_EVENT_PROPERTY_CHANGE: c_int = 22;
 const MPV_EVENT_COMMAND_REPLY: c_int = 5;
 const MPV_END_FILE_REASON_EOF: c_int = 0;
@@ -174,6 +175,9 @@ pub enum Event {
     FileLoaded,
     /// Playback of a file ended. `eof` is true when it played to the end.
     EndFile { eof: bool, error: bool },
+    /// Playback started after loading a file or seeking: the current frame
+    /// is from where playback now is.
+    PlaybackRestart,
     /// A command sent with [`Mpv::send_tagged`] finished.
     CommandDone { tag: u64, ok: bool },
     /// An observed property changed (see [`Mpv::observe`]). `Node::None`
@@ -354,6 +358,8 @@ unsafe impl Sync for Ptr {}
 struct RenderState {
     dirty: bool,
     quit: bool,
+    /// Render the current frame again even if mpv has no new one.
+    redraw: bool,
     size: [i32; 2],
 }
 
@@ -362,6 +368,8 @@ struct RenderShared {
     state: Mutex<RenderState>,
     cv: Condvar,
     frame: Mutex<Option<ColorImage>>,
+    /// While set, rendered frames are thrown away (see `Mpv::hide_frames`).
+    hidden: std::sync::atomic::AtomicBool,
 }
 
 impl RenderShared {
@@ -516,7 +524,8 @@ impl Mpv {
     /// Latest frame rendered in software, if a new one is available.
     pub fn take_frame(&self) -> Option<ColorImage> {
         let Render::Software { shared, .. } = &self.render else { return None };
-        shared.frame.lock().unwrap().take()
+        let frame = shared.frame.lock().unwrap().take();
+        frame.filter(|_| !shared.hidden.load(std::sync::atomic::Ordering::Acquire))
     }
 
     /// A callback that draws the video, fitted into `rect`, on the GPU. `None`
@@ -528,11 +537,37 @@ impl Mpv {
         Some(egui::PaintCallback { rect, callback: Arc::new(callback) })
     }
 
-    /// Stops showing the last frame drawn on the GPU until mpv draws a new one,
-    /// so a previous video never shows under the next.
-    pub fn forget_frame(&self) {
-        if let Render::OpenGl(render) = &self.render {
-            render.state.lock().unwrap().has_frame = false;
+    /// Shows no video (black) until [`Self::show_frames`]. While a new file
+    /// starts, mpv still draws the previous one's last frame now and then;
+    /// this keeps it from flashing up before the new video.
+    pub fn hide_frames(&self) {
+        match &self.render {
+            Render::OpenGl(render) => {
+                let mut st = render.state.lock().unwrap();
+                st.hidden = true;
+                st.has_frame = false;
+            }
+            Render::Software { shared, .. } => {
+                shared.hidden.store(true, std::sync::atomic::Ordering::Release);
+                shared.frame.lock().unwrap().take();
+            }
+        }
+    }
+
+    /// Shows video again, starting with the current frame. Call it once
+    /// playback of the new file has started (`Event::PlaybackRestart`).
+    pub fn show_frames(&self) {
+        match &self.render {
+            Render::OpenGl(render) => {
+                let mut st = render.state.lock().unwrap();
+                st.hidden = false;
+                st.redraw = true;
+                render.egui_ctx.request_repaint();
+            }
+            Render::Software { shared, .. } => {
+                shared.hidden.store(false, std::sync::atomic::Ordering::Release);
+                shared.poke(|st| st.redraw = true);
+            }
         }
     }
 
@@ -634,6 +669,7 @@ impl Mpv {
             match ev.event_id {
                 MPV_EVENT_NONE => break,
                 MPV_EVENT_FILE_LOADED => out.push(Event::FileLoaded),
+                MPV_EVENT_PLAYBACK_RESTART => out.push(Event::PlaybackRestart),
                 MPV_EVENT_END_FILE if !ev.data.is_null() => {
                     let end = unsafe { &*(ev.data as *const RawEndFile) };
                     out.push(Event::EndFile {
@@ -712,6 +748,10 @@ struct GlState {
     target: Option<GlTarget>,
     /// Whether `target` holds a frame of the current video.
     has_frame: bool,
+    /// See [`Mpv::hide_frames`].
+    hidden: bool,
+    /// Render the current frame again even if mpv has no new one.
+    redraw: bool,
 }
 
 /// Video rendered by mpv in the UI's OpenGL context. Every GL call happens on
@@ -742,7 +782,7 @@ impl GlRender {
         api.check(unsafe { (api.render_create)(&mut ctx, handle.0, params.as_mut_ptr()) })?;
         let render = Arc::new(Self {
             api,
-            state: Mutex::new(GlState { ctx: Some(Ptr(ctx)), target: None, has_frame: false }),
+            state: Mutex::new(GlState { ctx: Some(Ptr(ctx)), target: None, has_frame: false, hidden: false, redraw: false }),
             egui_ctx,
             _get_proc_address: get_proc_address,
         });
@@ -786,7 +826,8 @@ impl GlRender {
 
             let flags = (self.api.render_update)(ctx.0);
             let new_frame = flags & MPV_RENDER_UPDATE_FRAME != 0;
-            if resized || new_frame {
+            let redraw = std::mem::take(&mut st.redraw);
+            if resized || new_frame || redraw {
                 let mut target = OpenGlFbo { fbo: fbo.0.get() as c_int, w: size[0], h: size[1], internal_format: glow::RGBA8 as c_int };
                 // The framebuffer's origin is bottom-left, like the screen's.
                 let mut flip_y: c_int = 1;
@@ -798,7 +839,7 @@ impl GlRender {
                     RenderParam { ty: MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME, data: &mut block as *mut _ as *mut c_void },
                     RenderParam { ty: MPV_RENDER_PARAM_INVALID, data: std::ptr::null_mut() },
                 ];
-                if (self.api.render_render)(ctx.0, params.as_mut_ptr()) >= 0 && new_frame {
+                if (self.api.render_render)(ctx.0, params.as_mut_ptr()) >= 0 && !st.hidden {
                     st.has_frame = true;
                 }
                 // Undo state mpv may leave behind that egui doesn't reset itself.
@@ -970,11 +1011,12 @@ fn render_loop(api: &Api, ctx: Ptr, shared: &RenderShared, egui_ctx: &egui::Cont
                 return;
             }
             st.dirty = false;
-            st.size
+            (st.size, std::mem::take(&mut st.redraw))
         };
+        let (size, redraw) = size;
 
         let flags = unsafe { (api.render_update)(ctx.0) };
-        if flags & MPV_RENDER_UPDATE_FRAME == 0 && size == last_size {
+        if flags & MPV_RENDER_UPDATE_FRAME == 0 && size == last_size && !redraw {
             continue;
         }
         let [w, h] = size;
@@ -1004,6 +1046,9 @@ fn render_loop(api: &Api, ctx: Ptr, shared: &RenderShared, egui_ctx: &egui::Cont
             pixels.extend(row[..w as usize * 4].chunks_exact(4).map(|p| Color32::from_rgb(p[0], p[1], p[2])));
         }
         let image = ColorImage::new([w as usize, h as usize], pixels);
+        if shared.hidden.load(std::sync::atomic::Ordering::Acquire) {
+            continue;
+        }
         *shared.frame.lock().unwrap() = Some(image);
         egui_ctx.request_repaint();
     }

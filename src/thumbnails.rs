@@ -55,7 +55,10 @@ impl Thumbnails {
                     self.loaded = false;
                     self.path = None;
                 }
-                mpv::Event::EndFile { .. } | mpv::Event::Property { .. } | mpv::Event::CommandDone { .. } => {}
+                mpv::Event::EndFile { .. }
+                | mpv::Event::Property { .. }
+                | mpv::Event::CommandDone { .. }
+                | mpv::Event::PlaybackRestart => {}
             }
         }
         if let Some(image) = self.mpv.take_frame() {
