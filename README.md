@@ -45,7 +45,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Seek bar previews**: hovering the seek bar shows a preview frame and the time (and
   chapter name). Chapters show as marks on the seek bar.
 - Playback speed from 0.25× to 3× (pitch-corrected), audio track selection, volume
-  (remembered), fullscreen with controls that hide while playing and stay up while paused.
+  (remembered), fullscreen with controls that float over the video and hide while playing
+  (they stay up while paused or while the pointer rests on them). The cursor also hides over
+  the video when the mouse is still.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
   into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).

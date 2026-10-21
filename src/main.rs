@@ -212,6 +212,8 @@ struct App {
     scrub: Option<f64>,
     last_save: Instant,
     last_activity: Instant,
+    /// Where the floating fullscreen controls were last drawn.
+    controls_rect: Option<egui::Rect>,
     notice: Option<Notice>,
     actions: Vec<Action>,
     durations: DurationProbe,
@@ -256,6 +258,7 @@ impl App {
             scrub: None,
             last_save: Instant::now(),
             last_activity: Instant::now(),
+            controls_rect: None,
             notice: None,
             actions: Vec::new(),
             durations: DurationProbe::new(ctx.clone()),
@@ -1714,24 +1717,20 @@ impl eframe::App for App {
             thumbnails.update(&ctx);
         }
 
-        // In fullscreen, controls appear on mouse movement and hide after a
-        // moment, but stay up while paused or idle.
+        // While a video plays and the mouse is still, the cursor hides over
+        // the video, and in fullscreen so do the controls, which float over
+        // the video there. They stay up while paused and while the pointer
+        // rests on the controls.
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
-        if moved {
+        let hover = ctx.pointer_hover_pos();
+        let over_controls = self.controls_rect.zip(hover).is_some_and(|(r, p)| r.contains(p));
+        if moved || over_controls {
             self.last_activity = Instant::now();
         }
-        let show_chrome = !self.fullscreen
-            || !self.loaded
-            || self.playback.paused
-            || self.last_activity.elapsed() < CONTROLS_HIDE_DELAY;
-        if !show_chrome {
-            ctx.set_cursor_icon(egui::CursorIcon::None);
-        }
+        let idle = self.loaded && !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
 
         if !self.fullscreen {
             egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
-        }
-        if show_chrome {
             egui::Panel::bottom("controls")
                 .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)))
                 .show(ui, |ui| self.controls(ui));
@@ -1748,6 +1747,26 @@ impl eframe::App for App {
             .show(ui, |ui| self.video_area(ui))
             .response
             .rect;
+        self.controls_rect = None;
+        if self.fullscreen && !idle {
+            let area = egui::Area::new(egui::Id::unique("controls-overlay"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(window.left_bottom())
+                .pivot(egui::Align2::LEFT_BOTTOM)
+                .show(&ctx, |ui| {
+                    egui::Frame::NONE
+                        .fill(Color32::from_black_alpha(190))
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            ui.set_width(window.width() - 24.0);
+                            self.controls(ui);
+                        });
+                });
+            self.controls_rect = Some(area.response.rect);
+        }
+        if idle && (self.fullscreen || hover.is_some_and(|p| video.contains(p))) {
+            ctx.set_cursor_icon(egui::CursorIcon::None);
+        }
         // Hidden, but kept open, while switching videos.
         if self.sync_panel && self.loaded {
             self.sync_panel(&ctx, video);
@@ -1765,10 +1784,9 @@ impl eframe::App for App {
         }
         self.apply_actions(&ctx);
 
+        // Also hides the controls and cursor once the mouse stops moving.
         if self.loaded && !self.playback.paused {
             ctx.request_repaint_after(Duration::from_millis(250));
-        } else if self.fullscreen && show_chrome {
-            ctx.request_repaint_after(CONTROLS_HIDE_DELAY);
         }
     }
 
