@@ -18,6 +18,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     by a headless mpv and remembered.
   - Right-click an entry to play it from the start, mark it (un)watched or remove it; the
     trash icon clears the playlist. Files on disk are never touched.
+  - Drag entries to reorder them, or sort the playlist by name, date modified or length
+    (or reverse it) from the sort icon.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
   Videos count as watched at 90% or when they finish. The next one then starts after a
   5-second countdown (turn this off in the ⋯ menu).

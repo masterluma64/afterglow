@@ -81,6 +81,10 @@ enum Action {
     Play(usize),
     Remove(usize),
     ClearPlaylist,
+    /// Moves a playlist entry so it lands before the entry at `to` (or at the end).
+    Move { from: usize, to: usize },
+    Sort(SortBy),
+    ReverseOrder,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     ResetAllProgress,
@@ -104,6 +108,13 @@ enum Action {
     SetSpeed(f64),
     /// Jumps to the next chapter, or back to the start of this or the previous one.
     Chapter { forward: bool },
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum SortBy {
+    Name,
+    Modified,
+    Length,
 }
 
 /// Playback state sampled from mpv once per frame.
@@ -192,6 +203,8 @@ struct App {
     /// Seek-bar previews, started the first time they are needed.
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     up_next: Option<UpNext>,
+    /// The playlist entry being dragged to a new place.
+    drag_row: Option<usize>,
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
 }
@@ -224,6 +237,7 @@ impl App {
             chapters: Vec::new(),
             thumbnails: None,
             up_next: None,
+            drag_row: None,
             confirm_reset: false,
         };
         if !open.is_empty() {
@@ -384,6 +398,36 @@ impl App {
         }
         self.playlist.remove(index);
         self.save_playlist();
+    }
+
+    /// Rearranges the playlist, keeping track of the playing video.
+    fn reorder(&mut self, rearrange: impl FnOnce(&mut Vec<PathBuf>)) {
+        let playing = self.current_path().map(Path::to_path_buf);
+        rearrange(&mut self.playlist);
+        self.current = playing.and_then(|p| self.playlist.iter().position(|q| *q == p));
+        self.save_playlist();
+    }
+
+    fn sort_playlist(&mut self, by: SortBy) {
+        match by {
+            SortBy::Name => self.reorder(|list| {
+                list.sort_by(|a, b| library::natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()))
+            }),
+            SortBy::Modified => self.reorder(|list| {
+                // Oldest first, like episodes saved in the order they came out.
+                list.sort_by_cached_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+            }),
+            SortBy::Length => {
+                let lengths: std::collections::HashMap<PathBuf, f64> =
+                    self.playlist.iter().map(|p| (p.clone(), self.store.get(p).duration)).collect();
+                // Videos of unknown length go last.
+                let key = |p: &PathBuf| match lengths[p] {
+                    d if d > 0.0 => d,
+                    _ => f64::INFINITY,
+                };
+                self.reorder(|list| list.sort_by(|a, b| key(a).total_cmp(&key(b))));
+            }
+        }
     }
 
     fn clear_playlist(&mut self, ctx: &egui::Context) {
@@ -616,6 +660,17 @@ impl App {
             Action::Play(index) => self.play(index, ctx),
             Action::Remove(index) => self.remove(index, ctx),
             Action::ClearPlaylist => self.clear_playlist(ctx),
+            Action::Move { from, to } => self.reorder(|list| move_item(list, from, to)),
+            Action::Sort(by) => {
+                self.sort_playlist(by);
+                let what = match by {
+                    SortBy::Name => "name",
+                    SortBy::Modified => "date modified",
+                    SortBy::Length => "length",
+                };
+                self.notify(format!("Sorted by {what}"));
+            }
+            Action::ReverseOrder => self.reorder(|list| list.reverse()),
             Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include, ctx),
             Action::SetWatched(path, watched) => {
                 if self.loaded && self.current_path() == Some(path.as_path()) {
@@ -856,6 +911,20 @@ impl App {
                     if ui.add(clear).on_hover_text("Clear the playlist (files are not touched)").clicked() {
                         self.actions.push(Action::ClearPlaylist);
                     }
+                    let sort = egui::Button::new(RichText::new(icons::SORT).size(14.0)).frame_when_inactive(false);
+                    let (response, _) = egui::containers::menu::MenuButton::from_button(sort).ui(ui, |ui| {
+                        ui.label(RichText::new("Sort by").small().weak());
+                        for (by, label) in [(SortBy::Name, "Name"), (SortBy::Modified, "Date modified"), (SortBy::Length, "Length")] {
+                            if ui.button(label).clicked() {
+                                self.actions.push(Action::Sort(by));
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("Reverse order").clicked() {
+                            self.actions.push(Action::ReverseOrder);
+                        }
+                    });
+                    response.on_hover_text("Sort the playlist (or drag videos to reorder)");
                 });
             }
         });
@@ -878,6 +947,7 @@ impl App {
         }
         let folder = self.store.folder.clone();
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            let mut rows = Vec::new();
             for (index, path) in self.playlist.iter().enumerate() {
                 // Videos from a subfolder of the opened folder show where they're from.
                 let subfolder = folder.as_deref().and_then(|f| path.parent()?.strip_prefix(f).ok());
@@ -887,9 +957,48 @@ impl App {
                     }
                     _ => display_name(path),
                 };
-                playlist_row(ui, &self.store, &mut self.actions, index, path, &name, self.current == Some(index));
+                let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, &name, self.current == Some(index));
+                if resp.drag_started() {
+                    self.drag_row = Some(index);
+                }
+                rows.push((index, resp.rect));
             }
+            self.drag_rows(ui, &rows);
         });
+    }
+
+    /// While a row is dragged, shows where it would land, and moves it there
+    /// when released.
+    fn drag_rows(&mut self, ui: &mut egui::Ui, rows: &[(usize, egui::Rect)]) {
+        let Some(from) = self.drag_row else { return };
+        let (Some(pointer), Some(&(last, last_rect))) = (ui.ctx().pointer_interact_pos(), rows.last()) else {
+            self.drag_row = None;
+            return;
+        };
+        // Land before the first row whose middle is below the pointer.
+        let (to, y) = match rows.iter().find(|(_, r)| pointer.y < r.center().y) {
+            Some(&(index, rect)) => (index, rect.top()),
+            None => (last + 1, last_rect.bottom()),
+        };
+        let unchanged = to == from || to == from + 1;
+        if !unchanged {
+            let x = last_rect.x_range();
+            ui.painter().hline(x, y, (2.0, ui.visuals().selection.bg_fill));
+        }
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        // Scroll when dragging near the top or bottom edge.
+        let clip = ui.clip_rect();
+        if pointer.y < clip.top() + 24.0 {
+            ui.scroll_with_delta(vec2(0.0, 6.0));
+        } else if pointer.y > clip.bottom() - 24.0 {
+            ui.scroll_with_delta(vec2(0.0, -6.0));
+        }
+        if !ui.input(|i| i.pointer.any_down()) {
+            self.drag_row = None;
+            if !unchanged {
+                self.actions.push(Action::Move { from, to });
+            }
+        }
     }
 
     /// Total and watched running time of the playlist, with a progress bar.
@@ -1346,7 +1455,7 @@ fn playlist_row(
     path: &Path,
     name: &str,
     playing: bool,
-) {
+) -> egui::Response {
     let entry = store.get(path);
     let text = if entry.watched {
         RichText::new(format!("{}  {name}", icons::CHECK)).weak()
@@ -1354,7 +1463,10 @@ fn playlist_row(
         RichText::new(name)
     };
     let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
-    let button = egui::Button::selectable(playing, "").left_text(text).right_text(RichText::new(length).weak());
+    let button = egui::Button::selectable(playing, "")
+        .left_text(text)
+        .right_text(RichText::new(length).weak())
+        .sense(Sense::click_and_drag());
     let resp = ui.add_sized([ui.available_width(), 22.0], button);
     if (!entry.watched && entry.fraction() > 0.0) || entry.resume_position().is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
@@ -1385,6 +1497,7 @@ fn playlist_row(
             actions.push(Action::Remove(index));
         }
     });
+    resp
 }
 
 fn transport_button(icon: &str) -> egui::Button<'static> {
@@ -1419,6 +1532,16 @@ fn format_total(seconds: f64) -> String {
         (h, 0) => format!("{h} h"),
         (h, m) => format!("{h} h {m} min"),
     }
+}
+
+/// Moves the item at `from` so it lands before the item now at `to`, or at
+/// the end when `to` is the length.
+fn move_item<T>(list: &mut Vec<T>, from: usize, to: usize) {
+    if from >= list.len() || to > list.len() {
+        return;
+    }
+    let item = list.remove(from);
+    list.insert(if to > from { to - 1 } else { to }, item);
 }
 
 /// Going back within this many seconds of a chapter's start goes to the
@@ -1471,7 +1594,7 @@ fn format_time(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{chapter_at, chapter_target, format_speed, format_time, format_total, icons, step_speed};
+    use super::{chapter_at, chapter_target, format_speed, format_time, format_total, icons, move_item, step_speed};
     use eframe::egui::{Context, FontFamily, FontId};
 
     #[test]
@@ -1482,6 +1605,22 @@ mod tests {
         assert_eq!(format_total(4.0 * 3600.0 + 12.0 * 60.0 + 20.0), "4 h 12 min");
         assert_eq!(format_time(65.0), "01:05");
         assert_eq!(format_time(3725.0), "1:02:05");
+    }
+
+    #[test]
+    fn moves_items() {
+        let moved = |from, to| {
+            let mut list = vec!['a', 'b', 'c', 'd'];
+            move_item(&mut list, from, to);
+            list.into_iter().collect::<String>()
+        };
+        assert_eq!(moved(0, 2), "bacd", "before c");
+        assert_eq!(moved(3, 1), "adbc", "before b");
+        assert_eq!(moved(1, 4), "acdb", "to the end");
+        assert_eq!(moved(2, 0), "cabd", "to the start");
+        assert_eq!(moved(1, 1), "abcd");
+        assert_eq!(moved(1, 2), "abcd", "before the next one is where it already is");
+        assert_eq!(moved(9, 0), "abcd", "out of range is ignored");
     }
 
     #[test]
@@ -1520,7 +1659,8 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, "—", "·", "…", "−", "×",
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT,
+            "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));

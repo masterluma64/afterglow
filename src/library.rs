@@ -46,7 +46,7 @@ fn collect(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
 }
 
 /// Compares strings so that "Part 2" sorts before "Part 10".
-fn natural_cmp(a: &str, b: &str) -> Ordering {
+pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
     loop {
         match (a.peek().copied(), b.peek().copied()) {
