@@ -122,6 +122,11 @@ enum Action {
     ToggleSidebar,
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
+    CycleAudio,
+    /// Marks the playing video as watched, or unwatched if it is.
+    ToggleWatched,
+    /// Leaves fullscreen, or else closes the subtitle sync panel.
+    Escape,
     LoadSubtitle,
     AdjustSubDelay(f64),
     SetSubDelay(f64),
@@ -239,8 +244,8 @@ struct App {
     /// Whether track choices for this video were changed by hand, so they
     /// are saved as they come in.
     tracks_changed_by_user: bool,
-    /// Whether to announce the subtitle track once mpv reports it.
-    announce_subtitles: bool,
+    /// The kind of track ("sub" or "audio") to announce once mpv reports it.
+    announce_track: Option<&'static str>,
     /// A subtitle step waiting for mpv to report whether there was a line.
     announce_sub_step: Option<&'static str>,
     /// Saved track choices being restored: how many subtitle files are still
@@ -255,6 +260,8 @@ struct App {
     /// Only playlist entries whose name contains this are listed.
     search: String,
     focus_search: bool,
+    /// Which search result Enter plays.
+    search_pick: usize,
     /// Whether the subtitle sync panel is open.
     sync_panel: bool,
     /// When a subtitle line appeared and when it was spoken, for syncing.
@@ -308,7 +315,7 @@ impl App {
             chapters: Vec::new(),
             tracks: Vec::new(),
             tracks_changed_by_user: false,
-            announce_subtitles: false,
+            announce_track: None,
             announce_sub_step: None,
             restoring: None,
             thumbnails: None,
@@ -317,6 +324,7 @@ impl App {
             drag_row: None,
             search: String::new(),
             focus_search: false,
+            search_pick: 0,
             sync_panel: false,
             line_marks: [None, None],
             confirm_reset: false,
@@ -760,10 +768,11 @@ impl App {
             "chapter-list" => self.chapters = mpv::Chapter::list(&value),
             "track-list" => {
                 self.tracks = mpv::Track::list(&value);
-                if std::mem::take(&mut self.announce_subtitles) {
-                    let text = match self.tracks.iter().find(|t| t.kind == "sub" && t.selected) {
-                        Some(track) => format!("Subtitles: {}", track.label),
-                        None => "Subtitles off".into(),
+                if let Some(kind) = self.announce_track.take() {
+                    let what = if kind == "sub" { "Subtitles" } else { "Audio" };
+                    let text = match self.tracks.iter().find(|t| t.kind == kind && t.selected) {
+                        Some(track) => format!("{what}: {}", track.label),
+                        None => format!("{what} off"),
                     };
                     self.notify(text);
                 }
@@ -883,35 +892,49 @@ impl App {
             // egui ignores extra Shift/Alt when matching, so more specific
             // combinations must come before their plain counterparts.
             let mut bindings = vec![
+                // Single keys for everything; the Ctrl combinations are kept
+                // for habit's sake.
                 (M::CTRL | M::SHIFT, Key::O, Action::OpenFolder),
                 (M::CTRL, Key::O, Action::OpenVideos),
                 (M::CTRL, Key::F, Action::FocusSearch),
                 (M::CTRL, Key::Comma, Action::OpenSettings),
+                (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
+                (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
+                (M::ALT, Key::Enter, Action::ToggleFullscreen),
+                (M::NONE, Key::O, Action::OpenFolder),
+                (M::NONE, Key::I, Action::OpenVideos),
+                (M::NONE, Key::Slash, Action::FocusSearch),
+                (M::NONE, Key::E, Action::OpenSettings),
+                (M::NONE, Key::R, Action::RefreshFolder),
                 (M::NONE, Key::F5, Action::RefreshFolder),
                 (M::NONE, Key::Questionmark, Action::ShowHelp),
                 (M::NONE, Key::F1, Action::ShowHelp),
-                (M::ALT, Key::Enter, Action::ToggleFullscreen),
-                (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
-                (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
                 (M::SHIFT, Key::ArrowLeft, Action::SeekBy(-long)),
                 (M::SHIFT, Key::ArrowRight, Action::SeekBy(long)),
+                (M::SHIFT, Key::J, Action::SeekBy(-long)),
+                (M::SHIFT, Key::L, Action::SeekBy(long)),
                 (M::NONE, Key::ArrowLeft, Action::SeekBy(-short)),
                 (M::NONE, Key::ArrowRight, Action::SeekBy(short)),
+                (M::NONE, Key::J, Action::SeekBy(-short)),
+                (M::NONE, Key::L, Action::SeekBy(short)),
                 (M::NONE, Key::ArrowUp, Action::SetVolume((volume + 5.0).min(150.0))),
                 (M::NONE, Key::ArrowDown, Action::SetVolume((volume - 5.0).max(0.0))),
                 (M::NONE, Key::Space, Action::TogglePause),
                 (M::NONE, Key::K, Action::TogglePause),
                 (M::NONE, Key::F11, Action::ToggleFullscreen),
                 (M::NONE, Key::F, Action::ToggleFullscreen),
-                (M::NONE, Key::Escape, Action::ExitFullscreen),
+                (M::NONE, Key::Escape, Action::Escape),
                 (M::NONE, Key::Home, Action::Seek { to: 0.0, exact: true }),
                 (M::NONE, Key::Comma, Action::FrameStep { forward: false }),
                 (M::NONE, Key::Period, Action::FrameStep { forward: true }),
                 (M::NONE, Key::M, Action::ToggleMute),
                 (M::NONE, Key::N, Action::Next),
                 (M::NONE, Key::P, Action::Prev),
+                (M::NONE, Key::W, Action::ToggleWatched),
                 (M::NONE, Key::S, Action::CycleSubtitles),
-                (M::NONE, Key::L, Action::ToggleSidebar),
+                (M::NONE, Key::A, Action::CycleAudio),
+                (M::NONE, Key::T, Action::ToggleSyncPanel),
+                (M::NONE, Key::B, Action::ToggleSidebar),
                 (M::SHIFT, Key::Z, Action::AdjustSubDelay(-1.0)),
                 (M::SHIFT, Key::X, Action::AdjustSubDelay(1.0)),
                 (M::NONE, Key::Z, Action::AdjustSubDelay(-0.1)),
@@ -1075,6 +1098,19 @@ impl App {
                 }
             }
             Action::ToggleSidebar => self.show_sidebar = !self.show_sidebar,
+            Action::Escape => {
+                if self.fullscreen {
+                    self.apply(Action::ExitFullscreen, ctx);
+                } else {
+                    self.sync_panel = false;
+                }
+            }
+            Action::ToggleWatched => {
+                if let Some(path) = self.current_path().map(Path::to_path_buf) {
+                    let watched = self.store.get(&path).watched;
+                    self.apply(Action::SetWatched(path, !watched), ctx);
+                }
+            }
             Action::SetPaused(paused) => {
                 let playing = self.loaded && !self.playback.paused;
                 if playing == paused {
@@ -1098,6 +1134,7 @@ impl App {
                     action,
                     Action::SetTrack { .. }
                         | Action::CycleSubtitles
+                        | Action::CycleAudio
                         | Action::LoadSubtitle
                         | Action::AdjustSubDelay(_)
                         | Action::SetSubDelay(_)
@@ -1145,7 +1182,11 @@ impl App {
             }
             Action::CycleSubtitles if self.loaded => {
                 mpv.send(&["cycle", "sub"]);
-                self.announce_subtitles = true;
+                self.announce_track = Some("sub");
+            }
+            Action::CycleAudio if self.loaded => {
+                mpv.send(&["cycle", "audio"]);
+                self.announce_track = Some("audio");
             }
             Action::LoadSubtitle if self.loaded => {
                 let mut dialog = rfd::FileDialog::new()
@@ -1236,14 +1277,14 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if icon_button(ui, icons::SIDEBAR, "Show or hide the playlist (L)").clicked() {
+            if icon_button(ui, icons::SIDEBAR, "Show or hide the playlist (B)").clicked() {
                 self.actions.push(Action::ToggleSidebar);
             }
             ui.separator();
-            if icon_button(ui, icons::FOLDER_PLUS, "Open folder: replace the playlist with its videos (Ctrl+Shift+O)").clicked() {
+            if icon_button(ui, icons::FOLDER_PLUS, "Open folder: replace the playlist with its videos (O)").clicked() {
                 self.actions.push(Action::OpenFolder);
             }
-            if icon_button(ui, icons::FILE_VIDEO, "Add videos to the playlist (Ctrl+O)").clicked() {
+            if icon_button(ui, icons::FILE_VIDEO, "Add videos to the playlist (I)").clicked() {
                 self.actions.push(Action::OpenVideos);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1266,13 +1307,13 @@ impl App {
                             }
                         });
                     });
-                    let refresh = egui::Button::new(format!("{}  Refresh folder", icons::REFRESH)).shortcut_text("F5");
+                    let refresh = egui::Button::new(format!("{}  Refresh folder", icons::REFRESH)).shortcut_text("R");
                     let tip = "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.";
                     if ui.add_enabled(self.store.folder.is_some(), refresh).on_hover_text(tip).clicked() {
                         self.actions.push(Action::RefreshFolder);
                     }
                     ui.separator();
-                    let settings = egui::Button::new(format!("{}  Settings…", icons::GEAR)).shortcut_text("Ctrl+,");
+                    let settings = egui::Button::new(format!("{}  Settings…", icons::GEAR)).shortcut_text("E");
                     if ui.add(settings).clicked() {
                         self.actions.push(Action::OpenSettings);
                     }
@@ -1557,12 +1598,14 @@ impl App {
             ui.weak("You can also drop them onto the window.");
             return;
         }
-        self.search_box(ui);
         let query = self.search.trim().to_lowercase();
         let folder = self.store.folder.clone();
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-            let mut rows = Vec::new();
-            for (index, path) in self.playlist.iter().enumerate() {
+        // The entries to list, with their names, filtered by the search.
+        let visible: Vec<(usize, String)> = self
+            .playlist
+            .iter()
+            .enumerate()
+            .map(|(index, path)| {
                 // Videos from a subfolder of the opened folder show where they're from.
                 let subfolder = folder.as_deref().and_then(|f| path.parent()?.strip_prefix(f).ok());
                 let name = match subfolder {
@@ -1571,10 +1614,22 @@ impl App {
                     }
                     _ => display_name(path),
                 };
-                if !query.is_empty() && !name.to_lowercase().contains(&query) {
-                    continue;
+                (index, name)
+            })
+            .filter(|(_, name)| query.is_empty() || name.to_lowercase().contains(&query))
+            .collect();
+        self.search_box(ui, &visible);
+        let picked = (!query.is_empty()).then(|| visible.get(self.search_pick).map(|(i, _)| *i)).flatten();
+        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+            let mut rows = Vec::new();
+            for (index, name) in &visible {
+                let (index, path) = (*index, &self.playlist[*index]);
+                let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, name, self.current == Some(index));
+                if picked == Some(index) {
+                    // The search result Enter plays.
+                    ui.painter().rect_stroke(resp.rect, 4.0, (1.5, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+                    resp.scroll_to_me(None);
                 }
-                let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, &name, self.current == Some(index));
                 if resp.drag_started() {
                     self.drag_row = Some(index);
                 }
@@ -1588,21 +1643,49 @@ impl App {
         });
     }
 
-    fn search_box(&mut self, ui: &mut egui::Ui) {
+    /// The search box: / focuses it, ↑/↓ pick a result, Enter plays it and Esc
+    /// clears the search.
+    fn search_box(&mut self, ui: &mut egui::Ui, results: &[(usize, String)]) {
+        let id = egui::Id::unique("playlist-search");
+        if ui.memory(|m| m.has_focus(id)) {
+            let (down, up) = ui.input_mut(|i| {
+                (i.consume_key(egui::Modifiers::NONE, Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, Key::ArrowUp))
+            });
+            let last = results.len().saturating_sub(1);
+            if down {
+                self.search_pick = (self.search_pick + 1).min(last);
+            }
+            if up {
+                self.search_pick = self.search_pick.saturating_sub(1);
+            }
+        }
         ui.horizontal(|ui| {
             let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { 24.0 };
             let edit = egui::TextEdit::singleline(&mut self.search)
-                .hint_text(format!("{}  Search the playlist (Ctrl+F)", icons::SEARCH))
+                .id(id)
+                .hint_text(format!("{}  Search the playlist (/)", icons::SEARCH))
                 .desired_width(width);
             let resp = ui.add(edit);
+            if resp.changed() {
+                self.search_pick = 0;
+            }
             if std::mem::take(&mut self.focus_search) {
                 resp.request_focus();
             }
-            // Esc clears the search; egui has already dropped focus by then.
-            if resp.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
-                self.search.clear();
+            // egui has already dropped focus by the time these show up.
+            if resp.lost_focus() {
+                let (enter, escape) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+                if escape {
+                    self.search.clear();
+                }
+                if enter && !self.search.trim().is_empty() {
+                    if let Some((index, _)) = results.get(self.search_pick) {
+                        self.actions.push(Action::Play(*index));
+                        self.search.clear();
+                    }
+                }
             }
-            if !self.search.is_empty() && icon_button(ui, icons::X, "Clear the search").clicked() {
+            if !self.search.is_empty() && icon_button(ui, icons::X, "Clear the search (Esc)").clicked() {
                 self.search.clear();
             }
         });
@@ -1697,9 +1780,9 @@ impl App {
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let (fs_icon, fs_tip) = if self.fullscreen {
-                    (icons::CORNERS_IN, "Exit fullscreen (F11 or Esc)")
+                    (icons::CORNERS_IN, "Exit fullscreen (F or Esc)")
                 } else {
-                    (icons::CORNERS_OUT, "Fullscreen (F11)")
+                    (icons::CORNERS_OUT, "Fullscreen (F)")
                 };
                 if icon_button(ui, fs_icon, fs_tip).clicked() {
                     self.actions.push(Action::ToggleFullscreen);
@@ -1810,7 +1893,7 @@ impl App {
     }
 
     fn track_menu(&mut self, ui: &mut egui::Ui, kind: &'static str) {
-        let (icon, tip) = if kind == "sub" { (icons::SUBTITLES, "Subtitles (S to cycle)") } else { (icons::WAVEFORM, "Audio track") };
+        let (icon, tip) = if kind == "sub" { (icons::SUBTITLES, "Subtitles (S to cycle)") } else { (icons::WAVEFORM, "Audio track (A to cycle)") };
         ui.add_enabled_ui(self.loaded, |ui| {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
             let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
@@ -1844,7 +1927,7 @@ impl App {
                             self.actions.push(Action::AdjustSubDelay(0.1));
                         }
                     });
-                    if ui.button(format!("{}  Sync subtitles…", icons::TIMER)).clicked() {
+                    if ui.add(egui::Button::new(format!("{}  Sync subtitles…", icons::TIMER)).shortcut_text("T")).clicked() {
                         self.actions.push(Action::ToggleSyncPanel);
                     }
                 }
@@ -2256,38 +2339,41 @@ fn format_total(seconds: f64) -> String {
 const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ("PLAYBACK", &[
         ("Space / K", "Play / pause"),
-        ("\u{E058} / \u{E06C}", "Seek 5 s (Shift: 30 s)"),
+        ("J / L", "Seek back / forward (Shift: further)"),
+        ("\u{E058} / \u{E06C}", "Seek back / forward (Shift: further)"),
         ("Home", "Back to the start"),
         ("0–9", "Jump to 0%–90%"),
         (", / .", "Previous / next frame"),
         ("[ / ]", "Slower / faster"),
         ("Backspace", "Normal speed"),
         ("PgUp / PgDn", "Previous / next chapter"),
-        ("N / P", "Next / previous video"),
     ]),
     ("SOUND", &[
         ("\u{E08E} / \u{E03E}", "Volume"),
         ("M", "Mute"),
+        ("A", "Cycle audio tracks"),
     ]),
     ("SUBTITLES", &[
         ("S", "Cycle subtitles"),
+        ("T", "Sync subtitles panel"),
         ("Z / X", "Delay −/+ 0.1 s (Shift: 1 s)"),
         ("Ctrl+\u{E058} / \u{E06C}", "Show previous / next line now"),
         ("G / H", "Mark subtitle shown / line spoken"),
     ]),
-    ("WINDOW", &[
-        ("F / F11", "Fullscreen"),
-        ("Alt+Enter", "Fullscreen"),
-        ("Esc", "Leave fullscreen"),
-        ("L", "Show or hide the playlist"),
-        ("? / F1", "This overview"),
-        ("Ctrl+,", "Settings"),
-    ]),
     ("PLAYLIST", &[
-        ("Ctrl+Shift+O", "Open folder"),
-        ("Ctrl+O", "Add videos"),
-        ("Ctrl+F", "Search the playlist"),
-        ("F5", "Refresh the folder"),
+        ("N / P", "Next / previous video"),
+        ("W", "Mark watched / unwatched"),
+        ("/", "Search (\u{E08E} \u{E03E} pick, Enter plays)"),
+        ("O", "Open folder"),
+        ("I", "Add videos"),
+        ("R", "Refresh the folder"),
+        ("B", "Show or hide the playlist"),
+    ]),
+    ("WINDOW", &[
+        ("F", "Fullscreen"),
+        ("Esc", "Leave fullscreen, close panels"),
+        ("E", "Settings"),
+        ("?", "This overview"),
     ]),
 ];
 

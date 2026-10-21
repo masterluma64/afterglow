@@ -7,14 +7,14 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 ## Features
 
 - **Playlist**: one playlist in the sidebar, restored on restart.
-  - *Open folder* (Ctrl+Shift+O, or drop a folder) replaces it with the videos in that
+  - *Open folder* (O, or drop a folder) replaces it with the videos in that
     folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
     Tick *Include subfolders* to also pick up videos in subfolders; changing it rescans
     the opened folder right away.
     New videos saved into the folder are added to the end of the playlist by themselves;
-    *Refresh folder* (F5, in the ⋯ menu) also drops videos whose files are gone.
+    *Refresh folder* (R, in the ⋯ menu) also drops videos whose files are gone.
   - The ⋯ menu lists recently opened folders.
-  - *Add videos* (Ctrl+O, or drop videos) appends them; if nothing is playing, the first
+  - *Add videos* (I, or drop videos) appends them; if nothing is playing, the first
     one starts.
   - Each video shows its length, and the header shows how much of the playlist's total
     running time you've watched. Lengths of unplayed videos are read in the background
@@ -24,7 +24,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     disk are never touched.
   - Drag entries to reorder them, or sort the playlist by name, date modified or length
     (or reverse it) from the sort icon.
-  - The search box (Ctrl+F) filters the playlist by name; Esc clears it.
+  - The search box (/) filters the playlist by name; ↑ / ↓ pick a result and Enter plays
+    it. Esc clears it.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
   Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
   5-second countdown (this can be turned off in Settings).
@@ -33,7 +34,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
   `Movie.en.ass`, …) are picked up automatically, with English preferred. The subtitle
   menu switches tracks, loads a subtitle file, or adjusts the delay.
-- **Subtitle sync**: the subtitle menu's *Sync subtitles* panel fixes subtitles that are out
+- **Subtitle sync**: the *Sync subtitles* panel (T, or the subtitle menu) fixes subtitles that are out
   of sync. When you hear a line, show the previous or next subtitle line right now
   (Ctrl+← / Ctrl+→); or mark when a subtitle appears (G) and when the line is actually
   spoken (H) to shift by the difference; or nudge the delay by 0.1 s or 1 s. Subtitles that
@@ -56,7 +57,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
 
-- **Settings** (⋯ menu or Ctrl+,): seek steps, when a video counts as watched, auto-play,
+- **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
   preferred subtitle and audio languages, hardware decoding and the theme.
 
 Afterglow is portable: its state is stored in `data\progress.json` next to `afterglow.exe`,
@@ -82,29 +83,36 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 
 ## Keyboard shortcuts
 
+Nearly everything has a single-key shortcut (the older Ctrl combinations still work). Press `?`
+in the app for an overview.
+
 | Key | Action |
 | --- | --- |
 | Space / K | Play / pause |
-| ← / → | Seek 5 s (Shift: 30 s; adjustable in Settings) |
-| ↑ / ↓ | Volume |
-| M | Mute |
-| N / P | Next / previous video |
-| S | Cycle subtitles |
-| Z / X | Subtitle delay −/+ 0.1 s (Shift: 1 s) |
-| Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
-| G / H | Mark when a subtitle appears / when its line is spoken |
-| F11 / F / Alt+Enter / double-click video | Fullscreen (Esc to exit) |
-| Scroll over the video | Volume |
-| Middle-click the video | Play / pause |
+| J / L or ← / → | Seek 5 s (Shift: 30 s; adjustable in Settings) |
 | Home | Back to the start |
-| PgUp / PgDn | Previous / next chapter |
 | 0–9 | Jump to 0%–90% |
 | , / . | Previous / next frame (pauses) |
 | [ / ] | Slower / faster (Backspace: normal speed) |
-| L | Show or hide the playlist |
-| ? / F1 | Keyboard shortcut overview (also in the ⋯ menu) |
-| Ctrl+, | Settings |
-| Ctrl+Shift+O | Open folder as playlist |
-| Ctrl+O | Add videos to the playlist |
-| Ctrl+F | Search the playlist |
-| F5 | Refresh the playlist's folder |
+| PgUp / PgDn | Previous / next chapter |
+| ↑ / ↓ | Volume |
+| M | Mute |
+| A | Cycle audio tracks |
+| S | Cycle subtitles |
+| T | Subtitle sync panel |
+| Z / X | Subtitle delay −/+ 0.1 s (Shift: 1 s) |
+| Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
+| G / H | Mark when a subtitle appears / when its line is spoken |
+| N / P | Next / previous video |
+| W | Mark the playing video watched / unwatched |
+| / | Search the playlist: ↑ / ↓ pick a result, Enter plays it, Esc clears |
+| O | Open folder as playlist |
+| I | Add videos to the playlist |
+| R | Refresh the playlist's folder |
+| B | Show or hide the playlist |
+| F / double-click video | Fullscreen |
+| Esc | Leave fullscreen, or close the subtitle sync panel |
+| E | Settings |
+| ? | Keyboard shortcut overview (also in the ⋯ menu) |
+| Scroll over the video | Volume |
+| Middle-click the video | Play / pause |
