@@ -685,12 +685,11 @@ impl App {
             if icon_button(ui, icons::SIDEBAR, "Show or hide the playlist (L)").clicked() {
                 self.actions.push(Action::ToggleSidebar);
             }
-            let folder = ui.button(format!("{}  Open folder", icons::FOLDER_PLUS));
-            if folder.on_hover_text("Replace the playlist with a folder's videos (Ctrl+Shift+O)").clicked() {
+            ui.separator();
+            if icon_button(ui, icons::FOLDER_PLUS, "Open folder: replace the playlist with its videos (Ctrl+Shift+O)").clicked() {
                 self.actions.push(Action::OpenFolder);
             }
-            let videos = ui.button(format!("{}  Add videos", icons::FILE_VIDEO));
-            if videos.on_hover_text("Add videos to the playlist (Ctrl+O)").clicked() {
+            if icon_button(ui, icons::FILE_VIDEO, "Add videos to the playlist (Ctrl+O)").clicked() {
                 self.actions.push(Action::OpenVideos);
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1050,18 +1049,6 @@ impl App {
         child.add_space(6.0);
         child.label(RichText::new(title).size(18.0));
         child.weak(hint);
-        child.add_space(10.0);
-        child.horizontal(|ui| {
-            // Center the two buttons.
-            let width = 220.0;
-            ui.add_space((ui.available_width() - width).max(0.0) / 2.0);
-            if ui.button(format!("{}  Open folder", icons::FOLDER_PLUS)).clicked() {
-                self.actions.push(Action::OpenFolder);
-            }
-            if ui.button(format!("{}  Add videos", icons::FILE_VIDEO)).clicked() {
-                self.actions.push(Action::OpenVideos);
-            }
-        });
     }
 
     fn drop_overlay(&self, ctx: &egui::Context, rect: egui::Rect) {
