@@ -27,8 +27,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   menu switches tracks, loads a subtitle file, or adjusts the delay.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.
-- Audio track selection, volume (remembered), fullscreen with controls that hide while
-  playing and stay up while paused.
+- Playback speed from 0.25× to 3× (pitch-corrected), audio track selection, volume
+  (remembered), fullscreen with controls that hide while playing and stay up while paused.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
   into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
@@ -66,6 +66,7 @@ Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fon
 | Home | Back to the start |
 | 0–9 | Jump to 0%–90% |
 | , / . | Previous / next frame (pauses) |
+| [ / ] | Slower / faster (Backspace: normal speed) |
 | L | Show or hide the playlist |
 | Ctrl+Shift+O | Open folder as playlist |
 | Ctrl+O | Add videos to the playlist |

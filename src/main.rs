@@ -96,6 +96,7 @@ enum Action {
     LoadSubtitle,
     AdjustSubDelay(f64),
     FrameStep { forward: bool },
+    SetSpeed(f64),
 }
 
 /// Playback state sampled from mpv once per frame.
@@ -107,6 +108,7 @@ struct Playback {
     muted: bool,
     volume: f64,
     sub_delay: f64,
+    speed: f64,
 }
 
 /// Finds the length of videos that haven't been played yet, on a background
@@ -482,6 +484,7 @@ impl App {
         p.muted = mpv.get_flag("mute");
         p.volume = mpv.get_f64("volume").unwrap_or(p.volume);
         p.sub_delay = mpv.get_f64("sub-delay").unwrap_or(0.0);
+        p.speed = mpv.get_f64("speed").unwrap_or(1.0);
         if self.loaded {
             p.position = mpv.get_f64("time-pos").unwrap_or(p.position);
             p.duration = mpv.get_f64("duration").unwrap_or(0.0);
@@ -503,7 +506,7 @@ impl App {
         if ctx.egui_wants_keyboard_input() || self.confirm_reset {
             return;
         }
-        let Playback { volume, duration, .. } = self.playback;
+        let Playback { volume, duration, speed, .. } = self.playback;
         ctx.input_mut(|i| {
             use egui::Modifiers as M;
             // egui ignores extra Shift/Alt when matching, so more specific
@@ -533,6 +536,9 @@ impl App {
                 (M::NONE, Key::L, Action::ToggleSidebar),
                 (M::NONE, Key::Z, Action::AdjustSubDelay(-0.1)),
                 (M::NONE, Key::X, Action::AdjustSubDelay(0.1)),
+                (M::NONE, Key::OpenBracket, Action::SetSpeed(step_speed(speed, false))),
+                (M::NONE, Key::CloseBracket, Action::SetSpeed(step_speed(speed, true))),
+                (M::NONE, Key::Backspace, Action::SetSpeed(1.0)),
             ];
             // 0–9 jump to 0%–90% of the video.
             let digits = [
@@ -704,6 +710,10 @@ impl App {
             Action::AdjustSubDelay(by) if self.loaded => {
                 let _ = mpv.command(&["add", "sub-delay", &by.to_string()]);
                 self.notify(format!("Subtitle delay {:+.1} s", self.playback.sub_delay + by));
+            }
+            Action::SetSpeed(speed) => {
+                mpv.set("speed", &speed.to_string());
+                self.notify(format!("Speed {}", format_speed(speed)));
             }
             _ => {}
         }
@@ -881,6 +891,7 @@ impl App {
                 }
                 self.track_menu(ui, "sub");
                 self.track_menu(ui, "audio");
+                self.speed_menu(ui);
 
                 let mut volume = volume;
                 let slider = egui::Slider::new(&mut volume, 0.0..=150.0).show_value(false);
@@ -978,6 +989,22 @@ impl App {
             });
             response.on_hover_text(tip);
         });
+    }
+
+    fn speed_menu(&mut self, ui: &mut egui::Ui) {
+        let speed = self.playback.speed;
+        let label = RichText::new(format_speed(speed)).monospace();
+        let label = if speed == 1.0 { label.weak() } else { label.strong() };
+        let button = egui::Button::new(label).frame_when_inactive(false);
+        let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+            ui.label(RichText::new("Speed").small().weak());
+            for preset in SPEEDS {
+                if ui.selectable_label((speed - preset).abs() < 0.001, format_speed(preset)).clicked() {
+                    self.actions.push(Action::SetSpeed(preset));
+                }
+            }
+        });
+        response.on_hover_text("Playback speed ([ and ], Backspace to reset)");
     }
 
     fn video_area(&mut self, ui: &mut egui::Ui) {
@@ -1272,6 +1299,24 @@ fn format_total(seconds: f64) -> String {
     }
 }
 
+const SPEEDS: [f64; 9] = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0];
+
+/// The next preset speed above (or below) `speed`, staying within the presets.
+fn step_speed(speed: f64, up: bool) -> f64 {
+    let next = if up {
+        SPEEDS.iter().copied().find(|&s| s > speed + 0.001)
+    } else {
+        SPEEDS.iter().rev().copied().find(|&s| s < speed - 0.001)
+    };
+    next.unwrap_or(if up { SPEEDS[SPEEDS.len() - 1] } else { SPEEDS[0] })
+}
+
+/// "1×", "1.25×", "0.5×".
+fn format_speed(speed: f64) -> String {
+    let text = format!("{speed:.2}");
+    format!("{}×", text.trim_end_matches('0').trim_end_matches('.'))
+}
+
 fn format_time(seconds: f64) -> String {
     let s = seconds.max(0.0) as u64;
     let (h, m, s) = (s / 3600, (s / 60) % 60, s % 60);
@@ -1280,7 +1325,7 @@ fn format_time(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_time, format_total, icons};
+    use super::{format_speed, format_time, format_total, icons, step_speed};
     use eframe::egui::{Context, FontFamily, FontId};
 
     #[test]
@@ -1294,6 +1339,18 @@ mod tests {
     }
 
     #[test]
+    fn steps_through_speeds() {
+        assert_eq!(format_speed(1.0), "1×");
+        assert_eq!(format_speed(1.25), "1.25×");
+        assert_eq!(format_speed(0.5), "0.5×");
+        assert_eq!(step_speed(1.0, true), 1.25);
+        assert_eq!(step_speed(1.0, false), 0.75);
+        assert_eq!(step_speed(1.1, false), 1.0, "off-preset speeds snap to the next preset");
+        assert_eq!(step_speed(3.0, true), 3.0);
+        assert_eq!(step_speed(0.25, false), 0.25);
+    }
+
+    #[test]
     fn icons_and_text_glyphs_exist() {
         let ctx = Context::default();
         icons::install(&ctx);
@@ -1301,7 +1358,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, "—", "·", "…", "−",
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];
         let has = |family: FontFamily, s: &str| ctx.fonts_mut(|f| f.has_glyphs(&FontId::new(14.0, family), s));
