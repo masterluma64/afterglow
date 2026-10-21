@@ -30,6 +30,7 @@ pub const MORE: &str = "\u{E1FE}";
 pub const WARNING: &str = "\u{E4E0}";
 pub const SORT: &str = "\u{E444}";
 pub const SEARCH: &str = "\u{E30C}";
+pub const CHECKS: &str = "\u{E53A}";
 
 const FILL_FAMILY: &str = "phosphor-fill";
 

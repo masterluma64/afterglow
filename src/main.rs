@@ -88,6 +88,8 @@ enum Action {
     ReverseOrder,
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
+    /// Marks every video before this playlist entry as watched.
+    MarkWatchedBefore(usize),
     ResetAllProgress,
     SetAutoplayNext(bool),
     CancelUpNext,
@@ -698,6 +700,18 @@ impl App {
                 self.store.save();
                 let name = display_name(&path);
                 self.notify(if watched { format!("{name}: marked as watched") } else { format!("{name}: progress reset") });
+            }
+            Action::MarkWatchedBefore(index) => {
+                let before: Vec<PathBuf> = self.playlist.iter().take(index).cloned().collect();
+                for path in &before {
+                    self.store.set_watched(path, true);
+                }
+                if self.loaded && self.current.is_some_and(|c| c < index) {
+                    // Keep the live position from overwriting the change.
+                    self.playback.position = self.playback.duration;
+                }
+                self.store.save();
+                self.notify(format!("Marked {} video{} as watched", before.len(), if before.len() == 1 { "" } else { "s" }));
             }
             Action::ResetAllProgress => {
                 if self.loaded {
@@ -1526,6 +1540,9 @@ fn playlist_row(
         if !entry.watched && ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), true));
         }
+        if index > 0 && ui.button(format!("{}  Mark all above as watched", icons::CHECKS)).clicked() {
+            actions.push(Action::MarkWatchedBefore(index));
+        }
         // Also offered for half-watched videos: resets progress without playing.
         if entry.watched || entry.position > 0.0 {
             let reset = ui.button(format!("{}  Mark as unwatched", icons::RESET)).on_hover_text("Reset its progress to the start");
@@ -1700,7 +1717,7 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH,
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS,
             "—", "·", "…", "−", "×",
         ];
         let fill = [icons::PLAY, icons::PAUSE, icons::SKIP_BACK, icons::SKIP_FORWARD];

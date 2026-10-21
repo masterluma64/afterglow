@@ -16,7 +16,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - Each video shows its length, and the header shows how much of the playlist's total
     running time you've watched. Lengths of unplayed videos are read in the background
     by a headless mpv and remembered.
-  - Right-click an entry to play it from the start, mark it (un)watched or remove it; the
+  - Right-click an entry to play it from the start, mark it (or everything above it)
+    watched, mark it unwatched or remove it; the
     trash icon clears the playlist. Files on disk are never touched.
   - Drag entries to reorder them, or sort the playlist by name, date modified or length
     (or reverse it) from the sort icon.
