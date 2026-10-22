@@ -46,6 +46,11 @@ const MPV_RENDER_PARAM_SW_STRIDE: c_int = 19;
 const MPV_RENDER_PARAM_SW_POINTER: c_int = 20;
 const MPV_RENDER_UPDATE_FRAME: u64 = 1;
 
+/// How soon to repaint for a new video frame. egui turns an immediate request
+/// into two UI passes (to let layout settle); any delay makes it one, which
+/// halves the UI work during playback.
+const NEW_FRAME_REPAINT: std::time::Duration = std::time::Duration::from_micros(1);
+
 #[repr(C)]
 struct RawEvent {
     event_id: c_int,
@@ -732,7 +737,7 @@ unsafe extern "C" fn get_gl_proc_address(ctx: *mut c_void, name: *const c_char) 
 unsafe extern "C" fn on_gl_render_update(ctx: *mut c_void) {
     // Called from mpv's threads; must not call back into mpv.
     let render = unsafe { &*(ctx as *const GlRender) };
-    render.egui_ctx.request_repaint();
+    render.egui_ctx.request_repaint_after(NEW_FRAME_REPAINT);
 }
 
 /// An offscreen texture that mpv draws into, copied to the screen each paint.
@@ -1050,7 +1055,7 @@ fn render_loop(api: &Api, ctx: Ptr, shared: &RenderShared, egui_ctx: &egui::Cont
             continue;
         }
         *shared.frame.lock().unwrap() = Some(image);
-        egui_ctx.request_repaint();
+        egui_ctx.request_repaint_after(NEW_FRAME_REPAINT);
     }
 }
 
