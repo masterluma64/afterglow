@@ -165,6 +165,7 @@ impl App {
 
     pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
         self.stop(ctx);
+        self.store.adopt_moved(&list);
         self.playlist = list;
         self.show_sidebar = true;
         self.save_playlist();
@@ -180,6 +181,7 @@ impl App {
         if videos.is_empty() {
             return;
         }
+        self.store.adopt_moved(&videos);
         let mut first = None;
         let mut added = 0;
         for video in videos {
@@ -222,10 +224,15 @@ impl App {
     /// Takes in background rescans of the playlist's folder.
     /// Drops the playlist entries whose files were found missing at startup.
     pub(crate) fn receive_missing_files(&mut self) {
-        let Some(missing) = self.missing_files.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
+        let Some(FileCheck { missing, sizes }) = self.missing_files.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
         self.missing_files = None;
-        let playing = self.current_path().map(Path::to_path_buf);
-        self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
+        for (path, size) in sizes {
+            self.store.set_size(&path, size);
+        }
+        if !missing.is_empty() {
+            let playing = self.current_path().map(Path::to_path_buf);
+            self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
+        }
     }
 
     pub(crate) fn receive_scans(&mut self) {
@@ -239,19 +246,28 @@ impl App {
     /// Adds the videos that aren't in the playlist yet to its end, returning
     /// how many there were.
     pub(crate) fn append_new(&mut self, found: Vec<PathBuf>) -> usize {
-        let new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
+        let mut new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
         if new.is_empty() {
             return 0;
         }
-        let count = new.len();
         self.names.clear();
         self.summary = None;
+        // A renamed or moved video takes the place of its old path.
+        for (old, path) in self.store.adopt_moved(&new) {
+            if let Some(i) = self.playlist.iter().position(|p| *p == old) {
+                self.playlist[i] = path.clone();
+                new.retain(|p| *p != path);
+            }
+        }
+        let count = new.len();
         // Appending shifts no indices, so a countdown to the next video stays.
         self.playlist.extend(new);
         self.store.set_playlist(&self.playlist);
         self.request_durations();
         self.store.save();
-        self.notify(format!("{count} new video{} in the folder", if count == 1 { "" } else { "s" }));
+        if count > 0 {
+            self.notify(format!("{count} new video{} in the folder", if count == 1 { "" } else { "s" }));
+        }
         count
     }
 
@@ -263,11 +279,12 @@ impl App {
             Ok(found) => found,
             Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
         };
+        // New videos first, so renamed ones can take their old place.
+        let added = self.append_new(found);
         let before = self.playlist.len();
         let playing = self.current_path().map(Path::to_path_buf);
         self.reorder(|list| list.retain(|p| p.is_file() || Some(p) == playing.as_ref()));
         let removed = before - self.playlist.len();
-        let added = self.append_new(found);
         let plural = |n: usize| if n == 1 { "" } else { "s" };
         self.notify(match (added, removed) {
             (0, 0) => "No changes in the folder".to_string(),

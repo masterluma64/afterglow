@@ -155,6 +155,13 @@ struct Peek {
 }
 
 /// The video that starts by itself once the countdown ends.
+/// What the startup check found about the playlist's files.
+#[derive(Default)]
+struct FileCheck {
+    missing: HashSet<PathBuf>,
+    sizes: Vec<(PathBuf, u64)>,
+}
+
 struct UpNext {
     index: usize,
     at: Instant,
@@ -213,7 +220,7 @@ struct App {
     up_next: Option<UpNext>,
     watch: watch::FolderWatch,
     /// Playlist files found missing at startup.
-    missing_files: Option<Receiver<HashSet<PathBuf>>>,
+    missing_files: Option<Receiver<FileCheck>>,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
     /// Only playlist entries whose name contains this are listed.
@@ -269,12 +276,21 @@ impl App {
         let playlist: Vec<PathBuf> = store.playlist.clone();
         // Files that disappeared since last time are dropped from the playlist,
         // checked in the background since a network drive can take a while.
+        // The sizes of the others are noted, to recognize them once moved.
         let missing_files = {
             let (tx, rx) = mpsc::channel();
             let (paths, ctx) = (playlist.clone(), ctx.clone());
             let spawned = std::thread::Builder::new().name("check-files".into()).spawn(move || {
-                let missing: HashSet<PathBuf> = paths.into_iter().filter(|p| !p.is_file()).collect();
-                if !missing.is_empty() && tx.send(missing).is_ok() {
+                let mut found = FileCheck::default();
+                for path in paths {
+                    match std::fs::metadata(&path) {
+                        Ok(meta) if meta.is_file() => found.sizes.push((path, meta.len())),
+                        _ => {
+                            found.missing.insert(path);
+                        }
+                    }
+                }
+                if tx.send(found).is_ok() {
                     ctx.request_repaint();
                 }
             });

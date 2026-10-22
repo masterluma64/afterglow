@@ -16,9 +16,17 @@ pub struct Entry {
     pub position: f64,
     pub duration: f64,
     pub watched: bool,
+    /// The file's size in bytes, to recognize it after it is moved or renamed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
 }
 
 impl Entry {
+    /// Whether it has been (partly) watched.
+    fn has_progress(&self) -> bool {
+        self.watched || self.position > 0.0
+    }
+
     /// Where playback should resume, if anywhere, given the fraction of a
     /// video after which it counts as watched.
     fn resume_position(&self, watched_fraction: f64) -> Option<f64> {
@@ -345,6 +353,65 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Records a video file's size, by which it is recognized if it is moved
+    /// or renamed.
+    pub fn set_size(&mut self, path: &Path, size: u64) {
+        let entry = self.entries.entry(key(path)).or_default();
+        if entry.size != Some(size) {
+            entry.size = Some(size);
+            self.dirty = true;
+        }
+    }
+
+    /// Carries progress over to videos that were moved or renamed. Each of
+    /// `paths` without progress of its own takes that of a remembered video
+    /// with exactly the same size whose file is gone, if just one such video
+    /// and one such path have that size. Track choices go along. Also records
+    /// the sizes of `paths`. Returns the recognized videos' old and new paths.
+    pub fn adopt_moved(&mut self, paths: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
+        let mut unknown: HashMap<u64, Vec<&PathBuf>> = HashMap::new();
+        for path in paths {
+            let entry = self.entries.get(&key(path)).copied();
+            // A size recorded for this path means the file was seen here before.
+            if entry.is_some_and(|e| e.size.is_some()) {
+                continue;
+            }
+            let known = entry.is_some_and(|e| e.has_progress()) || self.tracks.contains_key(&key(path));
+            let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else { continue };
+            self.set_size(path, size);
+            if !known {
+                unknown.entry(size).or_default().push(path);
+            }
+        }
+        if unknown.is_empty() {
+            return Vec::new();
+        }
+        let mut remembered: HashMap<u64, Vec<String>> = HashMap::new();
+        for (k, entry) in &self.entries {
+            let worth_keeping = entry.has_progress() || self.tracks.contains_key(k);
+            if let Some(size) = entry.size.filter(|s| worth_keeping && unknown.contains_key(s)) {
+                remembered.entry(size).or_default().push(k.clone());
+            }
+        }
+        let mut adopted = Vec::new();
+        for (size, keys) in remembered {
+            let [path] = unknown[&size][..] else { continue };
+            let gone: Vec<String> = keys.into_iter().filter(|k| !Path::new(k).exists()).collect();
+            let [old] = &gone[..] else { continue };
+            if let Some(entry) = self.entries.remove(old) {
+                self.entries.insert(key(path), entry);
+            }
+            if let Some(tracks) = self.tracks.remove(old) {
+                self.tracks.insert(key(path), tracks);
+            }
+            adopted.push((PathBuf::from(old), path.clone()));
+        }
+        if !adopted.is_empty() {
+            self.dirty = true;
+        }
+        adopted
+    }
+
     pub fn set_playlist(&mut self, playlist: &[PathBuf]) {
         self.playlist = playlist.to_vec();
         self.dirty = true;
@@ -462,6 +529,46 @@ impl Drop for Saver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_moved_and_renamed_videos() {
+        let dir = std::env::temp_dir().join(format!("afterglow-moved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = |name: &str, size: usize| {
+            let path = dir.join(name);
+            std::fs::write(&path, vec![0u8; size]).unwrap();
+            path
+        };
+        let mut store = Store::default();
+        let gone = dir.join("old name.mkv");
+        store.update_position(&gone, 60.0, 600.0);
+        store.set_size(&gone, 10);
+        store.tracks_mut(&gone).subtitle = Some("2".into());
+        let still_there = file("still there.mkv", 20);
+        store.set_watched(&still_there, true);
+        store.set_size(&still_there, 20);
+        // Two gone videos of the same size: can't tell which is which.
+        for name in ["twin 1.mkv", "twin 2.mkv"] {
+            store.set_watched(&dir.join(name), true);
+            store.set_size(&dir.join(name), 30);
+        }
+
+        let renamed = file("new name.mkv", 10);
+        let copy = file("copy.mkv", 20);
+        let seen = file("seen before.mkv", 10);
+        store.set_size(&seen, 10);
+        let twin = file("twin.mkv", 30);
+        let adopted = store.adopt_moved(&[renamed.clone(), copy.clone(), twin.clone(), seen.clone()]);
+        assert_eq!(adopted, [(gone.clone(), renamed.clone())], "a video seen at its path before is no candidate");
+        assert_eq!(store.get(&renamed).position, 60.0);
+        assert_eq!(store.tracks(&renamed).and_then(|t| t.subtitle.as_deref()), Some("2"));
+        assert!(store.entries.get(&key(&gone)).is_none());
+        assert!(!store.get(&copy).watched, "a video whose file still exists keeps its progress to itself");
+        assert!(!store.get(&twin).watched, "ambiguous matches are left alone");
+        assert_eq!(store.get(&copy).size, Some(20), "sizes of new videos are recorded");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn reset_progress_keeps_lengths_and_playlist() {

@@ -34,6 +34,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - The search box (/) filters the playlist by name; ↑ / ↓ pick a result and Enter plays
     it. Esc clears it.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
+  Moving or renaming a video keeps its progress and track choices: it is recognized by its
+  exact file size once it shows up in the playlist again (if no other video has that size).
   Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
   5-second countdown (this can be turned off in Settings).
   On startup the video you were watching is opened, paused on the exact frame where you
