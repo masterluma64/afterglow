@@ -100,7 +100,7 @@ fn main() -> eframe::Result {
         renderer: if software { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow },
         ..Default::default()
     };
-    let open: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
+    let open = absolute_paths(std::env::args_os().skip(1));
     let result = eframe::run_native(
         APP_NAME,
         options,
@@ -625,6 +625,13 @@ fn set_spacing(ctx: &egui::Context) {
     });
 }
 
+/// Paths from the command line, made absolute: the playlist and progress are
+/// remembered by path, and a relative one would mean something else once
+/// Afterglow is started from another folder.
+fn absolute_paths(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<PathBuf> {
+    args.map(PathBuf::from).map(|p| std::path::absolute(&p).unwrap_or(p)).collect()
+}
+
 fn display_name(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }
@@ -714,6 +721,14 @@ mod tests {
         assert_eq!(format_total(4.0 * 3600.0 + 12.0 * 60.0 + 20.0), "4 h 12 min");
         assert_eq!(format_time(65.0), "01:05");
         assert_eq!(format_time(3725.0), "1:02:05");
+    }
+
+    #[test]
+    fn makes_command_line_paths_absolute() {
+        let cwd = std::env::current_dir().unwrap();
+        let args = ["Shows\\Foo", "D:\\Movies\\Bar.mkv"].map(std::ffi::OsString::from);
+        let paths = absolute_paths(args.into_iter());
+        assert_eq!(paths, [cwd.join("Shows\\Foo"), PathBuf::from("D:\\Movies\\Bar.mkv")]);
     }
 
     #[test]
