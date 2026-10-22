@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod app_icon;
 mod icons;
 mod library;
 mod media_keys;
@@ -43,6 +44,13 @@ const SUB_RESTORE_TAG: u64 = 2;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 
+/// The icon in the title bar and taskbar (the executable's own icon is built
+/// in by build.rs).
+fn window_icon() -> egui::IconData {
+    const SIZE: u32 = 64;
+    egui::IconData { rgba: app_icon::render(SIZE), width: SIZE, height: SIZE }
+}
+
 /// Set to run without OpenGL: the UI uses wgpu and video is rendered in software.
 const SOFTWARE_VIDEO_ENV: &str = "AFTERGLOW_SOFTWARE_VIDEO";
 
@@ -54,7 +62,8 @@ fn main() -> eframe::Result {
             .with_title(APP_NAME)
             .with_inner_size([1280.0, 760.0])
             .with_min_inner_size([480.0, 300.0])
-            .with_drag_and_drop(true),
+            .with_drag_and_drop(true)
+            .with_icon(std::sync::Arc::new(window_icon())),
         renderer: if software { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow },
         ..Default::default()
     };

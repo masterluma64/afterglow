@@ -1,3 +1,5 @@
+<img src="assets/icon.png" width="96" alt="">
+
 # Afterglow
 
 A minimalist video player that remembers where you left off, written in Rust with
@@ -86,6 +88,8 @@ To distribute, ship `afterglow.exe` together with `libmpv-2.dll`, in a folder th
 write to (the `data` folder is created next to them).
 
 Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fonts`.
+The app icon is drawn in code (`src/app_icon.rs`); `cargo run --example make_icon`
+regenerates `assets/icon.ico`, which the build script puts into the executable.
 
 ## Keyboard shortcuts
 

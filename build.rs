@@ -1,8 +1,17 @@
-//! Copies the vendored libmpv DLL next to the built executable.
+//! Builds the app icon into the executable and copies the vendored libmpv DLL
+//! next to it.
 
 use std::path::PathBuf;
 
 fn main() {
+    // The icon Explorer, shortcuts and the taskbar show for afterglow.exe.
+    // Regenerate assets/icon.ico with `cargo run --example make_icon`.
+    println!("cargo:rerun-if-changed=assets/afterglow.rc");
+    println!("cargo:rerun-if-changed=assets/icon.ico");
+    if let Err(e) = embed_resource::compile("assets/afterglow.rc", embed_resource::NONE).manifest_optional() {
+        println!("cargo:warning=could not build the app icon into the executable: {e}");
+    }
+
     let src = PathBuf::from("vendor/libmpv-2.dll");
     println!("cargo:rerun-if-changed={}", src.display());
     if !src.exists() {

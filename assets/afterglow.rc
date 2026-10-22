@@ -1,0 +1,2 @@
+// Windows resources built into afterglow.exe (see build.rs).
+1 ICON "icon.ico"
