@@ -1,11 +1,12 @@
-# Builds Afterglow and zips it with libmpv into dist\, ready to run on another
-# PC: dist\afterglow-<version>-windows-x64.zip.
+# Builds Afterglow, with libmpv packed into the exe, ready to run on another
+# PC: dist\afterglow-<version>-windows-x64.exe on its own, and a zip of it
+# with the README and a notice.
 #
 #   scripts\package.cmd               (or double-click it)
 #   scripts\package.cmd -SkipTests
 #
 # Needs vendor\libmpv-2.dll (see Building in the README). The version comes
-# from Cargo.toml; building the same version again replaces its zip.
+# from Cargo.toml; building the same version again replaces them.
 param([switch]$SkipTests)
 
 $ErrorActionPreference = 'Stop'
@@ -36,8 +37,6 @@ if (-not $SkipTests) {
     Run 'Testing' { cargo test --release }
 }
 Run 'Building' { cargo build --release }
-# The copy that ships, which the build script put next to the exe.
-Check-Libmpv target\release\libmpv-2.dll
 
 $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
 $commit = git rev-parse --short HEAD
@@ -47,14 +46,17 @@ $mpv = (Get-Item vendor\libmpv-2.dll).VersionInfo.ProductVersion
 $name = "afterglow-$version"
 $folder = Join-Path dist $name
 $zip = Join-Path dist "$name-windows-x64.zip"
-Remove-Item -Recurse -Force $folder, $zip -ErrorAction SilentlyContinue
+$exe = Join-Path dist "$name-windows-x64.exe"
+Remove-Item -Recurse -Force $folder, $zip, $exe -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $folder | Out-Null
-Copy-Item target\release\afterglow.exe, target\release\libmpv-2.dll, README.md $folder
+Copy-Item target\release\afterglow.exe $exe
+Copy-Item target\release\afterglow.exe, README.md $folder
 @"
 Afterglow $version, built from commit $commit.
 This build of Afterglow is for private use only; please don't share it.
 
-libmpv-2.dll is mpv $mpv (https://mpv.io), as built by
+The libmpv packed into afterglow.exe (unpacked into its data folder on the
+first start) is mpv $mpv (https://mpv.io), as built by
 https://github.com/shinchiro/mpv-winbuild-cmake. It is a GPL build: mpv and
 the FFmpeg libraries in it are free software under the GNU GPL and LGPL.
 Their source code and exact license terms are at
@@ -66,5 +68,7 @@ The icons are Phosphor (https://phosphoricons.com), under the MIT license.
 Compress-Archive -Path $folder -DestinationPath $zip
 Remove-Item -Recurse -Force $folder
 
-$size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
-Write-Host "== Done: $zip ($size MB)" -ForegroundColor Green
+function Size($path) { [math]::Round((Get-Item $path).Length / 1e6, 1) }
+# The exe is meant to stay under 50 MB.
+if ((Get-Item $exe).Length -ge 50e6) { Write-Host "Warning: the exe is 50 MB or more" -ForegroundColor Yellow }
+Write-Host "== Done: $exe ($(Size $exe) MB) and $zip ($(Size $zip) MB)" -ForegroundColor Green

@@ -7,6 +7,7 @@ edition = "2024"
 dirs = "7.0.0"
 eframe = { version = "0.37.0", features = ["glow"] }
 libloading = "0.9.0"
+liblzma = "0.4.9"
 raw-window-handle = "0.6.2"
 rfd = "0.17.2"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -15,3 +16,13 @@ souvlaki = { version = "0.8.3", default-features = false }
 
 [build-dependencies]
 embed-resource = "3.0.12"
+liblzma = "0.4.9"
+
+[profile.release]
+# Smaller and a bit faster.
+lto = true
+codegen-units = 1
+
+[profile.release.build-override]
+# The build script packs libmpv with xz, which is slow unoptimized.
+opt-level = 3

@@ -103,7 +103,9 @@ so the whole folder can be moved or carried on a USB stick. Data from earlier ve
 
 Requires `libmpv-2.dll` in `vendor/` (from the `mpv-dev-x86_64-*.7z` archive at
 <https://github.com/shinchiro/mpv-winbuild-cmake/releases>). The build script copies it
-next to the executable. The build Afterglow is tested with is release
+next to the executable, and release builds also pack it into the executable, compressed with
+xz (this takes a minute or two the first time, and again only when the DLL changes).
+The build Afterglow is tested with is release
 [20261016](https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261016), and
 `vendor/libmpv-2.dll.sha256` pins it: since libmpv decodes every video Afterglow opens, the
 packaging script below only ships that exact DLL. To update libmpv, test the new one and put
@@ -114,14 +116,16 @@ cargo run --release
 cargo run --release -- "D:\Shows\Foo"    # play a folder
 ```
 
-To run it elsewhere, keep `afterglow.exe` and `libmpv-2.dll` together in a folder the user
-can write to (the `data` folder is created next to them).
+A release `afterglow.exe` runs on its own: on the first start it unpacks libmpv into its
+`data` folder (about 120 MB, taking a second or two), and uses that from then on. A
+`libmpv-2.dll` next to the exe is used instead if there is one. Put the exe in a folder the
+user can write to, since the `data` folder is created next to it.
 
-To make a zip of it, run `scripts\package.cmd` (or double-click it). It runs the tests,
-builds, and writes `dist\afterglow-<version>-windows-x64.zip` with the exe, the DLL, this
-README and a notice saying which commit and libmpv it was built from. The version comes
-from `Cargo.toml`; building the same version again replaces its zip. `-SkipTests` skips the
-tests.
+To package it, run `scripts\package.cmd` (or double-click it). It runs the tests, builds,
+and writes `dist\afterglow-<version>-windows-x64.exe` (just under 50 MB), plus a zip with
+the exe, this README and a notice saying which commit and libmpv it was built from. The
+version comes from `Cargo.toml`; building the same version again replaces them.
+`-SkipTests` skips the tests.
 
 **Licensing:** Afterglow is closed source and meant for private use. The libmpv builds it
 uses (from shinchiro) are GPL builds, so don't share builds publicly while that's the
