@@ -188,7 +188,6 @@ struct Peek {
     left_at: Option<Instant>,
 }
 
-/// The video that starts by itself once the countdown ends.
 /// What the startup check found about the playlist's files.
 #[derive(Default)]
 struct FileCheck {
@@ -196,6 +195,7 @@ struct FileCheck {
     sizes: Vec<(PathBuf, u64)>,
 }
 
+/// The video that starts by itself once the countdown ends.
 struct UpNext {
     index: usize,
     at: Instant,
