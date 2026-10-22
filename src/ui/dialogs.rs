@@ -36,6 +36,7 @@ impl App {
     pub(crate) fn sync_panel(&mut self, ctx: &egui::Context, video: egui::Rect) {
         let mut open = self.sync_panel;
         let Playback { sub_delay, sub_speed, .. } = self.playback;
+        let subtitles_on = self.tracks.iter().any(|t| t.kind == "sub" && t.selected);
         egui::Window::new("Sync subtitles")
             .open(&mut open)
             .collapsible(false)
@@ -43,61 +44,97 @@ impl App {
             .default_pos(video.left_bottom() + vec2(16.0, -16.0))
             .pivot(egui::Align2::LEFT_BOTTOM)
             .show(ctx, |ui| {
-                ui.set_width(330.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("Delay {sub_delay:+.1} s")).strong());
-                    for (by, label, tip) in [
-                        (-1.0, "−1 s", "Show subtitles 1 s earlier (Shift+Z)"),
-                        (-0.1, "−0.1", "Show subtitles 0.1 s earlier (Z)"),
-                        (0.1, "+0.1", "Show subtitles 0.1 s later (X)"),
-                        (1.0, "+1 s", "Show subtitles 1 s later (Shift+X)"),
-                    ] {
-                        if ui.small_button(label).on_hover_text(tip).clicked() {
-                            self.actions.push(Action::AdjustSubDelay(by));
+                ui.set_width(360.0);
+                // Roomier buttons, like the menus.
+                ui.spacing_mut().button_padding = vec2(12.0, 6.0);
+                let hint = |ui: &mut egui::Ui, text: &str| ui.label(RichText::new(text).small().weak());
+                if !subtitles_on {
+                    let warning = format!("{}  Subtitles are off: turn them on first (S).", icons::WARNING);
+                    ui.label(RichText::new(warning).color(ui.visuals().warn_fg_color));
+                    ui.add_space(6.0);
+                }
+
+                card(ui, "1  ·  SHIFT ALL SUBTITLES", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{sub_delay:+.1} s")).size(20.0).strong());
+                        let state = match sub_delay {
+                            d if d > 0.0 => "shown later than in the file",
+                            d if d < 0.0 => "shown earlier than in the file",
+                            _ => "as timed in the file",
+                        };
+                        ui.weak(state);
+                        if sub_delay != 0.0 {
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui.button(format!("{}  Reset", icons::RESET)).on_hover_text("Back to the file's timing").clicked() {
+                                    self.actions.push(Action::SetSubDelay(0.0));
+                                }
+                            });
                         }
-                    }
-                    if sub_delay != 0.0 && ui.small_button(icons::RESET).on_hover_text("No delay").clicked() {
-                        self.actions.push(Action::SetSubDelay(0.0));
-                    }
+                    });
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        for (by, label, tip) in [
+                            (-1.0, "−1 s", "Shift+Z"),
+                            (-0.1, "−0.1 s", "Z"),
+                            (0.1, "+0.1 s", "X"),
+                            (1.0, "+1 s", "Shift+X"),
+                        ] {
+                            if ui.button(label).on_hover_text(tip).clicked() {
+                                self.actions.push(Action::AdjustSubDelay(by));
+                            }
+                        }
+                    });
+                    hint(ui, "Subtitles too late? Press −. Too early? Press +.");
                 });
-                ui.add_space(8.0);
-                ui.label(RichText::new("When you hear a line, show its subtitle now").small().weak());
-                ui.horizontal(|ui| {
-                    if ui.button("Previous line").on_hover_text("For subtitles that came too early (Ctrl+\u{E058})").clicked() {
-                        self.actions.push(Action::SubStep(-1));
-                    }
-                    if ui.button("Next line").on_hover_text("For subtitles that haven't appeared yet (Ctrl+\u{E06C})").clicked() {
-                        self.actions.push(Action::SubStep(1));
-                    }
+                ui.add_space(6.0);
+
+                card(ui, "2  ·  OR MATCH THE LINE YOU JUST HEARD", |ui| {
+                    ui.horizontal(|ui| {
+                        let previous = format!("{}  Previous line", icons::ARROW_LEFT);
+                        if ui.button(previous).on_hover_text("Its subtitle already went by (Ctrl+\u{E058})").clicked() {
+                            self.actions.push(Action::SubStep(-1));
+                        }
+                        let next = format!("Next line  {}", icons::ARROW_RIGHT);
+                        if ui.button(next).on_hover_text("Its subtitle hasn't shown yet (Ctrl+\u{E06C})").clicked() {
+                            self.actions.push(Action::SubStep(1));
+                        }
+                    });
+                    hint(ui, "Shifts the subtitles so that line shows right now.");
                 });
-                ui.add_space(8.0);
-                ui.label(RichText::new("Or mark one line, in either order").small().weak());
-                ui.horizontal(|ui| {
-                    let mark = |marked: Option<f64>, label: &str| match marked {
-                        Some(at) => format!("{}  {label} at {}", icons::CHECK, format_time(at)),
-                        None => label.to_string(),
-                    };
+                ui.add_space(6.0);
+
+                card(ui, "3  ·  OR MEASURE ONE LINE", |ui| {
                     let [appeared, spoken] = self.line_marks;
-                    if ui.button(mark(appeared, "Subtitle appeared")).on_hover_text("G").clicked() {
-                        self.actions.push(Action::MarkLine { spoken: false });
-                    }
-                    if ui.button(mark(spoken, "Line spoken")).on_hover_text("H").clicked() {
-                        self.actions.push(Action::MarkLine { spoken: true });
-                    }
-                });
-                ui.add_space(8.0);
-                ui.label(RichText::new("Drifting further out of sync over time?").small().weak());
-                ui.horizontal(|ui| {
-                    for (speed, label) in SUB_TIMINGS {
-                        let selected = (sub_speed - speed).abs() < 1e-6;
-                        let text = label[..1].to_uppercase() + &label[1..];
-                        if ui.selectable_label(selected, text).clicked() && !selected {
-                            self.actions.push(Action::SetSubSpeed(speed));
+                    let mark = |marked: Option<f64>, label: &str, key: &str| match marked {
+                        Some(at) => format!("{}  {label} at {}", icons::CHECK, format_time(at)),
+                        None => format!("{label}  ({key})"),
+                    };
+                    ui.horizontal(|ui| {
+                        if ui.button(mark(appeared, "Subtitle appears", "G")).clicked() {
+                            self.actions.push(Action::MarkLine { spoken: false });
                         }
-                    }
+                        if ui.button(mark(spoken, "Line is spoken", "H")).clicked() {
+                            self.actions.push(Action::MarkLine { spoken: true });
+                        }
+                    });
+                    hint(ui, "Press each as it happens, in either order; the subtitles then shift by the difference.");
                 });
-                ui.add_space(4.0);
-                ui.weak("Changes are remembered for this video.");
+                ui.add_space(6.0);
+
+                card(ui, "DRIFTING FURTHER OFF OVER TIME?", |ui| {
+                    ui.horizontal(|ui| {
+                        for (speed, label) in SUB_TIMINGS {
+                            let selected = (sub_speed - speed).abs() < 1e-6;
+                            let text = label[..1].to_uppercase() + &label[1..];
+                            if ui.selectable_label(selected, text).clicked() && !selected {
+                                self.actions.push(Action::SetSubSpeed(speed));
+                            }
+                        }
+                    });
+                    hint(ui, "For subtitles made for a video with another frame rate.");
+                });
+                ui.add_space(6.0);
+                hint(ui, "Changes are remembered for this video.");
             });
         self.sync_panel = open;
     }
@@ -128,100 +165,112 @@ impl App {
         let mut autoplay = self.store.autoplay_next;
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
-            ui.set_width(420.0);
+            ui.set_width(470.0);
             ui.label(RichText::new("Settings").size(18.0).strong());
             ui.add_space(10.0);
-            let section = |ui: &mut egui::Ui, title: &str| {
-                ui.label(RichText::new(title).small().weak());
-                ui.end_row();
-            };
-            egui::Grid::new("settings").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
-                section(ui, "PLAYBACK");
-                ui.label("Seek step");
-                ui.add(egui::DragValue::new(&mut settings.seek_short).range(1.0..=120.0).suffix(" s").speed(0.2));
-                ui.end_row();
-                ui.label("Seek step with Shift");
-                ui.add(egui::DragValue::new(&mut settings.seek_long).range(1.0..=600.0).suffix(" s").speed(1.0));
-                ui.end_row();
-                ui.label("Count as watched at");
-                ui.add(egui::Slider::new(&mut settings.watched_percent, 50.0..=100.0).suffix("%").integer());
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut autoplay, "Play the next video automatically");
-                ui.end_row();
-                ui.label("");
-                ui.checkbox(&mut settings.level_volume, "Even out the volume")
-                    .on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter");
-                ui.end_row();
-                ui.label("Dropped videos")
-                    .on_hover_text("What dropping videos onto the window does (dropped folders always replace the playlist)");
-                ui.horizontal(|ui| {
-                    use progress::DroppedVideos as D;
-                    for (choice, label) in [(None, "Ask"), (Some(D::Add), "Add to playlist"), (Some(D::Replace), "Replace playlist")] {
-                        ui.selectable_value(&mut settings.dropped_videos, choice, label);
-                    }
+            // Labels as wide in every card, so the controls line up.
+            let grid = |id: &str| egui::Grid::new(id).num_columns(2).spacing([16.0, 10.0]).min_col_width(150.0);
+            let max_height = (ui.ctx().content_rect().height() - 180.0).max(200.0);
+            egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
+                card(ui, "PLAYBACK", |ui| {
+                    grid("settings-playback").show(ui, |ui| {
+                        ui.label("Seek step");
+                        ui.add(egui::DragValue::new(&mut settings.seek_short).range(1.0..=120.0).suffix(" s").speed(0.2));
+                        ui.end_row();
+                        ui.label("Seek step with Shift");
+                        ui.add(egui::DragValue::new(&mut settings.seek_long).range(1.0..=600.0).suffix(" s").speed(1.0));
+                        ui.end_row();
+                        ui.label("Count as watched at");
+                        ui.add(egui::Slider::new(&mut settings.watched_percent, 50.0..=100.0).suffix("%").integer());
+                        ui.end_row();
+                        ui.label("Next video");
+                        ui.checkbox(&mut autoplay, "Play it automatically");
+                        ui.end_row();
+                        ui.label("Volume");
+                        ui.checkbox(&mut settings.level_volume, "Even it out (night mode)")
+                            .on_hover_text("Quiet dialogue gets louder and loud scenes quieter");
+                        ui.end_row();
+                        ui.label("Dropped videos")
+                            .on_hover_text("What dropping videos onto the window does (dropped folders always replace the playlist)");
+                        ui.horizontal(|ui| {
+                            use progress::DroppedVideos as D;
+                            for (choice, label) in [(None, "Ask"), (Some(D::Add), "Add"), (Some(D::Replace), "Replace playlist")] {
+                                ui.selectable_value(&mut settings.dropped_videos, choice, label);
+                            }
+                        });
+                        ui.end_row();
+                    });
                 });
-                ui.end_row();
-                section(ui, "LANGUAGES");
-                ui.label("Subtitles");
-                ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).margin(TEXT_MARGIN).hint_text("e.g. en,eng").desired_width(200.0))
-                    .on_hover_text("Language codes in order of preference, separated by commas. Applies to the next video.");
-                ui.end_row();
-                ui.label("Audio");
-                ui.add(egui::TextEdit::singleline(&mut settings.audio_languages).margin(TEXT_MARGIN).hint_text("the file's default").desired_width(200.0))
-                    .on_hover_text("Language codes in order of preference, e.g. ja,jpn. Applies to the next video.");
-                ui.end_row();
-                section(ui, "VIDEO AND APPEARANCE");
-                ui.label("");
-                ui.checkbox(&mut settings.hardware_decoding, "Decode video on the GPU")
-                    .on_hover_text("Turn off if videos show glitches; uses more CPU");
-                ui.end_row();
-                ui.label("Theme");
-                ui.horizontal(|ui| {
-                    for (theme, label) in [
-                        (progress::Theme::System, "System"),
-                        (progress::Theme::Dark, "Dark"),
-                        (progress::Theme::Light, "Light"),
-                    ] {
-                        ui.selectable_value(&mut settings.theme, theme, label);
-                    }
+                ui.add_space(8.0);
+                card(ui, "LANGUAGES", |ui| {
+                    grid("settings-languages").show(ui, |ui| {
+                        ui.label("Subtitles");
+                        ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).margin(TEXT_MARGIN).hint_text("e.g. en,eng").desired_width(200.0))
+                            .on_hover_text("Language codes in order of preference, separated by commas. Applies to the next video.");
+                        ui.end_row();
+                        ui.label("Audio");
+                        ui.add(egui::TextEdit::singleline(&mut settings.audio_languages).margin(TEXT_MARGIN).hint_text("the file's default").desired_width(200.0))
+                            .on_hover_text("Language codes in order of preference, e.g. ja,jpn. Applies to the next video.");
+                        ui.end_row();
+                    });
                 });
-                ui.end_row();
-                ui.label("Playlist side");
-                ui.horizontal(|ui| {
-                    for (side, label) in [(progress::Side::Left, "Left"), (progress::Side::Right, "Right")] {
-                        ui.selectable_value(&mut settings.sidebar_side, side, label);
-                    }
+                ui.add_space(8.0);
+                card(ui, "VIDEO AND APPEARANCE", |ui| {
+                    grid("settings-appearance").show(ui, |ui| {
+                        ui.label("Hardware decoding");
+                        ui.checkbox(&mut settings.hardware_decoding, "Decode video on the GPU")
+                            .on_hover_text("Turn off if videos show glitches; uses more CPU");
+                        ui.end_row();
+                        ui.label("Theme");
+                        ui.horizontal(|ui| {
+                            for (theme, label) in [
+                                (progress::Theme::System, "System"),
+                                (progress::Theme::Dark, "Dark"),
+                                (progress::Theme::Light, "Light"),
+                            ] {
+                                ui.selectable_value(&mut settings.theme, theme, label);
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Playlist side");
+                        ui.horizontal(|ui| {
+                            for (side, label) in [(progress::Side::Left, "Left"), (progress::Side::Right, "Right")] {
+                                ui.selectable_value(&mut settings.sidebar_side, side, label);
+                            }
+                        });
+                        ui.end_row();
+                        ui.label("Accent color");
+                        ui.horizontal(|ui| {
+                            let blue = accent_selection(None, ui.visuals().dark_mode).bg_fill;
+                            if swatch(ui, blue, settings.accent.is_none(), "Blue (default)").clicked() {
+                                settings.accent = None;
+                            }
+                            for (name, rgb) in ACCENTS {
+                                if swatch(ui, Color32::from_rgb(rgb[0], rgb[1], rgb[2]), settings.accent == Some(rgb), name).clicked() {
+                                    settings.accent = Some(rgb);
+                                }
+                            }
+                            let mut custom = settings.accent.unwrap_or([blue.r(), blue.g(), blue.b()]);
+                            let picker = egui::color_picker::color_edit_button_srgb(ui, &mut custom);
+                            if picker.on_hover_text("Pick any color").changed() {
+                                settings.accent = Some(custom);
+                            }
+                        });
+                        ui.end_row();
+                    });
                 });
-                ui.end_row();
-                ui.label("Accent color");
-                ui.horizontal(|ui| {
-                    let blue = accent_selection(None, ui.visuals().dark_mode).bg_fill;
-                    if swatch(ui, blue, settings.accent.is_none(), "Blue (default)").clicked() {
-                        settings.accent = None;
-                    }
-                    for (name, rgb) in ACCENTS {
-                        if swatch(ui, Color32::from_rgb(rgb[0], rgb[1], rgb[2]), settings.accent == Some(rgb), name).clicked() {
-                            settings.accent = Some(rgb);
-                        }
-                    }
-                    let mut custom = settings.accent.unwrap_or([blue.r(), blue.g(), blue.b()]);
-                    let picker = egui::color_picker::color_edit_button_srgb(ui, &mut custom);
-                    if picker.on_hover_text("Pick any color").changed() {
-                        settings.accent = Some(custom);
-                    }
-                });
-                ui.end_row();
             });
-            ui.add_space(14.0);
+            ui.add_space(12.0);
             ui.horizontal(|ui| {
-                if ui.button("Done").clicked() {
-                    close = true;
-                }
                 if ui.button("Restore defaults").clicked() {
                     settings = progress::Settings::default();
                     autoplay = true;
                 }
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if ui.add(primary_button(ui, "Done")).clicked() {
+                        close = true;
+                    }
+                });
             });
         });
         if settings != self.store.settings {
@@ -242,21 +291,27 @@ impl App {
         let count = self.pending_drop.as_ref().map_or(0, Vec::len);
         let videos = if count == 1 { "this video".to_string() } else { format!("these {count} videos") };
         let modal = egui::Modal::new(egui::Id::unique("drop-behavior")).show(ctx, |ui| {
-            ui.set_width(400.0);
+            ui.set_width(420.0);
             ui.label(RichText::new("Dropped videos").size(18.0).strong());
-            ui.add_space(8.0);
-            ui.label(format!("Add {videos} to the playlist, or replace the playlist with {}?", if count == 1 { "it" } else { "them" }));
-            ui.add_space(14.0);
+            ui.add_space(6.0);
+            ui.label(format!("What should happen with {videos}?"));
+            ui.add_space(10.0);
+            let gap = 8.0;
+            let width = (ui.available_width() - gap) / 2.0;
             ui.horizontal(|ui| {
-                if ui.button(format!("{}  Add to the playlist", icons::PLUS)).clicked() {
-                    self.actions.push(Action::ChooseDropBehavior(progress::DroppedVideos::Add));
-                }
-                if ui.button(format!("{}  Replace the playlist", icons::FILE_VIDEO)).clicked() {
-                    self.actions.push(Action::ChooseDropBehavior(progress::DroppedVideos::Replace));
+                ui.spacing_mut().item_spacing.x = gap;
+                use progress::DroppedVideos as D;
+                let them = if count == 1 { "it" } else { "them" };
+                let add = format!("Put {them} at the end of the playlist.");
+                let replace = format!("Start a new playlist with {them}.");
+                for (choice, icon, title, detail) in [(D::Add, icons::PLUS, "Add", add), (D::Replace, icons::FILE_VIDEO, "Replace", replace)] {
+                    if choice_card(ui, width, icon, title, &detail).clicked() {
+                        self.actions.push(Action::ChooseDropBehavior(choice));
+                    }
                 }
             });
-            ui.add_space(8.0);
-            ui.weak("Your choice is remembered; you can change it in Settings.");
+            ui.add_space(10.0);
+            ui.label(RichText::new("Your choice is remembered; you can change it in Settings.").small().weak());
         });
         // Esc or a click outside cancels the drop without remembering anything.
         if modal.should_close() {
@@ -266,27 +321,36 @@ impl App {
 
     /// An overview of the keyboard shortcuts.
     pub(crate) fn help_dialog(&mut self, ctx: &egui::Context) {
+        let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
+            ui.set_width(720.0);
             ui.label(RichText::new("Keyboard shortcuts").size(18.0).strong());
-            ui.add_space(8.0);
-            ui.columns(2, |columns| {
-                for (column, groups) in columns.iter_mut().zip(SHORTCUTS.chunks(SHORTCUTS.len().div_ceil(2))) {
-                    for (title, keys) in groups {
-                        column.label(RichText::new(*title).small().weak());
-                        egui::Grid::new(title).num_columns(2).spacing([16.0, 4.0]).min_col_width(112.0).show(column, |ui| {
-                            for (key, action) in *keys {
-                                ui.label(RichText::new(*key).monospace().strong());
-                                ui.label(*action);
-                                ui.end_row();
-                            }
-                        });
-                        column.add_space(10.0);
+            ui.add_space(10.0);
+            let max_height = (ui.ctx().content_rect().height() - 140.0).max(200.0);
+            egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
+                ui.columns(2, |columns| {
+                    for (column, groups) in columns.iter_mut().zip(SHORTCUTS.chunks(SHORTCUTS.len().div_ceil(2))) {
+                        for (title, keys) in groups {
+                            card(column, title, |ui| {
+                                egui::Grid::new(title).num_columns(2).spacing([12.0, 3.0]).min_col_width(110.0).show(ui, |ui| {
+                                    for (key, action) in *keys {
+                                        keycaps(ui, key);
+                                        ui.label(*action);
+                                        ui.end_row();
+                                    }
+                                });
+                            });
+                            column.add_space(8.0);
+                        }
                     }
-                }
+                });
             });
-            ui.weak("Press ? or Esc to close.");
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Press ? or Esc to close.").small().weak());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = ui.button("Close").clicked());
+            });
         });
-        if modal.should_close() {
+        if close || modal.should_close() {
             self.show_help = false;
         }
     }
@@ -294,16 +358,16 @@ impl App {
     /// Confirmation before wiping every video's progress.
     pub(crate) fn reset_dialog(&mut self, ctx: &egui::Context) {
         let modal = egui::Modal::new(egui::Id::unique("reset-progress")).show(ctx, |ui| {
-            ui.set_width(380.0);
-            ui.label(RichText::new("Reset all progress?").size(18.0).strong());
+            ui.set_width(400.0);
+            let title = format!("{}  Reset all progress?", icons::WARNING);
+            ui.label(RichText::new(title).size(18.0).strong().color(error_color(ui.visuals().dark_mode)));
             ui.add_space(8.0);
-            ui.label("This forgets the saved position and watched state of every video. Your playlist and settings stay.");
+            ui.label("This forgets the saved position and watched state of every video.");
             ui.add_space(4.0);
-            ui.label(RichText::new("This can't be undone.").strong());
+            ui.label(RichText::new("Your playlist, settings and stats stay. This can't be undone.").small().weak());
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                let reset = egui::Button::new(RichText::new("Reset all progress").color(Color32::WHITE))
-                    .fill(DANGER_FILL);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let reset = egui::Button::new(RichText::new("Reset all progress").color(Color32::WHITE)).fill(DANGER_FILL);
                 if ui.add(reset).clicked() {
                     self.actions.push(Action::ResetAllProgress);
                     self.confirm_reset = false;
@@ -420,7 +484,7 @@ fn stat_tile(ui: &mut egui::Ui, width: f32, label: &str, value: &str, detail: Op
 }
 
 /// A thin bar filled to `share` (0 to 1) in the accent color.
-fn meter(ui: &mut egui::Ui, share: f32) {
+pub(crate) fn meter(ui: &mut egui::Ui, share: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
     ui.painter().rect_filled(rect, 2.0, tile_fill(ui));
     let filled = egui::Rect::from_min_size(rect.min, vec2(rect.width() * share.clamp(0.0, 1.0), rect.height()));
@@ -470,4 +534,59 @@ fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new("Today").small().weak()));
         });
     });
+}
+
+/// A full-width card with a small title, for grouping a dialog's parts.
+fn card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let width = ui.available_width();
+    egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.set_width(width - 24.0);
+        ui.label(RichText::new(title).small().weak());
+        ui.add_space(4.0);
+        add_contents(ui);
+    });
+}
+
+/// The main button of a dialog or screen, in the accent color.
+pub(crate) fn primary_button(ui: &egui::Ui, text: impl Into<RichText>) -> egui::Button<'static> {
+    let selection = ui.visuals().selection;
+    egui::Button::new(text.into().color(selection.stroke.color)).fill(selection.bg_fill)
+}
+
+/// A key as a keycap; keys given as "A / B" are drawn as two.
+fn keycaps(ui: &mut egui::Ui, keys: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (i, key) in keys.split(" / ").enumerate() {
+            if i > 0 {
+                ui.weak("/");
+            }
+            let visuals = ui.visuals();
+            egui::Frame::new()
+                .fill(visuals.widgets.inactive.weak_bg_fill)
+                .stroke((1.0, visuals.widgets.noninteractive.bg_stroke.color))
+                .corner_radius(4)
+                .inner_margin(egui::Margin::symmetric(6, 1))
+                .show(ui, |ui| ui.label(RichText::new(key).monospace()));
+        }
+    });
+}
+
+/// A clickable card for one of a few choices: an icon, a title and a line
+/// saying what it does, outlined in the accent color on hover.
+fn choice_card(ui: &mut egui::Ui, width: f32, icon: &str, title: &str, detail: &str) -> egui::Response {
+    let inner = egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(12).show(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.set_width(width - 24.0);
+            ui.label(RichText::new(icon).size(22.0));
+            ui.add_space(4.0);
+            ui.label(RichText::new(title).strong());
+            ui.label(RichText::new(detail).small().weak());
+        });
+    });
+    let resp = ui.interact(inner.response.rect, ui.scope_id().with(title), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_stroke(inner.response.rect, 8.0, (1.5, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
+    }
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

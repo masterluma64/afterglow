@@ -44,9 +44,7 @@ pub const COMMAND: &str = "\u{E1C4}";
 pub const FILM_STRIP: &str = "\u{E792}";
 pub const MOON: &str = "\u{E330}";
 // The text font has no arrows; shortcut texts use these code points inline.
-#[cfg(test)]
 pub const ARROW_LEFT: &str = "\u{E058}";
-#[cfg(test)]
 pub const ARROW_RIGHT: &str = "\u{E06C}";
 #[cfg(test)]
 pub const ARROW_UP: &str = "\u{E08E}";

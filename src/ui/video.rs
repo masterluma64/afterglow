@@ -117,14 +117,20 @@ impl App {
             child.label(RichText::new(display_name(&self.playlist[index])).size(20.0).strong());
             child.add_space(4.0);
             child.weak(format!("Starts in {} s", left.as_secs_f32().ceil() as u32));
-            child.add_space(10.0);
+            child.add_space(6.0);
+            // The countdown, filling up until the video starts.
+            let gone = 1.0 - left.as_secs_f32() / AUTOPLAY_DELAY.as_secs_f32();
+            child.allocate_ui(vec2(220.0, 4.0), |ui| dialogs::meter(ui, gone));
+            child.add_space(12.0);
             child.horizontal(|ui| {
+                ui.spacing_mut().button_padding = vec2(14.0, 6.0);
                 // Centre the two buttons under the text.
-                ui.add_space((ui.available_width() - 150.0).max(0.0) / 2.0);
-                if ui.button(format!("{}  Play now", icons::PLAY)).on_hover_text("Space").clicked() {
+                ui.add_space((ui.available_width() - 190.0).max(0.0) / 2.0);
+                let play = dialogs::primary_button(ui, format!("{}  Play now", icons::PLAY));
+                if ui.add(play).on_hover_text("Space").clicked() {
                     self.actions.push(Action::PlayFromStart(index));
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button("Cancel").on_hover_text("Esc").clicked() {
                     self.actions.push(Action::CancelUpNext);
                 }
             });
@@ -136,10 +142,12 @@ impl App {
             let resume = self.store.resume_position(path);
             let verb = if resume.is_some() { "Continue" } else { "Play" };
             let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, display_name(path))).size(18.0);
-            if child.button(text).on_hover_text("Space").clicked() {
+            child.spacing_mut().button_padding = vec2(18.0, 9.0);
+            if child.add(dialogs::primary_button(&child, text)).on_hover_text("Space").clicked() {
                 self.actions.push(Action::Play(index));
             }
             if let Some(pos) = resume {
+                child.add_space(4.0);
                 child.weak(format!("from {}", format_time(pos)));
             }
             return;

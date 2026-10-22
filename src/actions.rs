@@ -430,6 +430,8 @@ impl App {
             Action::Escape => {
                 if !self.selected.is_empty() {
                     self.selected.clear();
+                } else if self.up_next.is_some() {
+                    self.up_next = None;
                 } else if self.peek.is_some() {
                     self.peek = None;
                 } else if self.fullscreen {
