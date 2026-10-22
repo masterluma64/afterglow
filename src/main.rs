@@ -258,6 +258,8 @@ struct App {
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
     up_next: Option<UpNext>,
     watch: watch::FolderWatch,
+    /// Playlist files found missing at startup.
+    missing_files: Option<Receiver<HashSet<PathBuf>>>,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
     /// Only playlist entries whose name contains this are listed.
@@ -302,8 +304,20 @@ impl App {
                 mpv.observe(name);
             }
         }
-        // Files that disappeared since last time are dropped from the playlist.
-        let playlist = store.playlist.iter().filter(|p| p.is_file()).cloned().collect();
+        let playlist: Vec<PathBuf> = store.playlist.clone();
+        // Files that disappeared since last time are dropped from the playlist,
+        // checked in the background since a network drive can take a while.
+        let missing_files = {
+            let (tx, rx) = mpsc::channel();
+            let (paths, ctx) = (playlist.clone(), ctx.clone());
+            let spawned = std::thread::Builder::new().name("check-files".into()).spawn(move || {
+                let missing: HashSet<PathBuf> = paths.into_iter().filter(|p| !p.is_file()).collect();
+                if !missing.is_empty() && tx.send(missing).is_ok() {
+                    ctx.request_repaint();
+                }
+            });
+            spawned.is_ok().then_some(rx)
+        };
         let mut app = Self {
             mpv,
             store,
@@ -332,6 +346,7 @@ impl App {
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
             up_next: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
+            missing_files,
             drag_row: None,
             search: String::new(),
             focus_search: false,
@@ -570,6 +585,14 @@ impl App {
     }
 
     /// Takes in background rescans of the playlist's folder.
+    /// Drops the playlist entries whose files were found missing at startup.
+    fn receive_missing_files(&mut self) {
+        let Some(missing) = self.missing_files.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
+        self.missing_files = None;
+        let playing = self.current_path().map(Path::to_path_buf);
+        self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
+    }
+
     fn receive_scans(&mut self) {
         while let Ok((folder, found)) = self.watch.scans.try_recv() {
             if self.store.folder.as_ref() == Some(&folder) {
@@ -694,6 +717,9 @@ impl App {
         let Ok(mpv) = &self.mpv else { return };
         let Some(path) = self.playlist.get(index).cloned() else { return };
         let name = display_name(&path);
+        if !path.is_file() {
+            return self.warn(format!("{name} was not found (moved or deleted?)"));
+        }
         let start = self.store.resume_position(&path);
         mpv.set("pause", if paused { "yes" } else { "no" });
         mpv.load_file(&path, start.unwrap_or(0.0));
@@ -2201,6 +2227,7 @@ impl eframe::App for App {
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
         self.receive_scans();
+        self.receive_missing_files();
         self.update_frame(&ctx);
         if let Some(ready) = &self.thumbnails_ready {
             if let Ok(thumbnails) = ready.try_recv() {
