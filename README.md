@@ -36,6 +36,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
   Moving or renaming a video keeps its progress and track choices: it is recognized by its
   exact file size once it shows up in the playlist again (if no other video has that size).
+  *Forget missing videos* (⋯ menu or palette) finds videos whose files were deleted and,
+  after you confirm, forgets what was saved about them. Videos on a drive that isn't
+  connected right now are left alone.
   Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
   5-second countdown (this can be turned off in Settings).
   On startup the video you were watching is opened, paused on the exact frame where you

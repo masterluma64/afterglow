@@ -285,6 +285,10 @@ struct App {
     line_marks: [Option<f64>; 2],
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
+    /// The background search for remembered videos whose files are gone.
+    gone_scan: Option<Receiver<Vec<String>>>,
+    /// Videos found gone, waiting for the user to confirm forgetting them.
+    confirm_forget: Option<Vec<String>>,
     /// Whether the keyboard shortcut overview is open.
     show_help: bool,
     /// Whether the settings dialog is open.
@@ -390,6 +394,8 @@ impl App {
             sync_panel: false,
             line_marks: [None, None],
             confirm_reset: false,
+            gone_scan: None,
+            confirm_forget: None,
             show_help: false,
             settings_open: false,
             palette: None,
@@ -536,6 +542,7 @@ impl eframe::App for App {
         self.recent.receive();
         self.receive_scans();
         self.receive_missing_files();
+        self.receive_gone();
         self.update_frame(&ctx);
         if let Some(ready) = &self.thumbnails_ready
             && let Ok(thumbnails) = ready.try_recv()
@@ -616,6 +623,9 @@ impl eframe::App for App {
         self.drop_overlay(&ctx, window);
         if self.confirm_reset {
             self.reset_dialog(&ctx);
+        }
+        if self.confirm_forget.is_some() {
+            self.forget_dialog(&ctx);
         }
         if self.show_help {
             self.help_dialog(&ctx);
@@ -796,7 +806,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::FRAME_CORNERS, icons::FILM_STRIP, icons::FOLDER_OPEN, icons::ZOOM_IN, icons::ZOOM_OUT, icons::MOON, icons::CROP, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::FRAME_CORNERS, icons::FILM_STRIP, icons::FOLDER_OPEN, icons::ZOOM_IN, icons::ZOOM_OUT, icons::MOON, icons::CROP, icons::BROOM, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

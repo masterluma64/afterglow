@@ -64,6 +64,10 @@ impl App {
                     if ui.add(help).clicked() {
                         self.actions.push(Action::ShowHelp);
                     }
+                    let forget = ui.button(format!("{}  Forget missing videos…", icons::BROOM));
+                    if forget.on_hover_text("Forget the saved progress of videos whose files no longer exist").clicked() {
+                        self.actions.push(Action::FindGone);
+                    }
                     if ui.button(format!("{}  Reset all progress…", icons::RESET)).clicked() {
                         self.actions.push(Action::ConfirmResetProgress);
                     }

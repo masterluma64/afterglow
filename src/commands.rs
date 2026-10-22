@@ -241,6 +241,7 @@ impl App {
         list.push(command("Open the screenshots folder", "", "snapshot pictures images", Action::OpenScreenshotFolder));
         list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
         list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
+        list.push(command("Forget videos that no longer exist…", "", "missing deleted gone clean up remove progress", Action::FindGone));
         list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
         // Every video in the playlist, to play by name.
         for (index, path) in self.playlist.iter().enumerate() {
@@ -283,6 +284,7 @@ impl App {
             Action::Zoom(_) => icons::ZOOM_OUT,
             Action::ToggleFill => icons::CROP,
             Action::ResetPicture | Action::ConfirmResetProgress => icons::RESET,
+            Action::FindGone => icons::BROOM,
             Action::ToggleWatched => icons::CHECK,
             Action::OpenFolder => icons::FOLDER_PLUS,
             Action::OpenVideos => icons::FILE_VIDEO,

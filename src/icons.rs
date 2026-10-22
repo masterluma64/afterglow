@@ -49,6 +49,7 @@ pub const ZOOM_IN: &str = "\u{E310}";
 pub const ZOOM_OUT: &str = "\u{E30E}";
 pub const MOON: &str = "\u{E330}";
 pub const CROP: &str = "\u{E1D4}";
+pub const BROOM: &str = "\u{EC54}";
 // The text font has no arrows; shortcut texts use these code points inline.
 #[cfg(test)]
 pub const ARROW_LEFT: &str = "\u{E058}";

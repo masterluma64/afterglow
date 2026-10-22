@@ -35,6 +35,10 @@ pub(crate) enum Action {
     OpenPalette,
     /// Asks before resetting every video's progress.
     ConfirmResetProgress,
+    /// Looks for remembered videos whose files are gone, to offer forgetting them.
+    FindGone,
+    /// Forgets the gone videos the user confirmed.
+    ForgetGone,
     SetSettings(progress::Settings),
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
@@ -122,7 +126,7 @@ impl App {
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.pending_drop.is_some() || self.palette.is_some() {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.confirm_forget.is_some() || self.settings_open || self.pending_drop.is_some() || self.palette.is_some() {
             return;
         }
         if self.show_help {
@@ -289,6 +293,15 @@ impl App {
                 self.palette = Some(Palette::default());
             }
             Action::ConfirmResetProgress => self.confirm_reset = true,
+            Action::FindGone => self.find_gone(ctx),
+            Action::ForgetGone => {
+                if let Some(gone) = self.confirm_forget.take() {
+                    let forgotten = self.store.forget(&gone);
+                    self.store.save();
+                    self.summary = None;
+                    self.notify(format!("Forgot {forgotten} video{}", if forgotten == 1 { "" } else { "s" }));
+                }
+            }
             Action::SetSettings(settings) => {
                 self.store.set_settings(settings);
                 self.apply_settings(ctx);

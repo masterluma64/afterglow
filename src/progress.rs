@@ -202,6 +202,24 @@ impl Default for Store {
     }
 }
 
+/// Which of these remembered videos are gone: their file no longer exists,
+/// though the drive or network share it was on is there. Videos on a drive
+/// that isn't connected right now are not counted. Checking can be slow on
+/// network drives, so this is meant for a background thread.
+pub fn gone(keys: Vec<String>) -> Vec<String> {
+    let mut reachable: HashMap<PathBuf, bool> = HashMap::new();
+    keys.into_iter()
+        .filter(|k| {
+            let path = Path::new(k);
+            // The drive (`D:\`) or share (`\\server\share\`) it is on.
+            let root: PathBuf = path.components().take(2).collect();
+            path.is_absolute()
+                && *reachable.entry(root.clone()).or_insert_with(|| root.exists())
+                && !path.exists()
+        })
+        .collect()
+}
+
 /// The UTF-8 byte order mark.
 const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
 
@@ -367,6 +385,30 @@ impl Store {
         entry.watched = watched;
         entry.position = if watched { entry.duration } else { 0.0 };
         self.dirty = true;
+    }
+
+    /// Every video anything is remembered about, to look for ones whose
+    /// files are gone (see [`gone`]).
+    pub fn remembered_videos(&self) -> Vec<String> {
+        let mut keys: Vec<String> = self.entries.keys().chain(self.tracks.keys()).cloned().collect();
+        keys.sort();
+        keys.dedup();
+        keys
+    }
+
+    /// Forgets everything saved about these videos: progress, length and
+    /// track choices. Returns how many there were.
+    pub fn forget(&mut self, keys: &[String]) -> usize {
+        let mut forgotten = 0;
+        for k in keys {
+            let entry = self.entries.remove(k).is_some();
+            let tracks = self.tracks.remove(k).is_some();
+            forgotten += usize::from(entry || tracks);
+        }
+        if forgotten > 0 {
+            self.dirty = true;
+        }
+        forgotten
     }
 
     /// Forgets the position and watched state of every video, returning how
@@ -632,6 +674,40 @@ impl Drop for Saver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forgets_gone_videos_but_not_ones_on_missing_drives() {
+        let dir = std::env::temp_dir().join(format!("afterglow-gone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let there = dir.join("there.mkv");
+        std::fs::write(&there, b"x").unwrap();
+        let deleted = dir.join("deleted.mkv");
+        // A drive letter with nothing connected, like an unplugged USB drive.
+        let unplugged = ('D'..='Z')
+            .map(|d| PathBuf::from(format!("{d}:\\")))
+            .find(|root| !root.exists())
+            .expect("a free drive letter")
+            .join("Shows")
+            .join("pilot.mkv");
+
+        let mut store = Store::default();
+        for path in [&there, &deleted, &unplugged] {
+            store.set_watched(path, true);
+        }
+        store.tracks_mut(&deleted).subtitle = Some("2".into());
+        store.tracks_mut(&dir.join("only tracks.mkv")).audio = Some("1".into());
+
+        let mut found = gone(store.remembered_videos());
+        found.sort();
+        let mut expected = vec![key(&deleted), key(&dir.join("only tracks.mkv"))];
+        expected.sort();
+        assert_eq!(found, expected, "neither a video that exists nor one on an unplugged drive is gone");
+        assert_eq!(store.forget(&found), 2);
+        assert!(store.tracks(&deleted).is_none());
+        assert!(store.get(&there).watched && store.get(&unplugged).watched);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn recognizes_moved_and_renamed_videos() {
