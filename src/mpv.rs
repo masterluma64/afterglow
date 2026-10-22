@@ -46,6 +46,11 @@ const MPV_RENDER_PARAM_SW_STRIDE: c_int = 19;
 const MPV_RENDER_PARAM_SW_POINTER: c_int = 20;
 const MPV_RENDER_UPDATE_FRAME: u64 = 1;
 
+/// For instances that open files nobody asked to play (lengths, previews):
+/// don't follow what a file refers to (playlists, EDL, linked segments,
+/// ordered chapters), which could be a network share or a web address.
+const NO_REFERENCES: (&str, &str) = ("access-references", "no");
+
 /// How soon to repaint for a new video frame. egui turns an immediate request
 /// into two UI passes (to let layout settle); any delay makes it one, which
 /// halves the UI work during playback.
@@ -428,6 +433,7 @@ impl Mpv {
             ("vd-lavc-skiploopfilter", "all"),
             ("demuxer-readahead-secs", "0"),
             ("cache", "no"),
+            NO_REFERENCES,
         ];
         Self::create(egui_ctx, None, &options)
     }
@@ -449,6 +455,10 @@ impl Mpv {
             ("slang", "en,eng"),
             ("volume-max", "150"),
             ("ytdl", "no"),
+            // libmpv's defaults already, stated so they can't change under us:
+            // no mpv.conf and no user scripts.
+            ("config", "no"),
+            ("load-scripts", "no"),
             // Decode on the GPU where it is known to work, falling back to the CPU.
             ("hwdec", "auto-safe"),
         ];
@@ -931,6 +941,9 @@ impl Prober {
             ("idle", "yes"),
             ("ytdl", "no"),
             ("input-default-bindings", "no"),
+            ("config", "no"),
+            ("load-scripts", "no"),
+            NO_REFERENCES,
         ];
         for (k, v) in options {
             let (k, v) = (cstr(k), cstr(v));
@@ -1351,5 +1364,33 @@ mod prober_tests {
         std::fs::write(&bogus, b"definitely not a video").unwrap();
         assert_eq!(prober.duration(&bogus, timeout), None);
         std::fs::remove_file(bogus).unwrap();
+    }
+
+    /// A file that refers to other files (here an EDL disguised as .mkv)
+    /// isn't followed by the instances that open files without being asked:
+    /// it could point at a network share or a web address.
+    #[test]
+    fn background_instances_do_not_follow_references() {
+        use_built_dll();
+        let wav = silent_wav("afterglow-reference-target.wav", 4);
+        let source = wav.to_string_lossy().into_owned();
+        let edl = std::env::temp_dir().join("afterglow-reference.mkv");
+        std::fs::write(&edl, format!("# mpv EDL v0\n%{}%{source},0,4\n", source.len())).unwrap();
+        let timeout = std::time::Duration::from_secs(5);
+
+        assert_eq!(Prober::new().expect("libmpv").duration(&edl, timeout), None, "the prober doesn't follow it");
+
+        let previews = Mpv::thumbnailer(egui::Context::default()).expect("libmpv");
+        previews.load_file(&edl, 0.0);
+        let deadline = std::time::Instant::now() + timeout;
+        let mut failed = false;
+        while std::time::Instant::now() < deadline && !failed {
+            failed = previews.poll_events().iter().any(|e| matches!(e, Event::EndFile { error: true, .. }));
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(failed, "the previewer doesn't follow it");
+        drop(previews);
+        std::fs::remove_file(edl).unwrap();
+        std::fs::remove_file(wav).unwrap();
     }
 }
