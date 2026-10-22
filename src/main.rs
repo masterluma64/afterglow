@@ -167,6 +167,7 @@ struct UpNext {
     at: Instant,
 }
 
+/// A short message shown over the video: feedback for an action, or a warning.
 struct Notice {
     text: String,
     warning: bool,

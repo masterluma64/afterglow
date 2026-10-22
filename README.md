@@ -57,6 +57,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Command palette** (Ctrl+K, or the ⋯ and right-click menus): type a few letters to find
   any command, including the ones without a key or button, such as a specific audio or
   subtitle track, a chapter, a speed, sorting, a recent folder or turning auto-play off.
+  Typing part of a video's name also finds it in the playlist, to play it.
   ↑ / ↓ pick one and Enter runs it.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.

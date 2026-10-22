@@ -1,8 +1,9 @@
 //! The right-click menu on the video and the command palette (Ctrl+K).
 
+use std::borrow::Cow;
+
 use super::*;
 
-/// A short message shown over the video: feedback for an action, or a warning.
 /// What is typed into the command palette, and which match Enter runs.
 #[derive(Default)]
 pub(crate) struct Palette {
@@ -10,18 +11,20 @@ pub(crate) struct Palette {
     pub(crate) pick: usize,
 }
 
-/// An entry in the command palette.
+/// An entry in the command palette: a command, or a playlist video to play.
 pub(crate) struct Command {
     pub(crate) label: String,
-    /// Its key, shown beside it.
-    pub(crate) key: &'static str,
+    /// Its key (or a video's length), shown beside it.
+    pub(crate) key: Cow<'static, str>,
     /// Other words it can be found by.
     pub(crate) keywords: &'static str,
     pub(crate) action: Action,
+    /// Videos are only listed once something is typed, after the commands.
+    pub(crate) video: bool,
 }
 
 pub(crate) fn command(label: impl Into<String>, key: &'static str, keywords: &'static str, action: Action) -> Command {
-    Command { label: label.into(), key, keywords, action }
+    Command { label: label.into(), key: key.into(), keywords, action, video: false }
 }
 
 /// Whether every word typed into the command palette appears in a command's
@@ -211,6 +214,13 @@ impl App {
         list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
         list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
         list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
+        // Every video in the playlist, to play by name.
+        for (index, path) in self.playlist.iter().enumerate() {
+            let entry = self.store.get(path);
+            let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
+            let label = format!("{}  {}", icons::FILE_VIDEO, display_name(path));
+            list.push(Command { label, key: length.into(), keywords: "play video", action: Action::Play(index), video: true });
+        }
         list
     }
 
@@ -220,8 +230,10 @@ impl App {
         let commands = self.commands();
         let Some(palette) = &mut self.palette else { return };
         let query = palette.query.trim().to_lowercase();
-        let mut matches: Vec<usize> = (0..commands.len()).filter(|&i| command_matches(&query, &commands[i])).collect();
-        matches.sort_by_key(|&i| command_rank(&query, &commands[i].label));
+        let mut matches: Vec<usize> = (0..commands.len())
+            .filter(|&i| !(query.is_empty() && commands[i].video) && command_matches(&query, &commands[i]))
+            .collect();
+        matches.sort_by_key(|&i| (commands[i].video, command_rank(&query, &commands[i].label)));
 
         // Taken before the text field sees them, so it keeps focus on Enter.
         let (down, up, enter) = ctx.input_mut(|i| {
@@ -262,7 +274,7 @@ impl App {
                 for (n, &i) in matches.iter().enumerate() {
                     let c = &commands[i];
                     let button = egui::Button::selectable(n == palette.pick, &c.label)
-                        .shortcut_text(RichText::new(c.key).weak())
+                        .shortcut_text(RichText::new(c.key.as_ref()).weak())
                         .min_size(vec2(ui.available_width(), PLAYLIST_ROW_HEIGHT));
                     let row = ui.add(button);
                     if row.clicked() {
