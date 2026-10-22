@@ -36,48 +36,55 @@ pub fn render(size: u32) -> Vec<u8> {
 fn shade(u: f32, v: f32) -> [f32; 4] {
     // Rounded square with a little margin, as Windows icons have.
     let margin = 0.04;
-    if rounded_square(u, v, margin, 0.22) > 0.0 {
+    let outside = rounded_square(u, v, margin, 0.22);
+    if outside > 0.0 {
         return [0.0; 4];
     }
 
-    const HORIZON: f32 = 0.74;
+    const HORIZON: f32 = 0.76;
     let mut colour = if v < HORIZON {
-        // Sky: deep violet at the top, through magenta, to orange at the horizon.
+        // Sky: the charcoal greys of the UI, a little lighter towards the horizon.
         let t = (v - margin) / (HORIZON - margin);
-        gradient(t, &[(0.0, rgb(0x24, 0x14, 0x52)), (0.55, rgb(0x8E, 0x2A, 0x8C)), (1.0, rgb(0xFF, 0x7A, 0x45))])
+        gradient(t, &[(0.0, rgb(0x1E, 0x1E, 0x20)), (1.0, rgb(0x34, 0x32, 0x33))])
     } else {
-        // Ground: a dusky band below the horizon.
+        // Ground: darker, like the UI's panels.
         let t = (v - HORIZON) / (1.0 - margin - HORIZON);
-        gradient(t, &[(0.0, rgb(0x4A, 0x16, 0x58)), (1.0, rgb(0x2A, 0x0E, 0x40))])
+        gradient(t, &[(0.0, rgb(0x1B, 0x1B, 0x1C)), (1.0, rgb(0x13, 0x13, 0x14))])
     };
 
-    // The sun, half set, with a warm glow around it.
-    let (sun_x, sun_y, sun_r) = (0.5, HORIZON, 0.27);
+    // The sun, half set, the one warm colour, with a soft glow around it.
+    let (sun_x, sun_y, sun_r) = (0.5, HORIZON, 0.25);
     let d = ((u - sun_x).powi(2) + (v - sun_y).powi(2)).sqrt();
     if v < HORIZON {
-        let glow = (-((d - sun_r).max(0.0) / 0.16).powi(2)).exp() * 0.55;
-        colour = mix(colour, rgb(0xFF, 0xB0, 0x5E), glow);
+        let glow = (-((d - sun_r).max(0.0) / 0.14).powi(2)).exp() * 0.35;
+        colour = mix(colour, rgb(0xC8, 0x7A, 0x4A), glow);
         if d < sun_r {
             let t = d / sun_r;
-            colour = gradient(t, &[(0.0, rgb(0xFF, 0xE2, 0x9A)), (1.0, rgb(0xFF, 0xA6, 0x4D))]);
+            colour = gradient(t, &[(0.0, rgb(0xF0, 0xB8, 0x80)), (1.0, rgb(0xD0, 0x7C, 0x48))]);
         }
     } else {
         // Its reflection on the ground, fading downwards.
-        let fade = 1.0 - ((v - HORIZON) / 0.2).clamp(0.0, 1.0);
-        let glow = (-((u - sun_x).abs() / 0.18).powi(2)).exp() * 0.45 * fade;
-        colour = mix(colour, rgb(0xFF, 0x9A, 0x55), glow);
+        let fade = 1.0 - ((v - HORIZON) / 0.18).clamp(0.0, 1.0);
+        let glow = (-((u - sun_x).abs() / 0.16).powi(2)).exp() * 0.3 * fade;
+        colour = mix(colour, rgb(0xC8, 0x7A, 0x4A), glow);
     }
 
     // The play symbol, slightly rounded, with a soft shadow below it.
-    let play = |u: f32, v: f32| triangle(u, v, (0.39, 0.19), (0.39, 0.57), (0.71, 0.38)) - 0.035;
+    let play = |u: f32, v: f32| triangle(u, v, (0.39, 0.27), (0.39, 0.65), (0.71, 0.46)) - 0.035;
     let shadow = play(u, v - 0.025);
     if shadow < 0.04 {
-        let strength = (1.0 - (shadow.max(0.0) / 0.04)) * 0.28;
-        colour = mix(colour, rgb(0x1A, 0x08, 0x2A), strength);
+        let strength = (1.0 - (shadow.max(0.0) / 0.04)) * 0.35;
+        colour = mix(colour, rgb(0x0C, 0x0C, 0x0D), strength);
     }
     let edge = play(u, v);
     if edge < 0.0 {
-        colour = rgb(0xFF, 0xF7, 0xF0);
+        colour = rgb(0xF4, 0xF2, 0xF0);
+    }
+
+    // A faint lighter rim, so the dark square still stands out on a dark
+    // taskbar.
+    if outside > -0.025 {
+        colour = mix(colour, rgb(0x5A, 0x5A, 0x5C), 0.5);
     }
     [colour[0], colour[1], colour[2], 1.0]
 }
