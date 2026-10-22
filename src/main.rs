@@ -213,6 +213,10 @@ struct App {
     missing_files: Option<Receiver<HashSet<PathBuf>>>,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
+    /// Playlist entries selected with Ctrl / Shift+click, to act on together.
+    selected: HashSet<PathBuf>,
+    /// Where a Shift+click selection extends from.
+    select_anchor: Option<PathBuf>,
     /// Only playlist entries whose name contains this are listed.
     search: String,
     focus_search: bool,
@@ -319,6 +323,8 @@ impl App {
             watch: watch::FolderWatch::new(ctx.clone(), None),
             missing_files,
             drag_row: None,
+            selected: HashSet::new(),
+            select_anchor: None,
             search: String::new(),
             focus_search: false,
             search_pick: 0,
@@ -670,10 +676,12 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("I", "Add videos"),
         ("R", "Refresh the folder"),
         ("B", "Show or hide the playlist"),
+        ("Ctrl / Shift+click", "Select several videos"),
+        ("Delete", "Remove the selected videos"),
     ]),
     ("WINDOW", &[
         ("F", "Fullscreen"),
-        ("Esc", "Leave fullscreen, close panels"),
+        ("Esc", "Clear the selection, leave fullscreen, close panels"),
         ("E", "Settings"),
         ("Ctrl+K", "Find a command"),
         ("?", "This overview"),

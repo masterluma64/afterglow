@@ -2,7 +2,9 @@
 
 use crate::*;
 
-/// A playlist entry with its watch progress.
+/// A playlist entry with its watch progress. `selection` is every selected
+/// video, in playlist order, when this one is among them.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn playlist_row(
     ui: &mut egui::Ui,
     store: &Store,
@@ -11,8 +13,11 @@ pub(crate) fn playlist_row(
     path: &Path,
     name: &str,
     playing: bool,
+    selection: Option<&[PathBuf]>,
 ) -> egui::Response {
     let entry = store.get(path);
+    // Painted under the row once its size is known.
+    let background = ui.painter().add(egui::Shape::Noop);
     // Dimmed text is hard to read on the accent-colored background of the
     // playing row, so there it uses the selection's text color.
     let dim = |text: RichText| if playing { text.color(ui.visuals().selection.stroke.color) } else { text.weak() };
@@ -25,16 +30,42 @@ pub(crate) fn playlist_row(
         .truncate()
         .sense(Sense::click_and_drag());
     let resp = ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button);
+    if selection.is_some() {
+        if playing {
+            // Already accent-colored: an outline shows it is selected too.
+            ui.painter().rect_stroke(resp.rect.shrink(1.0), 4.0, (1.5, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+        } else {
+            let fill = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
+            ui.painter().set(background, egui::Shape::rect_filled(resp.rect, 4.0, fill));
+        }
+    }
     if (!entry.watched && entry.fraction() > 0.0) || store.resume_position(path).is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
         let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
         ui.painter().line_segment([r.left_bottom(), end], (2.0, ui.visuals().selection.bg_fill));
     }
     let resp = resp.on_hover_text(format!("{}\n{}", path.display(), hover_text(&entry)));
-    if resp.clicked() {
-        actions.push(Action::Play(index));
-    }
     ui::context_menu(&resp, |ui| {
+        if let Some(selection) = selection.filter(|s| s.len() > 1) {
+            let videos = format!("{} videos", selection.len());
+            ui.label(RichText::new(format!("{videos} selected")).small().weak());
+            if ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
+                actions.push(Action::SetWatchedMany(selection.to_vec(), true));
+            }
+            if ui.button(format!("{}  Mark as unwatched", icons::RESET)).on_hover_text("Reset their progress to the start").clicked() {
+                actions.push(Action::SetWatchedMany(selection.to_vec(), false));
+            }
+            ui.separator();
+            let remove = egui::Button::new(format!("{}  Remove from playlist", icons::X)).shortcut_text("Delete");
+            if ui.add(remove).on_hover_text("The files are not touched").clicked() {
+                actions.push(Action::RemoveMany(selection.to_vec()));
+            }
+            ui.separator();
+            if ui.add(egui::Button::new("Clear the selection").shortcut_text("Esc")).clicked() {
+                actions.push(Action::ClearSelection);
+            }
+            return;
+        }
         if ui.button(format!("{}  Play from start", icons::PLAY)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), false));
             actions.push(Action::Play(index));
@@ -227,13 +258,23 @@ impl App {
             let offset = pick as f32 * row - (ui.available_height() - PLAYLIST_ROW_HEIGHT) / 2.0;
             scroll = scroll.vertical_scroll_offset(offset.max(0.0));
         }
+        let selection = self.selected_paths();
+        if selection.len() != self.selected.len() {
+            // Some selected videos left the playlist.
+            self.selected = selection.iter().cloned().collect();
+        }
         // Only the rows in view are laid out.
         scroll.show_rows(ui, PLAYLIST_ROW_HEIGHT, visible.len(), |ui, range| {
             let mut rows = Vec::new();
             for &index in &visible[range] {
                 let path = &self.playlist[index];
                 let name = &self.names[index].0;
-                let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, name, self.current == Some(index));
+                let selected = self.selected.contains(path).then_some(selection.as_slice());
+                let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, name, self.current == Some(index), selected);
+                if resp.clicked() {
+                    let modifiers = ui.input(|i| i.modifiers);
+                    self.click_row(&visible, index, modifiers);
+                }
                 if picked == Some(index) {
                     // The search result Enter plays.
                     ui.painter().rect_stroke(resp.rect, 4.0, (1.5, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
@@ -245,6 +286,40 @@ impl App {
             }
             self.drag_rows(ui, &rows);
         });
+    }
+
+    /// A click on a playlist row plays it; with Ctrl it is added to (or taken
+    /// out of) the selection, and Shift selects every row from the last one
+    /// clicked. `visible` is the rows shown, so a search limits the range.
+    pub(crate) fn click_row(&mut self, visible: &[usize], index: usize, modifiers: egui::Modifiers) {
+        let path = self.playlist[index].clone();
+        if modifiers.shift {
+            let at = |p: &PathBuf| visible.iter().position(|&i| self.playlist[i] == *p);
+            let here = at(&path).unwrap_or(0);
+            let from = self.select_anchor.as_ref().and_then(at).unwrap_or(here);
+            let range: Vec<PathBuf> = visible[from.min(here)..=from.max(here)].iter().map(|&i| self.playlist[i].clone()).collect();
+            if !modifiers.command {
+                self.selected.clear();
+            }
+            self.selected.extend(range);
+        } else if modifiers.command {
+            if !self.selected.remove(&path) {
+                self.selected.insert(path.clone());
+            }
+            self.select_anchor = Some(path);
+        } else {
+            self.selected.clear();
+            self.select_anchor = Some(path);
+            self.actions.push(Action::Play(index));
+        }
+    }
+
+    /// The selected videos, in playlist order.
+    pub(crate) fn selected_paths(&self) -> Vec<PathBuf> {
+        if self.selected.is_empty() {
+            return Vec::new();
+        }
+        self.playlist.iter().filter(|p| self.selected.contains(*p)).cloned().collect()
     }
 
     /// Rebuilds the cached display names (and their lowercase forms, for the

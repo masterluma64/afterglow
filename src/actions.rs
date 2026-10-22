@@ -41,6 +41,13 @@ pub(crate) enum Action {
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
     MarkWatchedBefore(usize),
+    /// Marks several videos watched (or unwatched), such as the selected ones.
+    SetWatchedMany(Vec<PathBuf>, bool),
+    /// Removes several videos from the playlist.
+    RemoveMany(Vec<PathBuf>),
+    /// Removes the selected videos from the playlist (Delete).
+    RemoveSelected,
+    ClearSelection,
     ResetAllProgress,
     SetAutoplayNext(bool),
     CancelUpNext,
@@ -156,6 +163,7 @@ impl App {
                 (M::NONE, Key::F11, Action::ToggleFullscreen),
                 (M::NONE, Key::F, Action::ToggleFullscreen),
                 (M::NONE, Key::Escape, Action::Escape),
+                (M::NONE, Key::Delete, Action::RemoveSelected),
                 (M::NONE, Key::Home, Action::Seek { to: 0.0, exact: true }),
                 (M::NONE, Key::Comma, Action::FrameStep { forward: false }),
                 (M::NONE, Key::Period, Action::FrameStep { forward: true }),
@@ -332,6 +340,43 @@ impl App {
                 self.store.save();
                 self.notify(format!("Marked {} video{} as watched", before.len(), if before.len() == 1 { "" } else { "s" }));
             }
+            Action::SetWatchedMany(paths, watched) => {
+                if self.loaded
+                    && let Some(current) = self.current_path()
+                    && paths.iter().any(|p| p == current)
+                {
+                    // As for one video (see `SetWatched`), but without moving on.
+                    self.playback.position = if watched { self.playback.duration } else { 0.0 };
+                    if !watched
+                        && let Ok(mpv) = &self.mpv
+                    {
+                        mpv.send(&["seek", "0", "absolute+exact"]);
+                    }
+                }
+                for path in &paths {
+                    self.store.set_watched(path, watched);
+                }
+                self.store.save();
+                self.selected.clear();
+                let videos = format!("{} video{}", paths.len(), if paths.len() == 1 { "" } else { "s" });
+                self.notify(if watched { format!("Marked {videos} as watched") } else { format!("Progress reset for {videos}") });
+            }
+            Action::RemoveMany(paths) => {
+                // From the end, so the indices of the rest stay put.
+                let indices: Vec<usize> = (0..self.playlist.len()).rev().filter(|&i| paths.contains(&self.playlist[i])).collect();
+                for &index in &indices {
+                    self.remove(index, ctx);
+                }
+                self.selected.clear();
+                self.notify(format!("Removed {} video{} from the playlist", indices.len(), if indices.len() == 1 { "" } else { "s" }));
+            }
+            Action::ClearSelection => self.selected.clear(),
+            Action::RemoveSelected => {
+                let paths = self.selected_paths();
+                if !paths.is_empty() {
+                    self.apply(Action::RemoveMany(paths), ctx);
+                }
+            }
             Action::ResetAllProgress => {
                 if self.loaded {
                     // The loaded video goes back to its start too, so the live
@@ -383,7 +428,9 @@ impl App {
             Action::ToggleSidebar if self.sidebar_docked() => self.show_sidebar = !self.show_sidebar,
             Action::ToggleSidebar => self.peek = if self.peek.is_some() { None } else { Some(Peek::default()) },
             Action::Escape => {
-                if self.peek.is_some() {
+                if !self.selected.is_empty() {
+                    self.selected.clear();
+                } else if self.peek.is_some() {
                     self.peek = None;
                 } else if self.fullscreen {
                     self.apply(Action::ExitFullscreen, ctx);
