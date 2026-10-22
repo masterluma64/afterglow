@@ -36,10 +36,10 @@ pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<
 /// `seen` holds the folders already scanned, so a link back up the tree
 /// (a symbolic link or junction) is followed only once.
 fn collect(dir: &Path, recursive: bool, seen: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf>) {
-    if let Ok(real) = std::fs::canonicalize(dir) {
-        if !seen.insert(real) {
-            return;
-        }
+    if let Ok(real) = std::fs::canonicalize(dir)
+        && !seen.insert(real)
+    {
+        return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {

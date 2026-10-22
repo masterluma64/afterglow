@@ -202,7 +202,7 @@ impl App {
 
         list.push(command("Open folder…", "O", "playlist browse", Action::OpenFolder));
         list.push(command("Add videos…", "I", "files browse", Action::OpenVideos));
-        for folder in self.store.recent_folders.iter().filter(|f| f.is_dir()) {
+        for folder in self.store.recent_folders.iter().filter(|f| self.recent.found(f)) {
             list.push(command(format!("Open recent: {}", display_name(folder)), "", "folder", Action::Open(vec![folder.clone()])));
         }
         if !self.store.recent_folders.is_empty() {

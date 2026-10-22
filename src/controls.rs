@@ -28,10 +28,12 @@ impl App {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
                 let (response, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
                     let recent = self.store.recent_folders.clone();
+                    // Checked in the background while the menu is open.
+                    self.recent.check(&recent, ui.ctx());
                     ui.add_enabled_ui(!recent.is_empty(), |ui| {
                         ui.menu_button(format!("{}  Recent folders", icons::RECENT), |ui| {
                             for folder in &recent {
-                                let exists = folder.is_dir();
+                                let exists = self.recent.found(folder);
                                 let tip = if exists { folder.display().to_string() } else { format!("{} (not found)", folder.display()) };
                                 let label = format!("{}  {}", icons::FOLDER, display_name(folder));
                                 if ui.add_enabled(exists, egui::Button::new(label)).on_hover_text(tip).clicked() {

@@ -1,7 +1,7 @@
 //! Persistent state: watch progress per video and the playlist, stored as
 //! JSON in the user's config folder.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
@@ -405,43 +405,54 @@ impl Store {
     /// with exactly the same size whose file is gone, if just one such video
     /// and one such path have that size. Track choices go along. Also records
     /// the sizes of `paths`. Returns the recognized videos' old and new paths.
+    ///
+    /// This reads the disk; on the UI thread, use [`find_moves`] on another
+    /// thread and [`Self::apply_moves`] instead.
+    #[cfg(test)]
     pub fn adopt_moved(&mut self, paths: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
-        let mut unknown: HashMap<u64, Vec<&PathBuf>> = HashMap::new();
-        for path in paths {
-            let entry = self.entries.get(&key(path)).copied();
-            // A size recorded for this path means the file was seen here before.
-            if entry.is_some_and(|e| e.size.is_some()) {
-                continue;
-            }
-            let known = entry.is_some_and(|e| e.has_progress()) || self.tracks.contains_key(&key(path));
-            let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else { continue };
-            self.set_size(path, size);
-            if !known {
-                unknown.entry(size).or_default().push(path);
-            }
-        }
-        if unknown.is_empty() {
-            return Vec::new();
-        }
-        let mut remembered: HashMap<u64, Vec<String>> = HashMap::new();
+        let moves = find_moves(&self.remembered(), paths);
+        self.apply_moves(&moves)
+    }
+
+    /// What moved videos are recognized by, copied for [`find_moves`].
+    pub fn remembered(&self) -> Remembered {
+        let mut remembered = Remembered::default();
         for (k, entry) in &self.entries {
             let worth_keeping = entry.has_progress() || self.tracks.contains_key(k);
-            if let Some(size) = entry.size.filter(|s| worth_keeping && unknown.contains_key(s)) {
-                remembered.entry(size).or_default().push(k.clone());
+            if entry.size.is_some() {
+                remembered.sized.insert(k.clone());
+            }
+            if worth_keeping {
+                remembered.known.insert(k.clone());
+                if let Some(size) = entry.size {
+                    remembered.by_size.entry(size).or_default().push(k.clone());
+                }
             }
         }
+        // Track choices alone also make a video known.
+        remembered.known.extend(self.tracks.keys().cloned());
+        remembered
+    }
+
+    /// Takes in what [`find_moves`] found: the sizes it read, and the videos
+    /// it recognized. The store may have changed since, so a video that has
+    /// gained progress of its own by now keeps it. Returns the old and new
+    /// paths of the videos whose progress was carried over.
+    pub fn apply_moves(&mut self, moves: &Moves) -> Vec<(PathBuf, PathBuf)> {
+        for (path, size) in &moves.sizes {
+            self.set_size(path, *size);
+        }
         let mut adopted = Vec::new();
-        for (size, keys) in remembered {
-            let [path] = unknown[&size][..] else { continue };
-            let gone: Vec<String> = keys.into_iter().filter(|k| !Path::new(k).exists()).collect();
-            let [old] = &gone[..] else { continue };
-            if let Some(entry) = self.entries.remove(old) {
-                self.entries.insert(key(path), entry);
+        for (old, path) in &moves.moved {
+            if self.get(path).has_progress() || self.tracks.contains_key(&key(path)) {
+                continue;
             }
-            if let Some(tracks) = self.tracks.remove(old) {
+            let Some(entry) = self.entries.remove(&key(old)) else { continue };
+            self.entries.insert(key(path), entry);
+            if let Some(tracks) = self.tracks.remove(&key(old)) {
                 self.tracks.insert(key(path), tracks);
             }
-            adopted.push((PathBuf::from(old), path.clone()));
+            adopted.push((old.clone(), path.clone()));
         }
         if !adopted.is_empty() {
             self.dirty = true;
@@ -505,6 +516,54 @@ impl Store {
         self.autoplay_next = autoplay;
         self.dirty = true;
     }
+}
+
+/// What the store knows that moved videos are recognized by (see
+/// [`Store::adopt_moved`]), copied so another thread can look for them.
+#[derive(Clone, Default)]
+pub struct Remembered {
+    /// Videos with a size on record: seen at their path before.
+    sized: HashSet<String>,
+    /// Videos with progress or track choices of their own.
+    known: HashSet<String>,
+    /// The known videos with a size on record, by size.
+    by_size: HashMap<u64, Vec<String>>,
+}
+
+/// What [`find_moves`] found, for [`Store::apply_moves`].
+#[derive(Default)]
+pub struct Moves {
+    /// Sizes of the videos that had none on record.
+    sizes: Vec<(PathBuf, u64)>,
+    /// Old and new paths of the videos recognized as moved or renamed.
+    moved: Vec<(PathBuf, PathBuf)>,
+}
+
+/// The part of [`Store::adopt_moved`] that reads the disk (file sizes, and
+/// whether remembered files are gone), which can take a while on a network
+/// drive; it can run on any thread.
+pub fn find_moves(remembered: &Remembered, paths: &[PathBuf]) -> Moves {
+    let mut moves = Moves::default();
+    let mut unknown: HashMap<u64, Vec<&PathBuf>> = HashMap::new();
+    for path in paths {
+        // A size recorded for this path means the file was seen here before.
+        if remembered.sized.contains(&key(path)) {
+            continue;
+        }
+        let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else { continue };
+        moves.sizes.push((path.clone(), size));
+        if !remembered.known.contains(&key(path)) {
+            unknown.entry(size).or_default().push(path);
+        }
+    }
+    for (size, paths) in unknown {
+        let [path] = paths[..] else { continue };
+        let Some(keys) = remembered.by_size.get(&size) else { continue };
+        let gone: Vec<&String> = keys.iter().filter(|k| !Path::new(k).exists()).collect();
+        let [old] = gone[..] else { continue };
+        moves.moved.push((PathBuf::from(old), path.clone()));
+    }
+    moves
 }
 
 /// Writes to a temporary file that replaces the old one only once it is

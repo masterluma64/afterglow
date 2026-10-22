@@ -1,5 +1,7 @@
 //! Opening folders and videos, and changing the playlist.
 
+use std::collections::HashMap;
+
 use super::*;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -42,6 +44,69 @@ impl DurationProbe {
         // send fails and the video simply stays without a length.
         if self.pending.insert(path.to_path_buf()) && self.requests.send(path.to_path_buf()).is_err() {
             self.pending.remove(path);
+        }
+    }
+}
+
+/// Disk work under way for the playlist (see `App::start_disk`).
+pub(crate) struct DiskBusy {
+    since: Instant,
+    /// What is being read, for the notice.
+    what: String,
+    /// Whether the notice is up.
+    announced: bool,
+}
+
+impl DiskBusy {
+    fn notice(&self) -> String {
+        format!("Reading {}…", self.what)
+    }
+}
+
+/// Whether the recent folders are there, checked in the background: on an
+/// unplugged or offline drive, checking takes long enough to freeze the
+/// window, and the menus showing them are drawn every frame.
+#[derive(Default)]
+pub(crate) struct RecentFolders {
+    found: HashMap<PathBuf, bool>,
+    checking: Option<Receiver<HashMap<PathBuf, bool>>>,
+    checked_at: Option<Instant>,
+}
+
+impl RecentFolders {
+    /// Whether `folder` was there when last checked; not checked yet counts as there.
+    pub(crate) fn found(&self, folder: &Path) -> bool {
+        self.found.get(folder).copied().unwrap_or(true)
+    }
+
+    /// Checks `folders` again, unless that is under way or was just done.
+    pub(crate) fn check(&mut self, folders: &[PathBuf], ctx: &egui::Context) {
+        self.receive();
+        let recent = self.checked_at.is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+        if self.checking.is_some() || recent {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let (folders, ctx) = (folders.to_vec(), ctx.clone());
+        let spawned = std::thread::Builder::new().name("check-folders".into()).spawn(move || {
+            let found = folders.into_iter().map(|f| {
+                let there = f.is_dir();
+                (f, there)
+            }).collect();
+            if tx.send(found).is_ok() {
+                ctx.request_repaint();
+            }
+        });
+        if spawned.is_ok() {
+            self.checking = Some(rx);
+        }
+    }
+
+    pub(crate) fn receive(&mut self) {
+        if let Some(found) = self.checking.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.found = found;
+            self.checking = None;
+            self.checked_at = Some(Instant::now());
         }
     }
 }
@@ -89,12 +154,96 @@ impl App {
         self.store.save();
     }
 
+    /// Starts disk work for the playlist (see `disk`); `what` names it in the
+    /// notice shown if it takes a while. One job runs at a time: actions that
+    /// need another wait for it (see `Action::needs_disk`).
+    pub(crate) fn start_disk(&mut self, job: disk::Job, what: String) {
+        if self.disk.start(job) {
+            self.disk_busy = Some(DiskBusy { since: Instant::now(), what, announced: false });
+        }
+    }
+
+    /// Takes in finished disk work, and says what's being read if it takes a while.
+    pub(crate) fn receive_disk(&mut self, ctx: &egui::Context) {
+        while let Ok(done) = self.disk.done.try_recv() {
+            if let Some(busy) = self.disk_busy.take() {
+                // Done reading: the notice saying so goes.
+                if self.notice.as_ref().is_some_and(|n| n.text == busy.notice()) {
+                    self.notice = None;
+                }
+            }
+            match done {
+                disk::Done::Opened { folders, videos, others, dropped, play, moves } => {
+                    self.store.apply_moves(&moves);
+                    self.opened(folders, videos, others, dropped, ctx);
+                    if let Some(index) = play.and_then(|v| self.playlist.iter().position(|p| *p == v))
+                        && self.current != Some(index)
+                    {
+                        self.play(index, ctx);
+                    }
+                }
+                disk::Done::Rescanned { folder, include_subfolders, why, found, missing, moves } => {
+                    // The playlist may come from another folder by now.
+                    if self.store.folder.as_ref() != Some(&folder) {
+                        continue;
+                    }
+                    let found = match found {
+                        Ok(found) => found,
+                        Err(e) => {
+                            self.warn(format!("Could not open {}: {e}", display_name(&folder)));
+                            continue;
+                        }
+                    };
+                    match why {
+                        disk::Rescan::Subfolders => self.rescanned_subfolders(&folder, include_subfolders, found, ctx),
+                        disk::Rescan::Refresh => self.refreshed(found, &missing, &moves),
+                    }
+                }
+                disk::Done::Arrived { videos, moves } => {
+                    self.append_new(videos, &moves);
+                }
+                disk::Done::Modified(times) => {
+                    // Oldest first, like episodes saved in the order they came out.
+                    self.reorder(|list| list.sort_by_cached_key(|p| times.get(p).copied().flatten()));
+                    self.notify("Sorted by date modified");
+                }
+            }
+        }
+        let Some(busy) = &mut self.disk_busy else { return };
+        let wait = Duration::from_millis(400);
+        if !busy.announced && busy.since.elapsed() >= wait {
+            busy.announced = true;
+            // Shown until the reading is done.
+            let text = busy.notice();
+            self.notice = Some(Notice { text, warning: false, until: Instant::now() + Duration::from_secs(600) });
+        } else if !busy.announced {
+            ctx.request_repaint_after(wait.saturating_sub(busy.since.elapsed()));
+        }
+    }
+
     /// Opens dropped or passed paths. Folders replace the playlist with their
     /// videos (and start playing). Videos are added to the end, unless they
     /// were dropped: then the drop setting decides, asking the first time.
-    pub(crate) fn open(&mut self, paths: Vec<PathBuf>, dropped: bool, ctx: &egui::Context) {
-        let (folders, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| p.is_dir());
-        let (videos, others): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| library::is_video(p));
+    /// With `play`, that video plays once it's in the playlist.
+    pub(crate) fn open(&mut self, paths: Vec<PathBuf>, dropped: bool, play: Option<PathBuf>) {
+        let what = match &paths[..] {
+            [path] => display_name(path),
+            _ => format!("{} items", paths.len()),
+        };
+        let include_subfolders = self.store.include_subfolders;
+        let job = disk::Job::Open { paths, include_subfolders, dropped, play, remembered: self.store.remembered() };
+        self.start_disk(job, what);
+    }
+
+    /// Takes in what `open` found on disk.
+    fn opened(
+        &mut self,
+        folders: Vec<(PathBuf, std::io::Result<Vec<PathBuf>>)>,
+        videos: Vec<PathBuf>,
+        others: Vec<PathBuf>,
+        dropped: bool,
+        ctx: &egui::Context,
+    ) {
         if let Some(other) = others.first() {
             self.warn(format!("Not a video: {}", display_name(other)));
         }
@@ -107,20 +256,20 @@ impl App {
             return;
         }
         let mut list = Vec::new();
-        for folder in &folders {
-            match library::scan_folder(folder, self.store.include_subfolders) {
-                Ok(found) => list.extend(found),
+        for (folder, found) in &folders {
+            match found {
+                Ok(found) => list.extend(found.iter().cloned()),
                 Err(e) => self.warn(format!("Could not open {}: {e}", display_name(folder))),
             }
         }
         list.extend(videos);
         if list.is_empty() {
             let hint = if self.store.include_subfolders { "" } else { " (subfolders are not included)" };
-            self.warn(format!("No videos found in {}{hint}", display_name(&folders[0])));
+            self.warn(format!("No videos found in {}{hint}", display_name(&folders[0].0)));
             return;
         }
         // Remember a single opened folder, so the subfolder setting can rescan it.
-        self.store.set_folder((folders.len() == 1).then(|| folders[0].as_path()));
+        self.store.set_folder((folders.len() == 1).then(|| folders[0].0.as_path()));
         self.sync_watch();
         self.replace_playlist(list, ctx);
     }
@@ -141,16 +290,20 @@ impl App {
     /// Changes whether folders include their subfolders, and rescans the folder
     /// the playlist came from. Videos added by hand stay, and so does the
     /// playing video if it is still part of the list.
-    pub(crate) fn set_include_subfolders(&mut self, include: bool, ctx: &egui::Context) {
+    pub(crate) fn set_include_subfolders(&mut self, include: bool) {
         self.store.set_include_subfolders(include);
         self.store.save();
         self.sync_watch();
         let Some(folder) = self.store.folder.clone() else { return };
-        let scanned = match library::scan_folder(&folder, include) {
-            Ok(scanned) => scanned,
-            Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
-        };
-        let added_by_hand = self.playlist.iter().filter(|p| !p.starts_with(&folder)).cloned();
+        let what = display_name(&folder);
+        let why = disk::Rescan::Subfolders;
+        let job = disk::Job::Rescan { folder, include_subfolders: include, why, playlist: Vec::new(), remembered: Default::default() };
+        self.start_disk(job, what);
+    }
+
+    /// Takes in the rescan `set_include_subfolders` asked for.
+    fn rescanned_subfolders(&mut self, folder: &Path, include: bool, scanned: Vec<PathBuf>, ctx: &egui::Context) {
+        let added_by_hand = self.playlist.iter().filter(|p| !p.starts_with(folder)).cloned();
         let list: Vec<PathBuf> = scanned.into_iter().chain(added_by_hand).collect();
         let playing = self.current_path().map(Path::to_path_buf);
         if playing.as_ref().is_some_and(|p| !list.contains(p)) {
@@ -160,12 +313,11 @@ impl App {
         self.playlist = list;
         self.save_playlist();
         let what = if include { "with subfolders" } else { "without subfolders" };
-        self.notify(format!("{}: {} videos {what}", display_name(&folder), self.playlist.len()));
+        self.notify(format!("{}: {} videos {what}", display_name(folder), self.playlist.len()));
     }
 
     pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
         self.stop(ctx);
-        self.store.adopt_moved(&list);
         self.playlist = list;
         self.show_sidebar = true;
         self.save_playlist();
@@ -181,7 +333,6 @@ impl App {
         if videos.is_empty() {
             return;
         }
-        self.store.adopt_moved(&videos);
         let mut first = None;
         let mut added = 0;
         for video in videos {
@@ -238,14 +389,19 @@ impl App {
     pub(crate) fn receive_scans(&mut self) {
         while let Ok((folder, found)) = self.watch.scans.try_recv() {
             if self.store.folder.as_ref() == Some(&folder) {
-                self.append_new(found);
+                let new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
+                if !new.is_empty() {
+                    // Checked on disk for moved videos first (see `disk`).
+                    self.actions.push(Action::Arrived(new));
+                }
             }
         }
     }
 
     /// Adds the videos that aren't in the playlist yet to its end, returning
-    /// how many there were.
-    pub(crate) fn append_new(&mut self, found: Vec<PathBuf>) -> usize {
+    /// how many there were. `moves` is what `disk` found about them.
+    pub(crate) fn append_new(&mut self, found: Vec<PathBuf>, moves: &progress::Moves) -> usize {
+        let adopted = self.store.apply_moves(moves);
         let mut new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
         if new.is_empty() {
             return 0;
@@ -253,7 +409,7 @@ impl App {
         self.names.clear();
         self.summary = None;
         // A renamed or moved video takes the place of its old path.
-        for (old, path) in self.store.adopt_moved(&new) {
+        for (old, path) in adopted {
             if let Some(i) = self.playlist.iter().position(|p| *p == old) {
                 self.playlist[i] = path.clone();
                 new.retain(|p| *p != path);
@@ -275,15 +431,24 @@ impl App {
         let Some(folder) = self.store.folder.clone() else {
             return self.notify("The playlist wasn't opened from a folder");
         };
-        let found = match library::scan_folder(&folder, self.store.include_subfolders) {
-            Ok(found) => found,
-            Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
+        let what = display_name(&folder);
+        let job = disk::Job::Rescan {
+            folder,
+            include_subfolders: self.store.include_subfolders,
+            why: disk::Rescan::Refresh,
+            playlist: self.playlist.clone(),
+            remembered: self.store.remembered(),
         };
+        self.start_disk(job, what);
+    }
+
+    /// Takes in the rescan `refresh_folder` asked for.
+    fn refreshed(&mut self, found: Vec<PathBuf>, missing: &HashSet<PathBuf>, moves: &progress::Moves) {
         // New videos first, so renamed ones can take their old place.
-        let added = self.append_new(found);
+        let added = self.append_new(found, moves);
         let before = self.playlist.len();
         let playing = self.current_path().map(Path::to_path_buf);
-        self.reorder(|list| list.retain(|p| p.is_file() || Some(p) == playing.as_ref()));
+        self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
         let removed = before - self.playlist.len();
         let plural = |n: usize| if n == 1 { "" } else { "s" };
         self.notify(match (added, removed) {
@@ -307,10 +472,8 @@ impl App {
             SortBy::Name => self.reorder(|list| {
                 list.sort_by(|a, b| library::natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()))
             }),
-            SortBy::Modified => self.reorder(|list| {
-                // Oldest first, like episodes saved in the order they came out.
-                list.sort_by_cached_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
-            }),
+            // The times are read on disk first (see `receive_disk`).
+            SortBy::Modified => self.start_disk(disk::Job::Modified(self.playlist.clone()), "the videos' dates".into()),
             SortBy::Length => {
                 let lengths: std::collections::HashMap<PathBuf, f64> =
                     self.playlist.iter().map(|p| (p.clone(), self.store.get(p).duration)).collect();

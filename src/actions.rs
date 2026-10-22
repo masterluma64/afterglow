@@ -12,6 +12,8 @@ pub(crate) enum Action {
     /// Files a later start of Afterglow was given (e.g. a video opened from
     /// Explorer): opened like `Open`, and the first video plays right away.
     OpenAndPlay(Vec<PathBuf>),
+    /// Videos the folder watch found new in the playlist's folder.
+    Arrived(Vec<PathBuf>),
     /// Answers what dropped videos should do, and remembers it.
     ChooseDropBehavior(progress::DroppedVideos),
     Play(usize),
@@ -94,6 +96,22 @@ pub(crate) enum Action {
     SetSpeed(f64),
     /// Jumps to the next chapter, or back to the start of this or the previous one.
     Chapter { forward: bool },
+}
+
+impl Action {
+    /// Whether it starts disk work for the playlist (see `App::start_disk`).
+    pub(crate) fn needs_disk(&self) -> bool {
+        matches!(
+            self,
+            Action::Open(_)
+                | Action::Drop(_)
+                | Action::OpenAndPlay(_)
+                | Action::Arrived(_)
+                | Action::RefreshFolder
+                | Action::SetIncludeSubfolders(_)
+                | Action::Sort(SortBy::Modified)
+        )
+    }
 }
 
 impl App {
@@ -211,9 +229,12 @@ impl App {
 
     pub(crate) fn apply(&mut self, action: Action, ctx: &egui::Context) {
         match action {
+            // Disk work for the playlist goes one job at a time: these wait for
+            // the one under way, and run on a later frame.
+            action if action.needs_disk() && self.disk_busy.is_some() => self.actions.push(action),
             Action::OpenFolder => {
                 if let Some(folder) = rfd::FileDialog::new().set_title("Open folder as playlist").pick_folder() {
-                    self.open(vec![folder], false, ctx);
+                    self.actions.push(Action::Open(vec![folder]));
                 }
             }
             Action::OpenVideos => {
@@ -222,19 +243,18 @@ impl App {
                     .add_filter("Videos", library::VIDEO_EXTENSIONS)
                     .pick_files();
                 if let Some(files) = files {
-                    self.add_videos(files, ctx);
+                    self.actions.push(Action::Open(files));
                 }
             }
-            Action::Open(paths) => self.open(paths, false, ctx),
-            Action::Drop(paths) => self.open(paths, true, ctx),
+            Action::Open(paths) => self.open(paths, false, None),
+            Action::Drop(paths) => self.open(paths, true, None),
             Action::OpenAndPlay(paths) => {
                 let video = paths.iter().find(|p| library::is_video(p)).cloned();
-                self.open(paths, false, ctx);
-                if let Some(index) = video.and_then(|v| self.playlist.iter().position(|p| *p == v)) {
-                    if self.current != Some(index) {
-                        self.play(index, ctx);
-                    }
-                }
+                self.open(paths, false, video);
+            }
+            Action::Arrived(videos) => {
+                let job = disk::Job::Arrived { videos, remembered: self.store.remembered() };
+                self.start_disk(job, "new videos".into());
             }
             Action::ChooseDropBehavior(behavior) => {
                 let mut settings = self.store.settings.clone();
@@ -253,7 +273,8 @@ impl App {
                 self.sort_playlist(by);
                 let what = match by {
                     SortBy::Name => "name",
-                    SortBy::Modified => "date modified",
+                    // Announced once the dates are read.
+                    SortBy::Modified => return,
                     SortBy::Length => "length",
                 };
                 self.notify(format!("Sorted by {what}"));
@@ -262,7 +283,11 @@ impl App {
             Action::RefreshFolder => self.refresh_folder(),
             Action::ShowHelp => self.show_help = true,
             Action::OpenSettings => self.settings_open = true,
-            Action::OpenPalette => self.palette = Some(Palette::default()),
+            Action::OpenPalette => {
+                // It offers the recent folders that are there.
+                self.recent.check(&self.store.recent_folders, ctx);
+                self.palette = Some(Palette::default());
+            }
             Action::ConfirmResetProgress => self.confirm_reset = true,
             Action::SetSettings(settings) => {
                 self.store.set_settings(settings);
@@ -294,7 +319,7 @@ impl App {
                 self.peek = (!pinned).then_some(Peek { entered: true, left_at: None });
                 self.show_sidebar = true;
             }
-            Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include, ctx),
+            Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include),
             Action::SetWatched(path, watched) => {
                 if self.loaded && self.current_path() == Some(path.as_path()) {
                     // Keep the live position from overwriting the change; a reset

@@ -5,6 +5,7 @@ mod app_icon;
 mod commands;
 mod controls;
 mod dialogs;
+mod disk;
 mod dll_search;
 mod icons;
 mod instance;
@@ -235,6 +236,11 @@ struct App {
     scroll_volume: f32,
     notice: Option<Notice>,
     actions: Vec<Action>,
+    /// Reads folders and files for the playlist without freezing the window.
+    disk: disk::Disk,
+    /// The disk work under way, if any.
+    disk_busy: Option<DiskBusy>,
+    recent: RecentFolders,
     durations: DurationProbe,
     /// Chapters of the loaded video.
     chapters: Vec<mpv::Chapter>,
@@ -358,6 +364,9 @@ impl App {
             scroll_volume: 0.0,
             notice: None,
             actions: Vec::new(),
+            disk: disk::Disk::new(ctx.clone()),
+            disk_busy: None,
+            recent: RecentFolders::default(),
             durations: DurationProbe::new(ctx.clone()),
             chapters: Vec::new(),
             tracks: Vec::new(),
@@ -392,7 +401,7 @@ impl App {
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
         if !open.is_empty() {
-            app.open(open, false, ctx);
+            app.open(open, false, None);
         } else if let Some(index) = app.continue_target() {
             // Pre-open where we left off, paused on that frame.
             app.load(index, true, ctx);
@@ -523,6 +532,8 @@ impl eframe::App for App {
         self.remember_window(&ctx);
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
+        self.receive_disk(&ctx);
+        self.recent.receive();
         self.receive_scans();
         self.receive_missing_files();
         self.update_frame(&ctx);
