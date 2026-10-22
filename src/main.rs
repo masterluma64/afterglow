@@ -1607,6 +1607,15 @@ impl App {
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
+        // Right-clicking where there are no videos (registered first, so the
+        // rows and buttons on top take precedence).
+        let background = ui.interact(ui.max_rect(), egui::Id::unique("playlist-area"), Sense::click());
+        self.sidebar_contents(ui);
+        let include = self.store.include_subfolders;
+        background.context_menu(|ui| subfolder_option(ui, include, &mut self.actions));
+    }
+
+    fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("PLAYLIST").small().weak());
@@ -1637,11 +1646,6 @@ impl App {
         });
         if !self.playlist.is_empty() {
             self.playlist_summary(ui);
-        }
-        let mut include = self.store.include_subfolders;
-        let tip = "Also play videos in subfolders when opening a folder";
-        if ui.checkbox(&mut include, "Include subfolders").on_hover_text(tip).changed() {
-            self.actions.push(Action::SetIncludeSubfolders(include));
         }
         ui.separator();
 
@@ -2389,8 +2393,20 @@ fn playlist_row(
         if ui.button(format!("{}  Remove from playlist", icons::X)).on_hover_text("The file is not touched").clicked() {
             actions.push(Action::Remove(index));
         }
+        ui.separator();
+        subfolder_option(ui, store.include_subfolders, actions);
     });
     resp
+}
+
+/// The "Include subfolders" switch in the playlist's right-click menus.
+fn subfolder_option(ui: &mut egui::Ui, include: bool, actions: &mut Vec<Action>) {
+    let mut include = include;
+    let tip = "Also play videos in subfolders when opening a folder (rescans the opened folder now)";
+    if ui.checkbox(&mut include, "Include subfolders").on_hover_text(tip).changed() {
+        actions.push(Action::SetIncludeSubfolders(include));
+        ui.close();
+    }
 }
 
 fn transport_button(icon: &str) -> egui::Button<'static> {
