@@ -77,6 +77,20 @@ pub enum DroppedVideos {
     Replace,
 }
 
+/// The window's place and size, in points, to open it the same way next time.
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+pub struct WindowPlacement {
+    /// Top-left corner of the window, including its frame.
+    pub x: f32,
+    pub y: f32,
+    /// Size of the area inside the frame, when not maximized.
+    pub width: f32,
+    pub height: f32,
+    pub maximized: bool,
+    /// Pixels per point when saved, to find the position on screen.
+    pub scale: f32,
+}
+
 #[derive(Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum Side {
     #[default]
@@ -129,6 +143,8 @@ pub struct Store {
     pub sidebar_pinned: bool,
     /// Whether the next video starts by itself when one finishes.
     pub autoplay_next: bool,
+    /// Where the window was, to open it there again.
+    pub window: Option<WindowPlacement>,
     #[serde(skip)]
     dirty: bool,
     /// Set when the saved file exists but couldn't be read: saving would
@@ -152,6 +168,7 @@ impl Default for Store {
             volume: 100.0,
             autoplay_next: true,
             sidebar_pinned: true,
+            window: None,
             settings: Settings::default(),
             dirty: false,
             read_failed: false,
@@ -366,6 +383,13 @@ impl Store {
     pub fn set_sidebar_pinned(&mut self, pinned: bool) {
         self.sidebar_pinned = pinned;
         self.dirty = true;
+    }
+
+    pub fn set_window(&mut self, window: WindowPlacement) {
+        if self.window != Some(window) {
+            self.window = Some(window);
+            self.dirty = true;
+        }
     }
 
     pub fn set_autoplay_next(&mut self, autoplay: bool) {

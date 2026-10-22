@@ -14,6 +14,7 @@ mod playback;
 mod playlist;
 mod power;
 mod progress;
+mod screen;
 mod sidebar;
 mod thumbnails;
 mod video;
@@ -60,6 +61,7 @@ const SUB_STEP_TAG: u64 = 1;
 const SUB_RESTORE_TAG: u64 = 2;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
+const MIN_WINDOW_SIZE: [f32; 2] = [480.0, 300.0];
 
 /// The icon in the title bar and taskbar (the executable's own icon is built
 /// in by build.rs).
@@ -75,13 +77,24 @@ fn main() -> eframe::Result {
     dll_search::restrict();
     // OpenGL lets mpv draw video straight into the window.
     let software = std::env::var_os(SOFTWARE_VIDEO_ENV).is_some();
+    let (store, load_warning) = Store::load();
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(APP_NAME)
+        .with_inner_size([1280.0, 760.0])
+        .with_min_inner_size(MIN_WINDOW_SIZE)
+        .with_drag_and_drop(true)
+        .with_icon(std::sync::Arc::new(window_icon()));
+    // Open the window where it was, unless that is no longer on screen.
+    if let Some(window) = store.window {
+        viewport = viewport
+            .with_inner_size([window.width.max(MIN_WINDOW_SIZE[0]), window.height.max(MIN_WINDOW_SIZE[1])])
+            .with_maximized(window.maximized);
+        if screen::title_bar_visible(&window) {
+            viewport = viewport.with_position([window.x, window.y]);
+        }
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title(APP_NAME)
-            .with_inner_size([1280.0, 760.0])
-            .with_min_inner_size([480.0, 300.0])
-            .with_drag_and_drop(true)
-            .with_icon(std::sync::Arc::new(window_icon())),
+        viewport,
         renderer: if software { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow },
         ..Default::default()
     };
@@ -92,7 +105,7 @@ fn main() -> eframe::Result {
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
             set_spacing(&cc.egui_ctx);
-            Ok(Box::new(App::new(&cc.egui_ctx, open, cc.get_proc_address.clone())))
+            Ok(Box::new(App::new(&cc.egui_ctx, (store, load_warning), open, cc.get_proc_address.clone())))
         }),
     );
     // Without a usable OpenGL driver, start over without it. A window's event
@@ -235,8 +248,12 @@ struct App {
 }
 
 impl App {
-    fn new(ctx: &egui::Context, open: Vec<PathBuf>, gl: Option<mpv::GetProcAddress>) -> Self {
-        let (store, load_warning) = Store::load();
+    fn new(
+        ctx: &egui::Context,
+        (store, load_warning): (Store, Option<String>),
+        open: Vec<PathBuf>,
+        gl: Option<mpv::GetProcAddress>,
+    ) -> Self {
         let mpv = Mpv::new(ctx.clone(), gl);
         if let Ok(mpv) = &mpv {
             mpv.set("volume", &store.volume.to_string());
@@ -339,6 +356,35 @@ impl App {
         self.playlist.get(self.current?).map(PathBuf::as_path)
     }
 
+    /// Keeps the window's place and size up to date in the store, so it opens
+    /// the same way next time. Fullscreen and minimized don't count, and while
+    /// maximized the size it had before is kept for un-maximizing.
+    fn remember_window(&mut self, ctx: &egui::Context) {
+        if self.fullscreen {
+            return;
+        }
+        let (outer, inner, maximized, minimized, scale) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.outer_rect, v.inner_rect, v.maximized, v.minimized, i.pixels_per_point)
+        });
+        let (Some(outer), Some(inner), Some(maximized)) = (outer, inner, maximized) else { return };
+        if minimized == Some(true) {
+            return;
+        }
+        let window = match self.store.window {
+            Some(before) if maximized => progress::WindowPlacement { maximized, ..before },
+            _ => progress::WindowPlacement {
+                x: outer.min.x,
+                y: outer.min.y,
+                width: inner.width(),
+                height: inner.height(),
+                maximized,
+                scale,
+            },
+        };
+        self.store.set_window(window);
+    }
+
     /// Handles media keys and shows what's playing in Windows' media overlay.
     fn media_controls(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -399,6 +445,7 @@ impl eframe::App for App {
         self.sample_playback();
         self.handle_input(&ctx);
         self.media_controls(&ctx, frame);
+        self.remember_window(&ctx);
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
         self.receive_scans();
