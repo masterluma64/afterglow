@@ -338,6 +338,17 @@ impl App {
                 self.store.save();
                 let name = display_name(&path);
                 self.notify(if watched { format!("{name}: marked as watched") } else { format!("{name}: progress reset") });
+                // Done with the playing video, so move on to the next one, as N does.
+                if let Some(index) = self.current.filter(|_| watched && self.current_path() == Some(path.as_path())) {
+                    if index + 1 < self.playlist.len() {
+                        self.play(index + 1, ctx);
+                        if let Some(notice) = self.notice.as_mut().filter(|n| !n.warning) {
+                            notice.text = format!("{name}: marked as watched  ·  next: {}", notice.text);
+                        }
+                    } else {
+                        self.notify(format!("{name}: marked as watched  ·  this is the last video"));
+                    }
+                }
             }
             Action::MarkWatchedBefore(index) => {
                 let before: Vec<PathBuf> = self.playlist.iter().take(index).cloned().collect();

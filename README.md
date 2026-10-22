@@ -38,7 +38,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   and when refreshing the folder. Videos on a drive that isn't connected right now are left
   alone.
   Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
-  5-second countdown (this can be turned off in Settings), from its beginning.
+  5-second countdown (this can be turned off in Settings), from its beginning. Marking the playing
+  video watched (W) skips straight to the next one.
   On startup the video you were watching is opened, paused on the exact frame where you
   left off.
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
@@ -162,7 +163,7 @@ in the app for an overview.
 | Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
 | G / H | Mark when a subtitle appears / when its line is spoken |
 | N / P | Next / previous video |
-| W | Mark the playing video watched / unwatched |
+| W | Mark the playing video watched (and play the next) / unwatched |
 | / | Search the playlist: ↑ / ↓ pick a result, Enter plays it, Esc clears |
 | O | Open folder as playlist |
 | I | Add videos to the playlist |
