@@ -2211,43 +2211,48 @@ impl App {
         ui.add_enabled_ui(self.loaded, |ui| {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
             let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                let tracks: Vec<mpv::Track> = self.tracks(kind).cloned().collect();
                 ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).small().weak());
-                if kind == "sub" {
-                    let none_selected = !tracks.iter().any(|t| t.selected);
-                    if ui.selectable_label(none_selected, "Off").clicked() {
-                        self.actions.push(Action::SetTrack { kind, id: None });
-                    }
-                }
-                for t in &tracks {
-                    if ui.selectable_label(t.selected, &t.label).clicked() {
-                        self.actions.push(Action::SetTrack { kind, id: Some(t.id) });
-                    }
-                }
-                if tracks.is_empty() && kind != "sub" {
-                    ui.weak("No audio tracks");
-                }
-                if kind == "sub" {
-                    ui.separator();
-                    if ui.button(format!("{}  Load subtitle file…", icons::PLUS)).clicked() {
-                        self.actions.push(Action::LoadSubtitle);
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label(format!("Delay {:+.1} s", self.playback.sub_delay));
-                        if ui.small_button(icons::MINUS).on_hover_text("Show earlier (Z)").clicked() {
-                            self.actions.push(Action::AdjustSubDelay(-0.1));
-                        }
-                        if ui.small_button(icons::PLUS).on_hover_text("Show later (X)").clicked() {
-                            self.actions.push(Action::AdjustSubDelay(0.1));
-                        }
-                    });
-                    if ui.add(egui::Button::new(format!("{}  Sync subtitles…", icons::TIMER)).shortcut_text("T")).clicked() {
-                        self.actions.push(Action::ToggleSyncPanel);
-                    }
-                }
+                self.track_items(ui, kind);
             });
             response.on_hover_text(tip);
         });
+    }
+
+    /// The choices in the subtitle or audio track menu.
+    fn track_items(&mut self, ui: &mut egui::Ui, kind: &'static str) {
+        let tracks: Vec<mpv::Track> = self.tracks(kind).cloned().collect();
+        if kind == "sub" {
+            let none_selected = !tracks.iter().any(|t| t.selected);
+            if ui.selectable_label(none_selected, "Off").clicked() {
+                self.actions.push(Action::SetTrack { kind, id: None });
+            }
+        }
+        for t in &tracks {
+            if ui.selectable_label(t.selected, &t.label).clicked() {
+                self.actions.push(Action::SetTrack { kind, id: Some(t.id) });
+            }
+        }
+        if tracks.is_empty() && kind != "sub" {
+            ui.weak("No audio tracks");
+        }
+        if kind == "sub" {
+            ui.separator();
+            if ui.button(format!("{}  Load subtitle file…", icons::PLUS)).clicked() {
+                self.actions.push(Action::LoadSubtitle);
+            }
+            ui.horizontal(|ui| {
+                ui.label(format!("Delay {:+.1} s", self.playback.sub_delay));
+                if ui.small_button(icons::MINUS).on_hover_text("Show earlier (Z)").clicked() {
+                    self.actions.push(Action::AdjustSubDelay(-0.1));
+                }
+                if ui.small_button(icons::PLUS).on_hover_text("Show later (X)").clicked() {
+                    self.actions.push(Action::AdjustSubDelay(0.1));
+                }
+            });
+            if ui.add(egui::Button::new(format!("{}  Sync subtitles…", icons::TIMER)).shortcut_text("T")).clicked() {
+                self.actions.push(Action::ToggleSyncPanel);
+            }
+        }
     }
 
     fn speed_menu(&mut self, ui: &mut egui::Ui) {
@@ -2257,13 +2262,85 @@ impl App {
         let button = egui::Button::new(label).frame_when_inactive(false);
         let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
             ui.label(RichText::new("Speed").small().weak());
-            for preset in SPEEDS {
-                if ui.selectable_label((speed - preset).abs() < 0.001, format_speed(preset)).clicked() {
-                    self.actions.push(Action::SetSpeed(preset));
-                }
-            }
+            self.speed_items(ui);
         });
         response.on_hover_text("Playback speed ([ and ], Backspace to reset)");
+    }
+
+    fn speed_items(&mut self, ui: &mut egui::Ui) {
+        let speed = self.playback.speed;
+        for preset in SPEEDS {
+            if ui.selectable_label((speed - preset).abs() < 0.001, format_speed(preset)).clicked() {
+                self.actions.push(Action::SetSpeed(preset));
+            }
+        }
+    }
+
+    /// The right-click menu on the video: what the controls and keys do,
+    /// gathered in one place (also in fullscreen, where the controls hide),
+    /// with each item's key beside it.
+    fn video_menu(&mut self, ui: &mut egui::Ui) {
+        let item = |ui: &mut egui::Ui, icon: &str, text: &str, key: &str| {
+            ui.add(egui::Button::new(format!("{icon}  {text}")).shortcut_text(RichText::new(key).weak())).clicked()
+        };
+        if self.loaded {
+            let paused = self.playback.paused;
+            let (icon, text) = if paused { (icons::PLAY, "Play") } else { (icons::PAUSE, "Pause") };
+            if item(ui, icon, text, "Space") {
+                self.actions.push(Action::TogglePause);
+            }
+            if self.current.is_some_and(|i| i + 1 < self.playlist.len()) && item(ui, icons::SKIP_FORWARD, "Next video", "N") {
+                self.actions.push(Action::Next);
+            }
+            if self.current.is_some_and(|i| i > 0) && item(ui, icons::SKIP_BACK, "Previous video", "P") {
+                self.actions.push(Action::Prev);
+            }
+            ui.separator();
+            ui.menu_button(format!("{}  Audio track", icons::WAVEFORM), |ui| self.track_items(ui, "audio"));
+            ui.menu_button(format!("{}  Subtitles", icons::SUBTITLES), |ui| self.track_items(ui, "sub"));
+            ui.menu_button(format!("{}  Speed  {}", icons::GAUGE, format_speed(self.playback.speed)), |ui| self.speed_items(ui));
+            if !self.chapters.is_empty() {
+                ui.menu_button(format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
+                    let now = chapter_at(&self.chapters, self.playback.position);
+                    for (i, chapter) in self.chapters.iter().enumerate() {
+                        let label = egui::Button::selectable(now == Some(i), &chapter.title)
+                            .shortcut_text(RichText::new(format_time(chapter.time)).weak());
+                        if ui.add(label).clicked() {
+                            self.actions.push(Action::Seek { to: chapter.time, exact: true });
+                        }
+                    }
+                });
+            }
+            ui.separator();
+            let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
+            let (icon, text) = if watched { (icons::RESET, "Mark as unwatched") } else { (icons::CHECK, "Mark as watched") };
+            if item(ui, icon, text, "W") {
+                self.actions.push(Action::ToggleWatched);
+            }
+        } else {
+            if item(ui, icons::FOLDER_PLUS, "Open folder…", "O") {
+                self.actions.push(Action::OpenFolder);
+            }
+            if item(ui, icons::FILE_VIDEO, "Add videos…", "I") {
+                self.actions.push(Action::OpenVideos);
+            }
+        }
+        ui.separator();
+        let (icon, text) = if self.fullscreen { (icons::CORNERS_IN, "Exit fullscreen") } else { (icons::CORNERS_OUT, "Fullscreen") };
+        if item(ui, icon, text, "F") {
+            self.actions.push(Action::ToggleFullscreen);
+        }
+        let shown = if self.sidebar_docked() { self.show_sidebar } else { self.peek.is_some() };
+        if item(ui, icons::SIDEBAR, if shown { "Hide the playlist" } else { "Show the playlist" }, "B") {
+            self.actions.push(Action::ToggleSidebar);
+        }
+        ui.separator();
+        if item(ui, icons::KEYBOARD, "Keyboard shortcuts", "?") {
+            self.actions.push(Action::ShowHelp);
+        }
+        if item(ui, icons::GEAR, "Settings…", "E") {
+            self.actions.push(Action::OpenSettings);
+        }
     }
 
     fn video_area(&mut self, ui: &mut egui::Ui) {
@@ -2296,6 +2373,9 @@ impl App {
             }
         } else {
             self.placeholder(ui, rect);
+        }
+        if self.mpv.is_ok() {
+            resp.context_menu(|ui| self.video_menu(ui));
         }
         self.paint_notice(ui, rect);
     }
@@ -2478,7 +2558,8 @@ impl eframe::App for App {
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
         let hover = ctx.pointer_hover_pos();
         let over_controls = self.controls_rect.zip(hover).is_some_and(|(r, p)| r.contains(p));
-        if moved || over_controls {
+        // An open menu also counts, so the cursor stays while choosing.
+        if moved || over_controls || egui::Popup::is_any_open(&ctx) {
             self.last_activity = Instant::now();
         }
         let idle = self.loaded && !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
@@ -2914,7 +2995,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

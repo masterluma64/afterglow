@@ -48,6 +48,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   drift further off over time (made for 25 fps vs 23.976 fps video) can be retimed.
 - **Per-video choices**: the audio track, subtitle track, subtitle delay and subtitle files
   you load are remembered for each video and restored when you open it again.
+- **Right-click the video** for a menu with play/pause, next and previous video, audio and
+  subtitle tracks, speed, chapters, marking the video watched, fullscreen, the playlist and
+  Settings. Each item shows its key, and it also works in fullscreen while the controls are
+  hidden.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.
 - **Seek bar previews**: hovering or dragging the seek bar shows a preview frame and the
@@ -126,3 +130,4 @@ in the app for an overview.
 | ? | Keyboard shortcut overview (also in the ⋯ menu) |
 | Scroll over the video | Volume |
 | Middle-click the video | Play / pause |
+| Right-click the video | Menu with tracks, speed, chapters and more |

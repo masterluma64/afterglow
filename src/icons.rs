@@ -38,6 +38,8 @@ pub const FOLDER: &str = "\u{E24A}";
 pub const KEYBOARD: &str = "\u{E2D8}";
 pub const GEAR: &str = "\u{E272}";
 pub const PIN: &str = "\u{E3E2}";
+pub const GAUGE: &str = "\u{E628}";
+pub const LIST_NUMBERS: &str = "\u{E2F6}";
 // The text font has no arrows; shortcut texts use these code points inline.
 #[cfg(test)]
 pub const ARROW_LEFT: &str = "\u{E058}";
