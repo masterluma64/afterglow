@@ -325,10 +325,10 @@ impl App {
                     // Keep the live position from overwriting the change; a reset
                     // video that is loaded also jumps back to its start.
                     self.playback.position = if watched { self.playback.duration } else { 0.0 };
-                    if !watched {
-                        if let Ok(mpv) = &self.mpv {
-                            mpv.send(&["seek", "0", "absolute+exact"]);
-                        }
+                    if !watched
+                        && let Ok(mpv) = &self.mpv
+                    {
+                        mpv.send(&["seek", "0", "absolute+exact"]);
                     }
                 }
                 self.store.set_watched(&path, watched);

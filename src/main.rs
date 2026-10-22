@@ -537,12 +537,12 @@ impl eframe::App for App {
         self.receive_scans();
         self.receive_missing_files();
         self.update_frame(&ctx);
-        if let Some(ready) = &self.thumbnails_ready {
-            if let Ok(thumbnails) = ready.try_recv() {
-                self.thumbnails = Some(thumbnails);
-                self.thumbnails_ready = None;
-                self.open_for_preview();
-            }
+        if let Some(ready) = &self.thumbnails_ready
+            && let Ok(thumbnails) = ready.try_recv()
+        {
+            self.thumbnails = Some(thumbnails);
+            self.thumbnails_ready = None;
+            self.open_for_preview();
         }
         if let Some(Ok(thumbnails)) = &mut self.thumbnails {
             thumbnails.update(&ctx);
@@ -630,11 +630,11 @@ impl eframe::App for App {
             self.drop_dialog(&ctx);
         }
 
-        if let Some(up_next) = &self.up_next {
-            if Instant::now() >= up_next.at {
-                let index = up_next.index;
-                self.actions.push(Action::Play(index));
-            }
+        if let Some(up_next) = &self.up_next
+            && Instant::now() >= up_next.at
+        {
+            let index = up_next.index;
+            self.actions.push(Action::Play(index));
         }
         self.apply_actions(&ctx);
 

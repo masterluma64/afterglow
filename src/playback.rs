@@ -134,10 +134,10 @@ impl App {
 
     pub(crate) fn stop(&mut self, ctx: &egui::Context) {
         self.save_current_progress();
-        if self.current.is_some() {
-            if let Ok(mpv) = &self.mpv {
-                mpv.send(&["stop"]);
-            }
+        if self.current.is_some()
+            && let Ok(mpv) = &self.mpv
+        {
+            mpv.send(&["stop"]);
         }
         self.finish(ctx);
     }

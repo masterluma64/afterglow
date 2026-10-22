@@ -332,12 +332,13 @@ impl App {
                 if escape {
                     self.search.clear();
                 }
-                if enter && !self.search.trim().is_empty() {
-                    if let Some(index) = results.get(self.search_pick) {
-                        self.actions.push(Action::Play(*index));
-                        self.search.clear();
-                        self.peek = None;
-                    }
+                if enter
+                    && !self.search.trim().is_empty()
+                    && let Some(index) = results.get(self.search_pick)
+                {
+                    self.actions.push(Action::Play(*index));
+                    self.search.clear();
+                    self.peek = None;
                 }
             }
             if !self.search.is_empty() && icon_button(ui, icons::X, "Clear the search (Esc)").clicked() {

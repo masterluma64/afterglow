@@ -118,10 +118,10 @@ impl App {
             ));
             child.add_space(6.0);
             child.hyperlink_to("Download libmpv", mpv::DOWNLOAD_URL);
-            if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
-                if child.button("Open Afterglow's folder").clicked() {
-                    let _ = std::process::Command::new("explorer").arg(dir).spawn();
-                }
+            if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf))
+                && child.button("Open Afterglow's folder").clicked()
+            {
+                let _ = std::process::Command::new("explorer").arg(dir).spawn();
             }
             child.weak("Then restart Afterglow.");
             return;

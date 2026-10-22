@@ -1081,7 +1081,7 @@ fn render_loop(api: &Api, ctx: Ptr, shared: &RenderShared, egui_ctx: &egui::Cont
         let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr() as *const u8, blocks * 64) };
         let mut pixels = Vec::with_capacity(w as usize * h as usize);
         for row in bytes.chunks_exact(stride) {
-            pixels.extend(row[..w as usize * 4].chunks_exact(4).map(|p| Color32::from_rgb(p[0], p[1], p[2])));
+            pixels.extend(row[..w as usize * 4].as_chunks::<4>().0.iter().map(|p| Color32::from_rgb(p[0], p[1], p[2])));
         }
         let image = ColorImage::new([w as usize, h as usize], pixels);
         if shared.hidden.load(std::sync::atomic::Ordering::Acquire) {
@@ -1231,10 +1231,10 @@ mod thumbnailer_tests {
             let deadline = Instant::now() + Duration::from_secs(10);
             while Instant::now() < deadline {
                 mpv.poll_events();
-                if let Some(img) = mpv.take_frame() {
-                    if img.pixels.iter().any(|p| *p != Color32::BLACK) {
-                        return Some(img);
-                    }
+                if let Some(img) = mpv.take_frame()
+                    && img.pixels.iter().any(|p| *p != Color32::BLACK)
+                {
+                    return Some(img);
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -1281,10 +1281,10 @@ mod subtitle_sync_tests {
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
                 for ev in mpv.poll_events() {
-                    if let Event::CommandDone { tag: t, ok, .. } = ev {
-                        if t == tag {
-                            return Some(ok);
-                        }
+                    if let Event::CommandDone { tag: t, ok, .. } = ev
+                        && t == tag
+                    {
+                        return Some(ok);
                     }
                 }
                 std::thread::sleep(Duration::from_millis(10));
@@ -1533,10 +1533,10 @@ mod picture_tests {
         loop {
             assert!(Instant::now() < deadline, "no frame");
             mpv.poll_events();
-            if let Some(img) = mpv.take_frame() {
-                if img.pixels.iter().any(|p| *p != Color32::BLACK) {
-                    return;
-                }
+            if let Some(img) = mpv.take_frame()
+                && img.pixels.iter().any(|p| *p != Color32::BLACK)
+            {
+                return;
             }
             std::thread::sleep(Duration::from_millis(10));
         }

@@ -666,7 +666,7 @@ mod tests {
         assert_eq!(adopted, [(gone.clone(), renamed.clone())], "a video seen at its path before is no candidate");
         assert_eq!(store.get(&renamed).position, 60.0);
         assert_eq!(store.tracks(&renamed).and_then(|t| t.subtitle.as_deref()), Some("2"));
-        assert!(store.entries.get(&key(&gone)).is_none());
+        assert!(!store.entries.contains_key(&key(&gone)));
         assert!(!store.get(&copy).watched, "a video whose file still exists keeps its progress to itself");
         assert!(!store.get(&twin).watched, "ambiguous matches are left alone");
         assert_eq!(store.get(&copy).size, Some(20), "sizes of new videos are recorded");
