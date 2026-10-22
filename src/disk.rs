@@ -11,7 +11,7 @@ use std::time::SystemTime;
 
 use eframe::egui;
 
-use crate::{library, progress};
+use crate::library;
 
 pub(crate) enum Job {
     /// Folders and videos to open: which are folders, and their videos.
@@ -21,7 +21,6 @@ pub(crate) enum Job {
         dropped: bool,
         /// A video to play once it's in the playlist.
         play: Option<PathBuf>,
-        remembered: progress::Remembered,
     },
     /// The playlist's folder, read again.
     Rescan {
@@ -31,10 +30,10 @@ pub(crate) enum Job {
         /// The playlist when asked: what's new is what isn't in it, and on
         /// a refresh, its entries are checked to be still there.
         playlist: Vec<PathBuf>,
-        remembered: progress::Remembered,
     },
-    /// Videos the folder watch found new in the playlist's folder.
-    Arrived { videos: Vec<PathBuf>, remembered: progress::Remembered },
+    /// Videos the folder watch found new in the playlist's folder, taken in
+    /// once the jobs before them are done.
+    Arrived(Vec<PathBuf>),
     /// When each video was last changed, to sort by it.
     Modified(Vec<PathBuf>),
 }
@@ -56,7 +55,6 @@ pub(crate) enum Done {
         others: Vec<PathBuf>,
         dropped: bool,
         play: Option<PathBuf>,
-        moves: progress::Moves,
     },
     Rescanned {
         folder: PathBuf,
@@ -65,9 +63,8 @@ pub(crate) enum Done {
         found: std::io::Result<Vec<PathBuf>>,
         /// Playlist entries whose files are gone (on a refresh).
         missing: HashSet<PathBuf>,
-        moves: progress::Moves,
     },
-    Arrived { videos: Vec<PathBuf>, moves: progress::Moves },
+    Arrived(Vec<PathBuf>),
     Modified(HashMap<PathBuf, Option<SystemTime>>),
 }
 
@@ -103,35 +100,24 @@ impl Disk {
 /// Carries out a job, synchronously (normally on the disk thread).
 pub(crate) fn run(job: Job) -> Done {
     match job {
-        Job::Open { paths, include_subfolders, dropped, play, remembered } => {
+        Job::Open { paths, include_subfolders, dropped, play } => {
             let (folders, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| p.is_dir());
             let (videos, others): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| library::is_video(p));
             let folders: Vec<_> = folders.into_iter().map(|f| {
                 let found = library::scan_folder(&f, include_subfolders);
                 (f, found)
             }).collect();
-            let all: Vec<PathBuf> =
-                folders.iter().filter_map(|(_, found)| found.as_ref().ok()).flatten().chain(&videos).cloned().collect();
-            let moves = progress::find_moves(&remembered, &all);
-            Done::Opened { folders, videos, others, dropped, play, moves }
+            Done::Opened { folders, videos, others, dropped, play }
         }
-        Job::Rescan { folder, include_subfolders, why, playlist, remembered } => {
+        Job::Rescan { folder, include_subfolders, why, playlist } => {
             let found = library::scan_folder(&folder, include_subfolders);
-            let (missing, moves) = match (why, &found) {
-                (Rescan::Refresh, Ok(found)) => {
-                    let listed: HashSet<&PathBuf> = playlist.iter().collect();
-                    let new: Vec<PathBuf> = found.iter().filter(|p| !listed.contains(p)).cloned().collect();
-                    let missing = playlist.iter().filter(|p| !p.is_file()).cloned().collect();
-                    (missing, progress::find_moves(&remembered, &new))
-                }
-                _ => (HashSet::new(), progress::Moves::default()),
+            let missing = match why {
+                Rescan::Refresh if found.is_ok() => playlist.iter().filter(|p| !p.is_file()).cloned().collect(),
+                _ => HashSet::new(),
             };
-            Done::Rescanned { folder, include_subfolders, why, found, missing, moves }
+            Done::Rescanned { folder, include_subfolders, why, found, missing }
         }
-        Job::Arrived { videos, remembered } => {
-            let moves = progress::find_moves(&remembered, &videos);
-            Done::Arrived { videos, moves }
-        }
+        Job::Arrived(videos) => Done::Arrived(videos),
         Job::Modified(paths) => Done::Modified(
             paths.into_iter().map(|p| {
                 let modified = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
@@ -147,7 +133,7 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn opens_rescans_and_recognizes_moved_videos() {
+    fn opens_and_rescans() {
         let dir = std::env::temp_dir().join(format!("afterglow-disk-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -156,26 +142,19 @@ mod tests {
             std::fs::write(&path, vec![0u8; size]).unwrap();
             path
         };
-        let (a, renamed, notes) = (file("a.mkv", 5), file("renamed.mkv", 10), file("notes.txt", 1));
-        // Watched as "old name.mkv", which is gone now.
-        let mut store = progress::Store::default();
-        let gone = dir.join("old name.mkv");
-        store.update_position(&gone, 60.0, 600.0);
-        store.set_size(&gone, 10);
+        let (a, b, notes) = (file("a.mkv", 5), file("b.mkv", 10), file("notes.txt", 1));
 
-        let job = Job::Open { paths: vec![dir.clone(), notes.clone()], include_subfolders: false, dropped: false, play: None, remembered: store.remembered() };
-        let Done::Opened { folders, videos, others, moves, .. } = run(job) else { panic!("opened") };
+        let job = Job::Open { paths: vec![dir.clone(), notes.clone()], include_subfolders: false, dropped: false, play: None };
+        let Done::Opened { folders, videos, others, .. } = run(job) else { panic!("opened") };
         assert_eq!(folders.len(), 1);
-        assert_eq!(folders[0].1.as_ref().unwrap(), &[a.clone(), renamed.clone()]);
+        assert_eq!(folders[0].1.as_ref().unwrap(), &[a.clone(), b.clone()]);
         assert!(videos.is_empty());
         assert_eq!(others, [notes]);
-        assert_eq!(store.apply_moves(&moves), [(gone.clone(), renamed.clone())], "found off the UI thread");
-        assert_eq!(store.get(&renamed).position, 60.0);
 
         let playlist = vec![a.clone(), dir.join("deleted.mkv")];
-        let job = Job::Rescan { folder: dir.clone(), include_subfolders: false, why: Rescan::Refresh, playlist, remembered: store.remembered() };
+        let job = Job::Rescan { folder: dir.clone(), include_subfolders: false, why: Rescan::Refresh, playlist };
         let Done::Rescanned { found, missing, .. } = run(job) else { panic!("rescanned") };
-        assert_eq!(found.unwrap(), [a.clone(), renamed.clone()]);
+        assert_eq!(found.unwrap(), [a.clone(), b.clone()]);
         assert_eq!(missing, HashSet::from([dir.join("deleted.mkv")]));
 
         let Done::Modified(times) = run(Job::Modified(vec![a.clone(), dir.join("deleted.mkv")])) else { panic!("modified") };

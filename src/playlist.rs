@@ -173,8 +173,7 @@ impl App {
                 }
             }
             match done {
-                disk::Done::Opened { folders, videos, others, dropped, play, moves } => {
-                    self.store.apply_moves(&moves);
+                disk::Done::Opened { folders, videos, others, dropped, play } => {
                     self.opened(folders, videos, others, dropped, ctx);
                     if let Some(index) = play.and_then(|v| self.playlist.iter().position(|p| *p == v))
                         && self.current != Some(index)
@@ -182,7 +181,7 @@ impl App {
                         self.play(index, ctx);
                     }
                 }
-                disk::Done::Rescanned { folder, include_subfolders, why, found, missing, moves } => {
+                disk::Done::Rescanned { folder, include_subfolders, why, found, missing } => {
                     // The playlist may come from another folder by now.
                     if self.store.folder.as_ref() != Some(&folder) {
                         continue;
@@ -196,11 +195,11 @@ impl App {
                     };
                     match why {
                         disk::Rescan::Subfolders => self.rescanned_subfolders(&folder, include_subfolders, found, ctx),
-                        disk::Rescan::Refresh => self.refreshed(found, &missing, &moves),
+                        disk::Rescan::Refresh => self.refreshed(found, &missing),
                     }
                 }
-                disk::Done::Arrived { videos, moves } => {
-                    self.append_new(videos, &moves);
+                disk::Done::Arrived(videos) => {
+                    self.append_new(videos);
                 }
                 disk::Done::Modified(times) => {
                     // Oldest first, like episodes saved in the order they came out.
@@ -231,7 +230,7 @@ impl App {
             _ => format!("{} items", paths.len()),
         };
         let include_subfolders = self.store.include_subfolders;
-        let job = disk::Job::Open { paths, include_subfolders, dropped, play, remembered: self.store.remembered() };
+        let job = disk::Job::Open { paths, include_subfolders, dropped, play };
         self.start_disk(job, what);
     }
 
@@ -297,7 +296,7 @@ impl App {
         let Some(folder) = self.store.folder.clone() else { return };
         let what = display_name(&folder);
         let why = disk::Rescan::Subfolders;
-        let job = disk::Job::Rescan { folder, include_subfolders: include, why, playlist: Vec::new(), remembered: Default::default() };
+        let job = disk::Job::Rescan { folder, include_subfolders: include, why, playlist: Vec::new() };
         self.start_disk(job, what);
     }
 
@@ -372,26 +371,56 @@ impl App {
         self.watch.set_target(self.store.folder.clone().map(|f| (f, self.store.include_subfolders)));
     }
 
-    /// Takes in background rescans of the playlist's folder.
+    /// Starts looking, in the background, for remembered videos whose files
+    /// are gone; [`Self::receive_gone`] forgets them.
+    pub(crate) fn find_gone(&mut self, ctx: &egui::Context) {
+        let (tx, rx) = mpsc::channel();
+        let (videos, ctx) = (self.store.remembered_videos(), ctx.clone());
+        let spawned = std::thread::Builder::new().name("find-gone".into()).spawn(move || {
+            if tx.send(progress::gone(videos)).is_ok() {
+                ctx.request_repaint();
+            }
+        });
+        self.gone_scan = spawned.is_ok().then_some(rx);
+    }
+
+    /// Forgets what was saved about the videos `find_gone` found gone.
+    pub(crate) fn receive_gone(&mut self) {
+        let Some(gone) = self.gone_scan.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
+        self.gone_scan = None;
+        self.forget_gone(gone);
+    }
+
+    /// Forgets the progress, length and track choices of these videos, whose
+    /// files are gone. Whatever is playing right now stays, even if its file
+    /// just went.
+    fn forget_gone(&mut self, mut gone: Vec<String>) {
+        if let Some(playing) = self.current_path() {
+            let playing = playing.to_string_lossy();
+            gone.retain(|k| *k != playing);
+        }
+        if self.store.forget(&gone) > 0 {
+            self.summary = None;
+            self.store.save();
+        }
+    }
+
     /// Drops the playlist entries whose files were found missing at startup.
     pub(crate) fn receive_missing_files(&mut self) {
-        let Some(FileCheck { missing, sizes }) = self.missing_files.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
+        let Some(missing) = self.missing_files.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
         self.missing_files = None;
-        for (path, size) in sizes {
-            self.store.set_size(&path, size);
-        }
         if !missing.is_empty() {
             let playing = self.current_path().map(Path::to_path_buf);
             self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
         }
     }
 
+    /// Takes in background rescans of the playlist's folder.
     pub(crate) fn receive_scans(&mut self) {
         while let Ok((folder, found)) = self.watch.scans.try_recv() {
             if self.store.folder.as_ref() == Some(&folder) {
                 let new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
                 if !new.is_empty() {
-                    // Checked on disk for moved videos first (see `disk`).
                     self.actions.push(Action::Arrived(new));
                 }
             }
@@ -399,22 +428,14 @@ impl App {
     }
 
     /// Adds the videos that aren't in the playlist yet to its end, returning
-    /// how many there were. `moves` is what `disk` found about them.
-    pub(crate) fn append_new(&mut self, found: Vec<PathBuf>, moves: &progress::Moves) -> usize {
-        let adopted = self.store.apply_moves(moves);
-        let mut new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
+    /// how many there were.
+    pub(crate) fn append_new(&mut self, found: Vec<PathBuf>) -> usize {
+        let new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
         if new.is_empty() {
             return 0;
         }
         self.names.clear();
         self.summary = None;
-        // A renamed or moved video takes the place of its old path.
-        for (old, path) in adopted {
-            if let Some(i) = self.playlist.iter().position(|p| *p == old) {
-                self.playlist[i] = path.clone();
-                new.retain(|p| *p != path);
-            }
-        }
         let count = new.len();
         // Appending shifts no indices, so a countdown to the next video stays.
         self.playlist.extend(new);
@@ -437,19 +458,18 @@ impl App {
             include_subfolders: self.store.include_subfolders,
             why: disk::Rescan::Refresh,
             playlist: self.playlist.clone(),
-            remembered: self.store.remembered(),
         };
         self.start_disk(job, what);
     }
 
     /// Takes in the rescan `refresh_folder` asked for.
-    fn refreshed(&mut self, found: Vec<PathBuf>, missing: &HashSet<PathBuf>, moves: &progress::Moves) {
-        // New videos first, so renamed ones can take their old place.
-        let added = self.append_new(found, moves);
+    fn refreshed(&mut self, found: Vec<PathBuf>, missing: &HashSet<PathBuf>) {
+        let added = self.append_new(found);
         let before = self.playlist.len();
         let playing = self.current_path().map(Path::to_path_buf);
         self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
         let removed = before - self.playlist.len();
+        self.forget_gone(missing.iter().map(|p| p.to_string_lossy().into_owned()).collect());
         let plural = |n: usize| if n == 1 { "" } else { "s" };
         self.notify(match (added, removed) {
             (0, 0) => "No changes in the folder".to_string(),

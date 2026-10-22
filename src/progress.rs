@@ -1,7 +1,7 @@
 //! Persistent state: watch progress per video and the playlist, stored as
 //! JSON in the user's config folder.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
@@ -16,17 +16,9 @@ pub struct Entry {
     pub position: f64,
     pub duration: f64,
     pub watched: bool,
-    /// The file's size in bytes, to recognize it after it is moved or renamed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub size: Option<u64>,
 }
 
 impl Entry {
-    /// Whether it has been (partly) watched.
-    fn has_progress(&self) -> bool {
-        self.watched || self.position > 0.0
-    }
-
     /// Where playback should resume, if anywhere, given the fraction of a
     /// video after which it counts as watched.
     fn resume_position(&self, watched_fraction: f64) -> Option<f64> {
@@ -432,76 +424,6 @@ impl Store {
         self.dirty = true;
     }
 
-    /// Records a video file's size, by which it is recognized if it is moved
-    /// or renamed.
-    pub fn set_size(&mut self, path: &Path, size: u64) {
-        let entry = self.entries.entry(key(path)).or_default();
-        if entry.size != Some(size) {
-            entry.size = Some(size);
-            self.dirty = true;
-        }
-    }
-
-    /// Carries progress over to videos that were moved or renamed. Each of
-    /// `paths` without progress of its own takes that of a remembered video
-    /// with exactly the same size whose file is gone, if just one such video
-    /// and one such path have that size. Track choices go along. Also records
-    /// the sizes of `paths`. Returns the recognized videos' old and new paths.
-    ///
-    /// This reads the disk; on the UI thread, use [`find_moves`] on another
-    /// thread and [`Self::apply_moves`] instead.
-    #[cfg(test)]
-    pub fn adopt_moved(&mut self, paths: &[PathBuf]) -> Vec<(PathBuf, PathBuf)> {
-        let moves = find_moves(&self.remembered(), paths);
-        self.apply_moves(&moves)
-    }
-
-    /// What moved videos are recognized by, copied for [`find_moves`].
-    pub fn remembered(&self) -> Remembered {
-        let mut remembered = Remembered::default();
-        for (k, entry) in &self.entries {
-            let worth_keeping = entry.has_progress() || self.tracks.contains_key(k);
-            if entry.size.is_some() {
-                remembered.sized.insert(k.clone());
-            }
-            if worth_keeping {
-                remembered.known.insert(k.clone());
-                if let Some(size) = entry.size {
-                    remembered.by_size.entry(size).or_default().push(k.clone());
-                }
-            }
-        }
-        // Track choices alone also make a video known.
-        remembered.known.extend(self.tracks.keys().cloned());
-        remembered
-    }
-
-    /// Takes in what [`find_moves`] found: the sizes it read, and the videos
-    /// it recognized. The store may have changed since, so a video that has
-    /// gained progress of its own by now keeps it. Returns the old and new
-    /// paths of the videos whose progress was carried over.
-    pub fn apply_moves(&mut self, moves: &Moves) -> Vec<(PathBuf, PathBuf)> {
-        for (path, size) in &moves.sizes {
-            self.set_size(path, *size);
-        }
-        let mut adopted = Vec::new();
-        for (old, path) in &moves.moved {
-            if self.get(path).has_progress() || self.tracks.contains_key(&key(path)) {
-                continue;
-            }
-            let Some(entry) = self.entries.remove(&key(old)) else { continue };
-            self.entries.insert(key(path), entry);
-            if let Some(tracks) = self.tracks.remove(&key(old)) {
-                self.tracks.insert(key(path), tracks);
-            }
-            adopted.push((old.clone(), path.clone()));
-        }
-        if !adopted.is_empty() {
-            self.dirty = true;
-        }
-        adopted
-    }
-
     pub fn set_playlist(&mut self, playlist: &[PathBuf]) {
         self.playlist = playlist.to_vec();
         self.dirty = true;
@@ -558,54 +480,6 @@ impl Store {
         self.autoplay_next = autoplay;
         self.dirty = true;
     }
-}
-
-/// What the store knows that moved videos are recognized by (see
-/// [`Store::adopt_moved`]), copied so another thread can look for them.
-#[derive(Clone, Default)]
-pub struct Remembered {
-    /// Videos with a size on record: seen at their path before.
-    sized: HashSet<String>,
-    /// Videos with progress or track choices of their own.
-    known: HashSet<String>,
-    /// The known videos with a size on record, by size.
-    by_size: HashMap<u64, Vec<String>>,
-}
-
-/// What [`find_moves`] found, for [`Store::apply_moves`].
-#[derive(Default)]
-pub struct Moves {
-    /// Sizes of the videos that had none on record.
-    sizes: Vec<(PathBuf, u64)>,
-    /// Old and new paths of the videos recognized as moved or renamed.
-    moved: Vec<(PathBuf, PathBuf)>,
-}
-
-/// The part of [`Store::adopt_moved`] that reads the disk (file sizes, and
-/// whether remembered files are gone), which can take a while on a network
-/// drive; it can run on any thread.
-pub fn find_moves(remembered: &Remembered, paths: &[PathBuf]) -> Moves {
-    let mut moves = Moves::default();
-    let mut unknown: HashMap<u64, Vec<&PathBuf>> = HashMap::new();
-    for path in paths {
-        // A size recorded for this path means the file was seen here before.
-        if remembered.sized.contains(&key(path)) {
-            continue;
-        }
-        let Ok(size) = std::fs::metadata(path).map(|m| m.len()) else { continue };
-        moves.sizes.push((path.clone(), size));
-        if !remembered.known.contains(&key(path)) {
-            unknown.entry(size).or_default().push(path);
-        }
-    }
-    for (size, paths) in unknown {
-        let [path] = paths[..] else { continue };
-        let Some(keys) = remembered.by_size.get(&size) else { continue };
-        let gone: Vec<&String> = keys.iter().filter(|k| !Path::new(k).exists()).collect();
-        let [old] = gone[..] else { continue };
-        moves.moved.push((PathBuf::from(old), path.clone()));
-    }
-    moves
 }
 
 /// Writes to a temporary file that replaces the old one only once it is
@@ -706,46 +580,6 @@ mod tests {
         assert_eq!(store.forget(&found), 2);
         assert!(store.tracks(&deleted).is_none());
         assert!(store.get(&there).watched && store.get(&unplugged).watched);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn recognizes_moved_and_renamed_videos() {
-        let dir = std::env::temp_dir().join(format!("afterglow-moved-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = |name: &str, size: usize| {
-            let path = dir.join(name);
-            std::fs::write(&path, vec![0u8; size]).unwrap();
-            path
-        };
-        let mut store = Store::default();
-        let gone = dir.join("old name.mkv");
-        store.update_position(&gone, 60.0, 600.0);
-        store.set_size(&gone, 10);
-        store.tracks_mut(&gone).subtitle = Some("2".into());
-        let still_there = file("still there.mkv", 20);
-        store.set_watched(&still_there, true);
-        store.set_size(&still_there, 20);
-        // Two gone videos of the same size: can't tell which is which.
-        for name in ["twin 1.mkv", "twin 2.mkv"] {
-            store.set_watched(&dir.join(name), true);
-            store.set_size(&dir.join(name), 30);
-        }
-
-        let renamed = file("new name.mkv", 10);
-        let copy = file("copy.mkv", 20);
-        let seen = file("seen before.mkv", 10);
-        store.set_size(&seen, 10);
-        let twin = file("twin.mkv", 30);
-        let adopted = store.adopt_moved(&[renamed.clone(), copy.clone(), twin.clone(), seen.clone()]);
-        assert_eq!(adopted, [(gone.clone(), renamed.clone())], "a video seen at its path before is no candidate");
-        assert_eq!(store.get(&renamed).position, 60.0);
-        assert_eq!(store.tracks(&renamed).and_then(|t| t.subtitle.as_deref()), Some("2"));
-        assert!(!store.entries.contains_key(&key(&gone)));
-        assert!(!store.get(&copy).watched, "a video whose file still exists keeps its progress to itself");
-        assert!(!store.get(&twin).watched, "ambiguous matches are left alone");
-        assert_eq!(store.get(&copy).size, Some(20), "sizes of new videos are recorded");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

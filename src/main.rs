@@ -188,13 +188,6 @@ struct Peek {
     left_at: Option<Instant>,
 }
 
-/// What the startup check found about the playlist's files.
-#[derive(Default)]
-struct FileCheck {
-    missing: HashSet<PathBuf>,
-    sizes: Vec<(PathBuf, u64)>,
-}
-
 /// The video that starts by itself once the countdown ends.
 struct UpNext {
     index: usize,
@@ -264,7 +257,7 @@ struct App {
     up_next: Option<UpNext>,
     watch: watch::FolderWatch,
     /// Playlist files found missing at startup.
-    missing_files: Option<Receiver<FileCheck>>,
+    missing_files: Option<Receiver<HashSet<PathBuf>>>,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
     /// Only playlist entries whose name contains this are listed.
@@ -285,10 +278,8 @@ struct App {
     line_marks: [Option<f64>; 2],
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
-    /// The background search for remembered videos whose files are gone.
+    /// The startup search for remembered videos whose files are gone.
     gone_scan: Option<Receiver<Vec<String>>>,
-    /// Videos found gone, waiting for the user to confirm forgetting them.
-    confirm_forget: Option<Vec<String>>,
     /// Whether the keyboard shortcut overview is open.
     show_help: bool,
     /// Whether the settings dialog is open.
@@ -328,21 +319,12 @@ impl App {
         let playlist: Vec<PathBuf> = store.playlist.clone();
         // Files that disappeared since last time are dropped from the playlist,
         // checked in the background since a network drive can take a while.
-        // The sizes of the others are noted, to recognize them once moved.
         let missing_files = {
             let (tx, rx) = mpsc::channel();
             let (paths, ctx) = (playlist.clone(), ctx.clone());
             let spawned = std::thread::Builder::new().name("check-files".into()).spawn(move || {
-                let mut found = FileCheck::default();
-                for path in paths {
-                    match std::fs::metadata(&path) {
-                        Ok(meta) if meta.is_file() => found.sizes.push((path, meta.len())),
-                        _ => {
-                            found.missing.insert(path);
-                        }
-                    }
-                }
-                if tx.send(found).is_ok() {
+                let missing: HashSet<PathBuf> = paths.into_iter().filter(|p| !p.is_file()).collect();
+                if tx.send(missing).is_ok() {
                     ctx.request_repaint();
                 }
             });
@@ -395,7 +377,6 @@ impl App {
             line_marks: [None, None],
             confirm_reset: false,
             gone_scan: None,
-            confirm_forget: None,
             show_help: false,
             settings_open: false,
             palette: None,
@@ -413,6 +394,7 @@ impl App {
             app.load(index, true, true, ctx);
         }
         app.request_durations();
+        app.find_gone(ctx);
         app.sync_watch();
         if let Some(warning) = load_warning {
             app.warn(warning);
@@ -624,9 +606,6 @@ impl eframe::App for App {
         if self.confirm_reset {
             self.reset_dialog(&ctx);
         }
-        if self.confirm_forget.is_some() {
-            self.forget_dialog(&ctx);
-        }
         if self.show_help {
             self.help_dialog(&ctx);
         }
@@ -806,7 +785,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::FRAME_CORNERS, icons::FILM_STRIP, icons::FOLDER_OPEN, icons::ZOOM_IN, icons::ZOOM_OUT, icons::MOON, icons::CROP, icons::BROOM, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::FRAME_CORNERS, icons::FILM_STRIP, icons::FOLDER_OPEN, icons::ZOOM_IN, icons::ZOOM_OUT, icons::MOON, icons::CROP, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];
