@@ -28,7 +28,7 @@ const ICON_SIZE: f32 = 17.0;
 /// Padding inside text fields.
 const TEXT_MARGIN: egui::Margin = egui::Margin::symmetric(8, 5);
 /// How close to the video's left edge the pointer brings out the unpinned playlist.
-const EDGE_WIDTH: f32 = 8.0;
+const EDGE_WIDTH: f32 = 24.0;
 /// How long the unpinned playlist stays after the pointer leaves it.
 const PEEK_HIDE_DELAY: Duration = Duration::from_millis(300);
 /// Height of a playlist entry, without the spacing between entries.
