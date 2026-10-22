@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app_icon;
+mod dll_search;
 mod icons;
 mod library;
 mod media_keys;
@@ -55,6 +56,7 @@ fn window_icon() -> egui::IconData {
 const SOFTWARE_VIDEO_ENV: &str = "AFTERGLOW_SOFTWARE_VIDEO";
 
 fn main() -> eframe::Result {
+    dll_search::restrict();
     // OpenGL lets mpv draw video straight into the window.
     let software = std::env::var_os(SOFTWARE_VIDEO_ENV).is_some();
     let options = eframe::NativeOptions {
