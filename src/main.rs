@@ -25,6 +25,8 @@ const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
 const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
+/// Height of a playlist entry, without the spacing between entries.
+const PLAYLIST_ROW_HEIGHT: f32 = 22.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Scroll distance, in points, of one mouse wheel notch.
 const SCROLL_NOTCH: f32 = 50.0;
@@ -263,6 +265,13 @@ struct App {
     focus_search: bool,
     /// Which search result Enter plays.
     search_pick: usize,
+    /// Scroll the list to this search result on the next frame.
+    scroll_to_pick: Option<usize>,
+    /// Display names of the playlist entries, and their lowercase forms.
+    names: Vec<(String, String)>,
+    /// When the playlist summary was added up: total and watched seconds, and
+    /// how many lengths are unknown.
+    summary: Option<(Instant, f64, f64, usize)>,
     /// Whether the subtitle sync panel is open.
     sync_panel: bool,
     /// When a subtitle line appeared and when it was spoken, for syncing.
@@ -327,6 +336,9 @@ impl App {
             search: String::new(),
             focus_search: false,
             search_pick: 0,
+            scroll_to_pick: None,
+            names: Vec::new(),
+            summary: None,
             sync_panel: false,
             line_marks: [None, None],
             confirm_reset: false,
@@ -384,6 +396,8 @@ impl App {
     fn save_playlist(&mut self) {
         // Indices may have shifted.
         self.up_next = None;
+        self.names.clear();
+        self.summary = None;
         self.request_durations();
         self.store.set_playlist(&self.playlist);
         let current = self.current_path().map(Path::to_path_buf);
@@ -572,6 +586,8 @@ impl App {
             return 0;
         }
         let count = new.len();
+        self.names.clear();
+        self.summary = None;
         // Appending shifts no indices, so a countdown to the next video stays.
         self.playlist.extend(new);
         self.store.set_playlist(&self.playlist);
@@ -1611,53 +1627,72 @@ impl App {
             return;
         }
         let query = self.search.trim().to_lowercase();
-        let folder = self.store.folder.clone();
-        // The entries to list, with their names, filtered by the search.
-        let visible: Vec<(usize, String)> = self
-            .playlist
-            .iter()
-            .enumerate()
-            .map(|(index, path)| {
-                // Videos from a subfolder of the opened folder show where they're from.
-                let subfolder = folder.as_deref().and_then(|f| path.parent()?.strip_prefix(f).ok());
-                let name = match subfolder {
-                    Some(sub) if !sub.as_os_str().is_empty() => {
-                        format!("{} / {}", sub.to_string_lossy().replace('\\', " / "), display_name(path))
-                    }
-                    _ => display_name(path),
-                };
-                (index, name)
-            })
-            .filter(|(_, name)| query.is_empty() || name.to_lowercase().contains(&query))
-            .collect();
+        self.refresh_names();
+        // Indices of the entries to list, filtered by the search.
+        let visible: Vec<usize> =
+            (0..self.playlist.len()).filter(|&i| query.is_empty() || self.names[i].1.contains(&query)).collect();
         self.search_box(ui, &visible);
-        let picked = (!query.is_empty()).then(|| visible.get(self.search_pick).map(|(i, _)| *i)).flatten();
-        egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        if visible.is_empty() {
+            ui.add_space(4.0);
+            ui.weak(format!("No videos match \"{}\".", self.search.trim()));
+            return;
+        }
+        let picked = (!query.is_empty()).then(|| visible.get(self.search_pick).copied()).flatten();
+        let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
+        if let Some(pick) = self.scroll_to_pick.take() {
+            // Keep the picked result in the middle of the list.
+            let row = PLAYLIST_ROW_HEIGHT + ui.spacing().item_spacing.y;
+            let offset = pick as f32 * row - (ui.available_height() - PLAYLIST_ROW_HEIGHT) / 2.0;
+            scroll = scroll.vertical_scroll_offset(offset.max(0.0));
+        }
+        // Only the rows in view are laid out.
+        scroll.show_rows(ui, PLAYLIST_ROW_HEIGHT, visible.len(), |ui, range| {
             let mut rows = Vec::new();
-            for (index, name) in &visible {
-                let (index, path) = (*index, &self.playlist[*index]);
+            for &index in &visible[range] {
+                let path = &self.playlist[index];
+                let name = &self.names[index].0;
                 let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, name, self.current == Some(index));
                 if picked == Some(index) {
                     // The search result Enter plays.
                     ui.painter().rect_stroke(resp.rect, 4.0, (1.5, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
-                    resp.scroll_to_me(None);
                 }
                 if resp.drag_started() {
                     self.drag_row = Some(index);
                 }
                 rows.push((index, resp.rect));
             }
-            if rows.is_empty() {
-                ui.add_space(4.0);
-                ui.weak(format!("No videos match \"{}\".", self.search.trim()));
-            }
             self.drag_rows(ui, &rows);
         });
     }
 
+    /// Rebuilds the cached display names (and their lowercase forms, for the
+    /// search) after the playlist changed.
+    fn refresh_names(&mut self) {
+        if self.names.len() == self.playlist.len() {
+            return;
+        }
+        let folder = self.store.folder.as_deref();
+        self.names = self
+            .playlist
+            .iter()
+            .map(|path| {
+                // Videos from a subfolder of the opened folder show where they're from.
+                let subfolder = folder.and_then(|f| path.parent()?.strip_prefix(f).ok());
+                let name = match subfolder {
+                    Some(sub) if !sub.as_os_str().is_empty() => {
+                        format!("{} / {}", sub.to_string_lossy().replace(std::path::MAIN_SEPARATOR, " / "), display_name(path))
+                    }
+                    _ => display_name(path),
+                };
+                let lower = name.to_lowercase();
+                (name, lower)
+            })
+            .collect();
+    }
+
     /// The search box: / focuses it, ↑/↓ pick a result, Enter plays it and Esc
     /// clears the search.
-    fn search_box(&mut self, ui: &mut egui::Ui, results: &[(usize, String)]) {
+    fn search_box(&mut self, ui: &mut egui::Ui, results: &[usize]) {
         let id = egui::Id::unique("playlist-search");
         if ui.memory(|m| m.has_focus(id)) {
             let (down, up) = ui.input_mut(|i| {
@@ -1670,6 +1705,9 @@ impl App {
             if up {
                 self.search_pick = self.search_pick.saturating_sub(1);
             }
+            if down || up {
+                self.scroll_to_pick = Some(self.search_pick);
+            }
         }
         ui.horizontal(|ui| {
             let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { 24.0 };
@@ -1680,6 +1718,7 @@ impl App {
             let resp = ui.add(edit);
             if resp.changed() {
                 self.search_pick = 0;
+                self.scroll_to_pick = Some(0);
             }
             if std::mem::take(&mut self.focus_search) {
                 resp.request_focus();
@@ -1691,7 +1730,7 @@ impl App {
                     self.search.clear();
                 }
                 if enter && !self.search.trim().is_empty() {
-                    if let Some((index, _)) = results.get(self.search_pick) {
+                    if let Some(index) = results.get(self.search_pick) {
                         self.actions.push(Action::Play(*index));
                         self.search.clear();
                     }
@@ -1739,17 +1778,23 @@ impl App {
     }
 
     /// Total and watched running time of the playlist, with a progress bar.
-    fn playlist_summary(&self, ui: &mut egui::Ui) {
-        let (mut total, mut watched, mut unknown) = (0.0, 0.0, 0);
-        for path in &self.playlist {
-            let entry = self.store.get(path);
-            if entry.duration <= 0.0 {
-                unknown += 1;
-                continue;
+    fn playlist_summary(&mut self, ui: &mut egui::Ui) {
+        // Adding up the whole playlist every frame adds up; once a second is plenty.
+        let fresh = self.summary.is_some_and(|(at, ..)| at.elapsed() < Duration::from_secs(1));
+        if !fresh {
+            let (mut total, mut watched, mut unknown) = (0.0, 0.0, 0);
+            for path in &self.playlist {
+                let entry = self.store.get(path);
+                if entry.duration <= 0.0 {
+                    unknown += 1;
+                    continue;
+                }
+                total += entry.duration;
+                watched += if entry.watched { entry.duration } else { entry.position.clamp(0.0, entry.duration) };
             }
-            total += entry.duration;
-            watched += if entry.watched { entry.duration } else { entry.position.clamp(0.0, entry.duration) };
+            self.summary = Some((Instant::now(), total, watched, unknown));
         }
+        let Some((_, total, watched, unknown)) = self.summary else { return };
         let measuring = unknown > 0 && !self.durations.pending.is_empty();
         let mut text = format!("{} of {} watched", format_total(watched), format_total(total));
         if measuring {
@@ -2282,8 +2327,10 @@ fn playlist_row(
     let button = egui::Button::selectable(playing, "")
         .left_text(text)
         .right_text(RichText::new(length).weak())
+        // One line per entry (cut off with …), so rows have a fixed height.
+        .truncate()
         .sense(Sense::click_and_drag());
-    let resp = ui.add_sized([ui.available_width(), 22.0], button);
+    let resp = ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button);
     if (!entry.watched && entry.fraction() > 0.0) || store.resume_position(path).is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
         let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
