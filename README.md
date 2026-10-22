@@ -110,6 +110,12 @@ cargo run --release -- "D:\Shows\Foo"    # play a folder
 To distribute, ship `afterglow.exe` together with `libmpv-2.dll`, in a folder the user can
 write to (the `data` folder is created next to them).
 
+Every push or merge to `main` runs `.github/workflows/release.yml`: it downloads the newest
+libmpv, runs the tests, and publishes a GitHub release with a zip of the exe and DLL, named
+after the version in `Cargo.toml`. If that version was already released, nothing is
+published, so bump the version to make a new release. Set `MPV_BUILD` in the workflow to pin
+a specific libmpv build.
+
 Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fonts`.
 The app icon is drawn in code (`src/app_icon.rs`); `cargo run --example make_icon`
 regenerates `assets/icon.ico`, which the build script puts into the executable.
