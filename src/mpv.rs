@@ -72,6 +72,7 @@ struct RawEvent {
 struct RawEndFile {
     reason: c_int,
     error: c_int,
+    playlist_entry_id: i64,
 }
 
 #[repr(C)]
@@ -188,12 +189,14 @@ impl Api {
 pub enum Event {
     FileLoaded,
     /// Playback of a file ended. `eof` is true when it played to the end.
-    EndFile { eof: bool, error: bool },
+    /// `entry` is the file's playlist entry id (see [`Mpv::load_file`]).
+    EndFile { eof: bool, error: bool, entry: i64 },
     /// Playback started after loading a file or seeking: the current frame
     /// is from where playback now is.
     PlaybackRestart,
-    /// A command sent with [`Mpv::send_tagged`] finished.
-    CommandDone { tag: u64, ok: bool },
+    /// A command sent with [`Mpv::send_tagged`] finished, with what it
+    /// returned (`Node::None` for most commands).
+    CommandDone { tag: u64, ok: bool, result: Node },
     /// An observed property changed (see [`Mpv::observe`]). `Node::None`
     /// means it is currently unavailable.
     Property { name: String, value: Node },
@@ -227,6 +230,13 @@ impl Node {
         }
     }
 
+    pub fn as_i64(&self) -> Option<i64> {
+        match *self {
+            Node::Int(i) => Some(i),
+            _ => None,
+        }
+    }
+
     fn as_str(&self) -> Option<&str> {
         match self {
             Node::Str(s) => Some(s),
@@ -235,7 +245,7 @@ impl Node {
     }
 
     /// The value of `key` in a map.
-    fn get(&self, key: &str) -> Option<&Node> {
+    pub fn get(&self, key: &str) -> Option<&Node> {
         match self {
             Node::Map(entries) => entries.iter().find(|(k, _)| k == key).map(|(_, v)| v),
             _ => None,
@@ -675,10 +685,13 @@ impl Mpv {
         self.get_str(name).as_deref() == Some("yes")
     }
 
-    pub fn load_file(&self, path: &Path, start: f64) {
+    /// Opens `path` at `start` seconds. With a `tag` other than 0, the reply
+    /// is an [`Event::CommandDone`] whose result holds the file's
+    /// `playlist_entry_id`, which its [`Event::EndFile`] carries too.
+    pub fn load_file(&self, path: &Path, start: f64, tag: u64) {
         // `start` is a global option, so it has to be reset for every file.
         self.set("start", &if start > 0.0 { format!("{start:.3}") } else { "none".into() });
-        self.send(&["loadfile", &path.to_string_lossy(), "replace"]);
+        self.send_tagged(tag, &["loadfile", &path.to_string_lossy(), "replace"]);
     }
 
     pub fn poll_events(&self) -> Vec<Event> {
@@ -694,10 +707,13 @@ impl Mpv {
                     out.push(Event::EndFile {
                         eof: end.reason == MPV_END_FILE_REASON_EOF,
                         error: end.reason == MPV_END_FILE_REASON_ERROR,
+                        entry: end.playlist_entry_id,
                     });
                 }
                 MPV_EVENT_COMMAND_REPLY if ev.reply_userdata != 0 => {
-                    out.push(Event::CommandDone { tag: ev.reply_userdata, ok: ev.error >= 0 });
+                    // `data` is an `mpv_event_command`, which holds just the result node.
+                    let result = if ev.data.is_null() { Node::None } else { unsafe { convert_node(&*(ev.data as *const RawNode)) } };
+                    out.push(Event::CommandDone { tag: ev.reply_userdata, ok: ev.error >= 0, result });
                 }
                 MPV_EVENT_PROPERTY_CHANGE if !ev.data.is_null() => {
                     let prop = unsafe { &*(ev.data as *const RawEventProperty) };
@@ -1209,7 +1225,7 @@ mod thumbnailer_tests {
         let video = encode_test_video("afterglow-thumbnails.mkv", 10);
         let mpv = Mpv::thumbnailer(egui::Context::default()).expect("libmpv");
         mpv.set_render_size(224, 126);
-        mpv.load_file(&video, 2.0);
+        mpv.load_file(&video, 2.0, 0);
 
         let picture = |mpv: &Mpv| {
             let deadline = Instant::now() + Duration::from_secs(10);
@@ -1255,7 +1271,7 @@ mod subtitle_sync_tests {
 
         let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("pause", "yes");
-        mpv.load_file(&video, 5.0);
+        mpv.load_file(&video, 5.0, 0);
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline && !mpv.poll_events().iter().any(|e| matches!(e, Event::FileLoaded)) {
             std::thread::sleep(Duration::from_millis(10));
@@ -1265,7 +1281,7 @@ mod subtitle_sync_tests {
             let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
                 for ev in mpv.poll_events() {
-                    if let Event::CommandDone { tag: t, ok } = ev {
+                    if let Event::CommandDone { tag: t, ok, .. } = ev {
                         if t == tag {
                             return Some(ok);
                         }
@@ -1349,7 +1365,7 @@ mod chapter_tests {
         let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
         mpv.set("pause", "yes");
         mpv.observe("chapter-list");
-        mpv.load_file(&edl, 0.0);
+        mpv.load_file(&edl, 0.0, 0);
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut chapters = Vec::new();
         while Instant::now() < deadline && chapters.is_empty() {
@@ -1367,6 +1383,51 @@ mod chapter_tests {
         assert_eq!(times, [0.0, 2.0, 4.0]);
         std::fs::remove_file(edl).unwrap();
         std::fs::remove_file(wav).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod entry_tests {
+    use super::tests::{silent_wav, use_built_dll};
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The reply to opening a file and the file's end carry the same entry
+    /// id, so the end of a replaced file can be told from the new one's.
+    #[test]
+    fn ends_name_the_file_they_are_about() {
+        use_built_dll();
+        let (one, two) = (silent_wav("afterglow-entry-1.wav", 1), silent_wav("afterglow-entry-2.wav", 1));
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        mpv.set("mute", "yes");
+        let mut events = Vec::new();
+        let until = |done: &dyn Fn(&[Event]) -> bool, events: &mut Vec<Event>| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !done(events) && Instant::now() < deadline {
+                events.extend(mpv.poll_events());
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let replies = |events: &[Event]| -> Vec<i64> {
+            let entry = |result: &Node| result.get("playlist_entry_id").and_then(Node::as_i64);
+            events.iter().filter_map(|e| match e { Event::CommandDone { tag: 9, result, .. } => entry(result), _ => None }).collect()
+        };
+        let ends = |events: &[Event]| -> Vec<(i64, bool)> {
+            events.iter().filter_map(|e| match e { Event::EndFile { entry, eof, .. } => Some((*entry, *eof)), _ => None }).collect()
+        };
+
+        mpv.load_file(&one, 0.0, 9);
+        until(&|e| replies(e).len() == 1, &mut events);
+        // Replace it before it ends, then let the second play to its end.
+        mpv.load_file(&two, 0.0, 9);
+        until(&|e| ends(e).iter().any(|&(_, eof)| eof), &mut events);
+        let ids = replies(&events);
+        assert_eq!(ids.len(), 2, "both opens are answered with an entry id");
+        assert_ne!(ids[0], ids[1]);
+        assert_eq!(ends(&events), [(ids[0], false), (ids[1], true)], "each end names its own file");
+        drop(mpv);
+        std::fs::remove_file(one).unwrap();
+        std::fs::remove_file(two).unwrap();
     }
 }
 
@@ -1412,7 +1473,7 @@ mod prober_tests {
         assert_eq!(Prober::new().expect("libmpv").duration(&edl, timeout), None, "the prober doesn't follow it");
 
         let previews = Mpv::thumbnailer(egui::Context::default()).expect("libmpv");
-        previews.load_file(&edl, 0.0);
+        previews.load_file(&edl, 0.0, 0);
         let deadline = std::time::Instant::now() + timeout;
         let mut failed = false;
         while std::time::Instant::now() < deadline && !failed {

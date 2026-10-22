@@ -32,6 +32,39 @@ pub(crate) fn step_speed(speed: f64, up: bool) -> f64 {
     next.unwrap_or(if up { SPEEDS[SPEEDS.len() - 1] } else { SPEEDS[0] })
 }
 
+/// Tells whether an end-of-file event is about the video asked for last.
+/// mpv can report the end of the previous video after a new one was asked
+/// for (when it had just played to its end, say); that must not count as
+/// the new one finishing. Each file mpv opens gets a playlist entry id,
+/// which the reply to opening it and its end both carry.
+#[derive(Default)]
+pub(crate) struct Loads {
+    /// Videos asked for whose reply hasn't come yet.
+    waiting: u32,
+    /// The entry id of the video asked for last, once its reply is in.
+    current: Option<i64>,
+}
+
+impl Loads {
+    pub(crate) fn asked(&mut self) {
+        self.waiting += 1;
+        self.current = None;
+    }
+
+    /// The reply to opening a video: its entry id, or `None` if it failed.
+    pub(crate) fn answered(&mut self, entry: Option<i64>) {
+        self.waiting = self.waiting.saturating_sub(1);
+        // Replies come in order, so only the last one is the current video.
+        if self.waiting == 0 {
+            self.current = entry;
+        }
+    }
+
+    pub(crate) fn is_current(&self, entry: i64) -> bool {
+        self.waiting == 0 && self.current == Some(entry)
+    }
+}
+
 impl App {
     /// The video to offer when nothing is playing: the last one played if it is
     /// unfinished, otherwise the next unwatched one after it (wrapping around).
@@ -74,7 +107,8 @@ impl App {
         }
         let start = self.store.resume_position(&path);
         mpv.set("pause", if paused { "yes" } else { "no" });
-        mpv.load_file(&path, start.unwrap_or(0.0));
+        mpv.load_file(&path, start.unwrap_or(0.0), LOAD_TAG);
+        self.loads.asked();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
         // Drop the previous frame so it never shows under the new video.
         self.texture = None;
@@ -238,7 +272,11 @@ impl App {
                     }
                 }
                 mpv::Event::Property { name, value } => self.property_changed(&name, value),
-                mpv::Event::CommandDone { tag: SUB_STEP_TAG, ok } => {
+                mpv::Event::CommandDone { tag: LOAD_TAG, ok, result } => {
+                    let entry = result.get("playlist_entry_id").and_then(mpv::Node::as_i64);
+                    self.loads.answered(entry.filter(|_| ok));
+                }
+                mpv::Event::CommandDone { tag: SUB_STEP_TAG, ok, .. } => {
                     if let Some(which) = self.announce_sub_step.take() {
                         self.notify(if ok { format!("{which} line shown now") } else { "No subtitle line to sync to".into() });
                     }
@@ -249,7 +287,7 @@ impl App {
                     }
                     self.select_saved_tracks();
                 }
-                mpv::Event::CommandDone { tag: SCREENSHOT_TAG, ok } => {
+                mpv::Event::CommandDone { tag: SCREENSHOT_TAG, ok, .. } => {
                     if !self.screenshots.is_empty() {
                         let path = self.screenshots.remove(0);
                         if ok {
@@ -260,7 +298,9 @@ impl App {
                     }
                 }
                 mpv::Event::CommandDone { .. } => {}
-                mpv::Event::EndFile { eof, error } => {
+                // The end of a video played before the one asked for last.
+                mpv::Event::EndFile { entry, .. } if !self.loads.is_current(entry) => {}
+                mpv::Event::EndFile { eof, error, .. } => {
                     self.loaded = false;
                     if error {
                         self.warn("Playback failed: the file could not be decoded.");
@@ -306,6 +346,26 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_video_asked_for_last_can_end() {
+        let mut loads = Loads::default();
+        assert!(!loads.is_current(1), "nothing asked for yet");
+        loads.asked();
+        loads.answered(Some(1));
+        assert!(loads.is_current(1));
+        // Next, Next: the first reply is for a video already replaced.
+        loads.asked();
+        loads.asked();
+        assert!(!loads.is_current(1), "the end of the old video, reported late");
+        loads.answered(Some(2));
+        assert!(!loads.is_current(2), "the second video was skipped");
+        loads.answered(Some(3));
+        assert!(loads.is_current(3) && !loads.is_current(2));
+        loads.asked();
+        loads.answered(None);
+        assert!(!loads.is_current(3), "after a failed open, nothing is playing");
+    }
 
     #[test]
     fn finds_chapter_targets() {

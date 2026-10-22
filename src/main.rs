@@ -62,6 +62,8 @@ const SUB_STEP_TAG: u64 = 1;
 const SUB_RESTORE_TAG: u64 = 2;
 /// Tags the reply to saving a screenshot.
 const SCREENSHOT_TAG: u64 = 3;
+/// Tags the replies to opening a video (see `playback::Loads`).
+const LOAD_TAG: u64 = 4;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 const MIN_WINDOW_SIZE: [f32; 2] = [480.0, 300.0];
@@ -213,6 +215,8 @@ struct App {
     current: Option<usize>,
     /// True between mpv reporting the file as loaded and its end.
     loaded: bool,
+    /// Which video an end-of-file event is about.
+    loads: Loads,
     playback: Playback,
     texture: Option<TextureHandle>,
     show_sidebar: bool,
@@ -340,6 +344,7 @@ impl App {
             playlist,
             current: None,
             loaded: false,
+            loads: Loads::default(),
             playback: Playback::default(),
             texture: None,
             show_sidebar: true,

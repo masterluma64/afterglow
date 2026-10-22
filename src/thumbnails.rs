@@ -51,7 +51,7 @@ impl Thumbnails {
             self.loaded = false;
             self.texture = None;
             self.requested = Some(time);
-            self.mpv.load_file(path, time);
+            self.mpv.load_file(path, time, 0);
             return;
         }
         if self.loaded && self.requested != Some(time) {
@@ -67,7 +67,7 @@ impl Thumbnails {
                 mpv::Event::FileLoaded => self.loaded = true,
                 // Replacing the file also ends the old one; only a real end
                 // (seeking past the last keyframe, or an error) needs a reload.
-                mpv::Event::EndFile { eof, error } if eof || error => {
+                mpv::Event::EndFile { eof, error, .. } if eof || error => {
                     self.loaded = false;
                     self.path = None;
                 }
