@@ -22,6 +22,15 @@ pub(crate) fn accent_selection(accent: Option<[u8; 3]>, dark: bool) -> egui::sty
     egui::style::Selection { bg_fill: Color32::from_rgb(r, g, b), stroke: egui::Stroke::new(1.0, text) }
 }
 
+/// Text color for errors: softer than egui's pure red, which glares on a
+/// dark background.
+pub(crate) fn error_color(dark: bool) -> Color32 {
+    if dark { Color32::from_rgb(235, 115, 105) } else { Color32::from_rgb(185, 50, 40) }
+}
+
+/// Fill behind white text on buttons that destroy something.
+pub(crate) const DANGER_FILL: Color32 = Color32::from_rgb(178, 62, 54);
+
 impl App {
     /// Tools for subtitles that are out of sync, in a panel over the video.
     pub(crate) fn sync_panel(&mut self, ctx: &egui::Context, video: egui::Rect) {
@@ -102,7 +111,10 @@ impl App {
             progress::Theme::Light => egui::ThemePreference::Light,
         });
         let accent = settings.accent;
-        ctx.all_styles_mut(|style| style.visuals.selection = accent_selection(accent, style.visuals.dark_mode));
+        ctx.all_styles_mut(|style| {
+            style.visuals.selection = accent_selection(accent, style.visuals.dark_mode);
+            style.visuals.error_fg_color = error_color(style.visuals.dark_mode);
+        });
         if let Ok(mpv) = &self.mpv {
             mpv.set("slang", &settings.sub_languages);
             mpv.set("alang", &settings.audio_languages);
@@ -291,7 +303,7 @@ impl App {
             ui.add_space(14.0);
             ui.horizontal(|ui| {
                 let reset = egui::Button::new(RichText::new("Reset all progress").color(Color32::WHITE))
-                    .fill(ui.visuals().error_fg_color);
+                    .fill(DANGER_FILL);
                 if ui.add(reset).clicked() {
                     self.actions.push(Action::ResetAllProgress);
                     self.confirm_reset = false;

@@ -6,6 +6,7 @@ use super::*;
 pub(crate) fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
     visuals.selection = accent_selection(accent, true);
+    visuals.error_fg_color = error_color(true);
     visuals
 }
 
