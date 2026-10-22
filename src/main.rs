@@ -89,6 +89,10 @@ enum Action {
     OpenVideos,
     /// Folders and videos dropped onto the window or passed on the command line.
     Open(Vec<PathBuf>),
+    /// Folders and videos dropped onto the window.
+    Drop(Vec<PathBuf>),
+    /// Answers what dropped videos should do, and remembers it.
+    ChooseDropBehavior(progress::DroppedVideos),
     Play(usize),
     Remove(usize),
     ClearPlaylist,
@@ -284,6 +288,8 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
+    /// Dropped videos waiting for the answer to what drops should do.
+    pending_drop: Option<Vec<PathBuf>>,
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
@@ -359,13 +365,14 @@ impl App {
             confirm_reset: false,
             show_help: false,
             settings_open: false,
+            pending_drop: None,
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
         if !open.is_empty() {
-            app.open(open, ctx);
+            app.open(open, false, ctx);
         } else if let Some(index) = app.continue_target() {
             // Pre-open where we left off, paused on that frame.
             app.load(index, true, ctx);
@@ -423,15 +430,20 @@ impl App {
     }
 
     /// Opens dropped or passed paths. Folders replace the playlist with their
-    /// videos (and start playing); videos are added to the end.
-    fn open(&mut self, paths: Vec<PathBuf>, ctx: &egui::Context) {
+    /// videos (and start playing). Videos are added to the end, unless they
+    /// were dropped: then the drop setting decides, asking the first time.
+    fn open(&mut self, paths: Vec<PathBuf>, dropped: bool, ctx: &egui::Context) {
         let (folders, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| p.is_dir());
         let (videos, others): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| library::is_video(p));
         if let Some(other) = others.first() {
             self.warn(format!("Not a video: {}", display_name(other)));
         }
         if folders.is_empty() {
-            self.add_videos(videos, ctx);
+            match self.store.settings.dropped_videos {
+                _ if !dropped || videos.is_empty() || self.playlist.is_empty() => self.add_videos(videos, ctx),
+                Some(behavior) => self.drop_videos(videos, behavior, ctx),
+                None => self.pending_drop = Some(videos),
+            }
             return;
         }
         let mut list = Vec::new();
@@ -451,6 +463,19 @@ impl App {
         self.store.set_folder((folders.len() == 1).then(|| folders[0].as_path()));
         self.sync_watch();
         self.replace_playlist(list, ctx);
+    }
+
+    /// Adds dropped videos to the playlist, or makes them the playlist.
+    fn drop_videos(&mut self, videos: Vec<PathBuf>, behavior: progress::DroppedVideos, ctx: &egui::Context) {
+        match behavior {
+            progress::DroppedVideos::Add => self.add_videos(videos, ctx),
+            progress::DroppedVideos::Replace => {
+                // The playlist no longer comes from a folder.
+                self.store.set_folder(None);
+                self.sync_watch();
+                self.replace_playlist(videos, ctx);
+            }
+        }
     }
 
     /// Changes whether folders include their subfolders, and rescans the folder
@@ -924,11 +949,11 @@ impl App {
     fn handle_input(&mut self, ctx: &egui::Context) {
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
         if !dropped.is_empty() {
-            self.actions.push(Action::Open(dropped));
+            self.actions.push(Action::Drop(dropped));
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.pending_drop.is_some() {
             return;
         }
         if self.show_help {
@@ -1035,7 +1060,7 @@ impl App {
         match action {
             Action::OpenFolder => {
                 if let Some(folder) = rfd::FileDialog::new().set_title("Open folder as playlist").pick_folder() {
-                    self.open(vec![folder], ctx);
+                    self.open(vec![folder], false, ctx);
                 }
             }
             Action::OpenVideos => {
@@ -1047,7 +1072,17 @@ impl App {
                     self.add_videos(files, ctx);
                 }
             }
-            Action::Open(paths) => self.open(paths, ctx),
+            Action::Open(paths) => self.open(paths, false, ctx),
+            Action::Drop(paths) => self.open(paths, true, ctx),
+            Action::ChooseDropBehavior(behavior) => {
+                let mut settings = self.store.settings.clone();
+                settings.dropped_videos = Some(behavior);
+                self.store.set_settings(settings);
+                self.store.save();
+                if let Some(videos) = self.pending_drop.take() {
+                    self.drop_videos(videos, behavior, ctx);
+                }
+            }
             Action::Play(index) => self.play(index, ctx),
             Action::Remove(index) => self.remove(index, ctx),
             Action::ClearPlaylist => self.clear_playlist(ctx),
@@ -1504,6 +1539,15 @@ impl App {
                 ui.label("");
                 ui.checkbox(&mut autoplay, "Play the next video automatically");
                 ui.end_row();
+                ui.label("Dropped videos")
+                    .on_hover_text("What dropping videos onto the window does (dropped folders always replace the playlist)");
+                ui.horizontal(|ui| {
+                    use progress::DroppedVideos as D;
+                    for (choice, label) in [(None, "Ask"), (Some(D::Add), "Add to playlist"), (Some(D::Replace), "Replace playlist")] {
+                        ui.selectable_value(&mut settings.dropped_videos, choice, label);
+                    }
+                });
+                ui.end_row();
                 section(ui, "LANGUAGES");
                 ui.label("Subtitles");
                 ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).hint_text("e.g. en,eng").desired_width(200.0))
@@ -1568,6 +1612,34 @@ impl App {
         if close || modal.should_close() {
             self.settings_open = false;
             self.store.save();
+        }
+    }
+
+    /// Asks, the first time videos are dropped, whether they should be added
+    /// or replace the playlist.
+    fn drop_dialog(&mut self, ctx: &egui::Context) {
+        let count = self.pending_drop.as_ref().map_or(0, Vec::len);
+        let videos = if count == 1 { "this video".to_string() } else { format!("these {count} videos") };
+        let modal = egui::Modal::new(egui::Id::unique("drop-behavior")).show(ctx, |ui| {
+            ui.set_width(400.0);
+            ui.label(RichText::new("Dropped videos").size(18.0).strong());
+            ui.add_space(8.0);
+            ui.label(format!("Add {videos} to the playlist, or replace the playlist with {}?", if count == 1 { "it" } else { "them" }));
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                if ui.button(format!("{}  Add to the playlist", icons::PLUS)).clicked() {
+                    self.actions.push(Action::ChooseDropBehavior(progress::DroppedVideos::Add));
+                }
+                if ui.button(format!("{}  Replace the playlist", icons::FILE_VIDEO)).clicked() {
+                    self.actions.push(Action::ChooseDropBehavior(progress::DroppedVideos::Replace));
+                }
+            });
+            ui.add_space(8.0);
+            ui.weak("Your choice is remembered; you can change it in Settings.");
+        });
+        // Esc or a click outside cancels the drop without remembering anything.
+        if modal.should_close() {
+            self.pending_drop = None;
         }
     }
 
@@ -2329,6 +2401,9 @@ impl eframe::App for App {
         }
         if self.settings_open {
             self.settings_dialog(&ctx);
+        }
+        if self.pending_drop.is_some() {
+            self.drop_dialog(&ctx);
         }
 
         if let Some(up_next) = &self.up_next {

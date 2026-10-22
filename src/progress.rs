@@ -39,6 +39,8 @@ pub struct Settings {
     pub seek_long: f64,
     /// How far into a video (in percent) it counts as watched.
     pub watched_percent: f64,
+    /// What dropping videos onto the window does; `None` asks (the first time).
+    pub dropped_videos: Option<DroppedVideos>,
     pub theme: Theme,
     /// Accent color (selection, seek bar, progress); `None` for the default blue.
     pub accent: Option<[u8; 3]>,
@@ -54,6 +56,7 @@ impl Default for Settings {
             seek_short: 5.0,
             seek_long: 30.0,
             watched_percent: 90.0,
+            dropped_videos: None,
             theme: Theme::System,
             accent: None,
             sub_languages: "en,eng".into(),
@@ -61,6 +64,14 @@ impl Default for Settings {
             hardware_decoding: true,
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum DroppedVideos {
+    /// Add them to the end of the playlist.
+    Add,
+    /// Make them the playlist.
+    Replace,
 }
 
 #[derive(Clone, Copy, PartialEq, Default, Serialize, Deserialize)]

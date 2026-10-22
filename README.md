@@ -10,13 +10,13 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - *Open folder* (O, or drop a folder) replaces it with the videos in that
     folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
     Turn on *Include subfolders* (right-click the playlist) to also pick up videos in
-    subfolders; changing it rescans
-    the opened folder right away.
+    subfolders; changing it rescans the opened folder right away.
     New videos saved into the folder are added to the end of the playlist by themselves;
     *Refresh folder* (R, in the ⋯ menu) also drops videos whose files are gone.
   - The ⋯ menu lists recently opened folders.
-  - *Add videos* (I, or drop videos) appends them; if nothing is playing, the first
-    one starts.
+  - *Add videos* (I) appends them; if nothing is playing, the first one starts.
+  - Dropping videos onto the window adds them or replaces the playlist: the first time,
+    Afterglow asks which, and remembers it (changeable in Settings).
   - Each video shows its length, and the header shows how much of the playlist's total
     running time you've watched. Lengths of unplayed videos are read in the background
     by a headless mpv and remembered.
