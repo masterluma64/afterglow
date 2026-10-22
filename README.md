@@ -59,7 +59,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
 
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
-  preferred subtitle and audio languages, hardware decoding and the theme.
+  preferred subtitle and audio languages, hardware decoding, the theme and the accent color
+  (a few presets or any color).
 
 Afterglow is portable: its state is stored in `data\progress.json` next to `afterglow.exe`,
 so the whole folder can be moved or carried on a USB stick. Data from earlier versions in

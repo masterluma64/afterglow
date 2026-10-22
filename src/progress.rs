@@ -40,6 +40,8 @@ pub struct Settings {
     /// How far into a video (in percent) it counts as watched.
     pub watched_percent: f64,
     pub theme: Theme,
+    /// Accent color (selection, seek bar, progress); `None` for the default blue.
+    pub accent: Option<[u8; 3]>,
     /// Preferred languages, as mpv's comma-separated `slang` / `alang` lists.
     pub sub_languages: String,
     pub audio_languages: String,
@@ -53,6 +55,7 @@ impl Default for Settings {
             seek_long: 30.0,
             watched_percent: 90.0,
             theme: Theme::System,
+            accent: None,
             sub_languages: "en,eng".into(),
             audio_languages: String::new(),
             hardware_decoding: true,

@@ -1469,6 +1469,8 @@ impl App {
             progress::Theme::Dark => egui::ThemePreference::Dark,
             progress::Theme::Light => egui::ThemePreference::Light,
         });
+        let accent = settings.accent;
+        ctx.all_styles_mut(|style| style.visuals.selection = accent_selection(accent, style.visuals.dark_mode));
         if let Ok(mpv) = &self.mpv {
             mpv.set("slang", &settings.sub_languages);
             mpv.set("alang", &settings.audio_languages);
@@ -1524,6 +1526,24 @@ impl App {
                         (progress::Theme::Light, "Light"),
                     ] {
                         ui.selectable_value(&mut settings.theme, theme, label);
+                    }
+                });
+                ui.end_row();
+                ui.label("Accent color");
+                ui.horizontal(|ui| {
+                    let blue = accent_selection(None, ui.visuals().dark_mode).bg_fill;
+                    if swatch(ui, blue, settings.accent.is_none(), "Blue (default)").clicked() {
+                        settings.accent = None;
+                    }
+                    for (name, rgb) in ACCENTS {
+                        if swatch(ui, Color32::from_rgb(rgb[0], rgb[1], rgb[2]), settings.accent == Some(rgb), name).clicked() {
+                            settings.accent = Some(rgb);
+                        }
+                    }
+                    let mut custom = settings.accent.unwrap_or([blue.r(), blue.g(), blue.b()]);
+                    let picker = egui::color_picker::color_edit_button_srgb(ui, &mut custom);
+                    if picker.on_hover_text("Pick any color").changed() {
+                        settings.accent = Some(custom);
                     }
                 });
                 ui.end_row();
@@ -2131,7 +2151,7 @@ impl App {
     fn placeholder(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(Layout::top_down(Align::Center)));
         // The video area is black in either theme.
-        child.style_mut().visuals = egui::Visuals::dark();
+        child.style_mut().visuals = video_visuals(self.store.settings.accent);
         child.add_space(rect.height() * 0.36);
         if let Err(e) = &self.mpv {
             child.label(RichText::new(format!("{}  Afterglow can't play videos", icons::WARNING)).size(18.0));
@@ -2276,12 +2296,13 @@ impl eframe::App for App {
             .rect;
         self.controls_rect = None;
         if self.fullscreen && !idle {
+            let accent = self.store.settings.accent;
             let area = egui::Area::new(egui::Id::unique("controls-overlay"))
                 .order(egui::Order::Foreground)
                 .fixed_pos(window.left_bottom())
                 .pivot(egui::Align2::LEFT_BOTTOM)
                 .show(&ctx, |ui| {
-                    ui.style_mut().visuals = egui::Visuals::dark();
+                    ui.style_mut().visuals = video_visuals(accent);
                     egui::Frame::NONE
                         .fill(Color32::from_black_alpha(190))
                         .inner_margin(egui::Margin::symmetric(12, 8))
@@ -2407,6 +2428,43 @@ fn subfolder_option(ui: &mut egui::Ui, include: bool, actions: &mut Vec<Action>)
         actions.push(Action::SetIncludeSubfolders(include));
         ui.close();
     }
+}
+
+/// Accent colors offered in the settings, besides egui's default blue.
+const ACCENTS: [(&str, [u8; 3]); 6] = [
+    ("Purple", [140, 95, 225]),
+    ("Pink", [214, 78, 150]),
+    ("Red", [205, 62, 58]),
+    ("Orange", [222, 120, 30]),
+    ("Green", [52, 150, 82]),
+    ("Teal", [22, 145, 150]),
+];
+
+/// A clickable color square, outlined when selected.
+fn swatch(ui: &mut egui::Ui, color: Color32, selected: bool, name: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
+    ui.painter().rect_filled(rect.shrink(3.0), 4.0, color);
+    if selected || resp.hovered() {
+        let outline = if selected { ui.visuals().strong_text_color() } else { ui.visuals().weak_text_color() };
+        ui.painter().rect_stroke(rect, 5.0, (2.0, outline), egui::StrokeKind::Inside);
+    }
+    resp.on_hover_text(name)
+}
+
+/// Selection colors for an accent: its fill, with text that stays readable on it.
+fn accent_selection(accent: Option<[u8; 3]>, dark: bool) -> egui::style::Selection {
+    let default = if dark { egui::Visuals::dark() } else { egui::Visuals::light() }.selection;
+    let Some([r, g, b]) = accent else { return default };
+    let luminance = 0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b);
+    let text = if luminance > 150.0 { Color32::BLACK } else { Color32::WHITE };
+    egui::style::Selection { bg_fill: Color32::from_rgb(r, g, b), stroke: egui::Stroke::new(1.0, text) }
+}
+
+/// The dark look of everything drawn over the video, whatever the theme.
+fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {
+    let mut visuals = egui::Visuals::dark();
+    visuals.selection = accent_selection(accent, true);
+    visuals
 }
 
 fn transport_button(icon: &str) -> egui::Button<'static> {
