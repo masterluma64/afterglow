@@ -1,4 +1,9 @@
-//! Finding videos on disk.
+//! The playlist, finding videos on disk, and what is remembered about them.
+
+pub(crate) mod disk;
+pub(crate) mod playlist;
+pub(crate) mod progress;
+pub(crate) mod watch;
 
 use std::cmp::Ordering;
 use std::collections::HashSet;

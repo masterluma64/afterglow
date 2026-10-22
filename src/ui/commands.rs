@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use super::*;
+use crate::*;
 
 /// What is typed into the command palette, and which match Enter runs.
 #[derive(Default)]

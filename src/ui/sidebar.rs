@@ -1,6 +1,6 @@
 //! The playlist sidebar: docked, or sliding out over the video.
 
-use super::*;
+use crate::*;
 
 /// A playlist entry with its watch progress.
 pub(crate) fn playlist_row(

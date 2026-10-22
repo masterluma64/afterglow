@@ -1,7 +1,7 @@
 //! Checks a saved window position against the monitors connected now, so a
 //! window last seen on a monitor that's gone doesn't open off-screen.
 
-use crate::progress::WindowPlacement;
+use crate::library::progress::WindowPlacement;
 
 const MONITOR_DEFAULTTONULL: u32 = 0;
 

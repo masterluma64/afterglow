@@ -5,7 +5,7 @@ use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui::{self, TextureHandle, TextureOptions};
 
-use crate::mpv::{self, Mpv};
+use crate::player::mpv::{self, Mpv};
 
 /// Size previews are rendered at, in pixels. Other aspect ratios get bars.
 pub const SIZE: [u32; 2] = [224, 126];

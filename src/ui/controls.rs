@@ -1,6 +1,6 @@
 //! The top bar and the playback controls under the video.
 
-use super::*;
+use crate::*;
 
 pub(crate) fn transport_button(icon: &str) -> egui::Button<'static> {
     egui::Button::new(icons::fill(icon).size(ICON_SIZE)).frame_when_inactive(false).min_size(vec2(34.0, 30.0))

@@ -1,26 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
-mod app_icon;
-mod commands;
-mod controls;
-mod dialogs;
-mod disk;
-mod dll_search;
-mod icons;
-mod instance;
 mod library;
-mod media_keys;
-mod mpv;
-mod playback;
-mod playlist;
-mod power;
-mod progress;
-mod screen;
-mod sidebar;
-mod thumbnails;
-mod video;
-mod watch;
+mod platform;
+mod player;
+mod ui;
+
+use library::{disk, playlist, progress, watch};
+use platform::{instance, media_keys, power, screen};
+use player::{dll_search, mpv, playback, thumbnails};
+use ui::{app_icon, commands, controls, dialogs, icons, video};
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -759,7 +748,7 @@ fn format_time(seconds: f64) -> String {
 mod tests {
     use super::*;
     use eframe::egui::{Context, FontFamily, FontId};
-    use crate::sidebar::format_total;
+    use crate::ui::sidebar::format_total;
 
     #[test]
     fn formats_times() {

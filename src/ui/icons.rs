@@ -65,11 +65,11 @@ pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
         "phosphor".into(),
-        Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Phosphor.ttf"))),
+        Arc::new(FontData::from_static(include_bytes!("../../assets/fonts/Phosphor.ttf"))),
     );
     fonts.font_data.insert(
         FILL_FAMILY.into(),
-        Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Phosphor-Fill.ttf"))),
+        Arc::new(FontData::from_static(include_bytes!("../../assets/fonts/Phosphor-Fill.ttf"))),
     );
     // Monospace text (key names, times) can contain icons too.
     fonts.families.entry(FontFamily::Monospace).or_default().push("phosphor".into());

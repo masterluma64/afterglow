@@ -1,6 +1,6 @@
 //! Settings, the shortcut overview, confirmations and the subtitle sync panel.
 
-use super::*;
+use crate::*;
 
 /// A clickable color square, outlined when selected.
 pub(crate) fn swatch(ui: &mut egui::Ui, color: Color32, selected: bool, name: &str) -> egui::Response {

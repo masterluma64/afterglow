@@ -1,9 +1,9 @@
 //! Writes `assets/icon.ico` (built into the executable by build.rs) and
-//! `assets/icon.png` from the icon drawn in `src/app_icon.rs`.
+//! `assets/icon.png` from the icon drawn in `src/ui/app_icon.rs`.
 //!
 //! cargo run --example make_icon
 
-#[path = "../src/app_icon.rs"]
+#[path = "../src/ui/app_icon.rs"]
 mod app_icon;
 
 /// The sizes Windows picks from for title bars, the taskbar and Explorer.

@@ -1,6 +1,6 @@
 //! The video area: the frame, notices over it, and what shows before a video plays.
 
-use super::*;
+use crate::*;
 
 /// The dark look of everything drawn over the video, whatever the theme.
 pub(crate) fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {

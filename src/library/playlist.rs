@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::*;
+use crate::*;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum SortBy {

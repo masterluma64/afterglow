@@ -1,6 +1,6 @@
 //! Loading and playing videos, and following mpv's state while they play.
 
-use super::*;
+use crate::*;
 
 /// The chapter playing at `time`.
 pub(crate) fn chapter_at(chapters: &[mpv::Chapter], time: f64) -> Option<usize> {
@@ -378,7 +378,7 @@ mod tests {
     fn finds_chapter_targets() {
         let chapters: Vec<_> = [0.0, 60.0, 120.0]
             .into_iter()
-            .map(|time| crate::mpv::Chapter { title: String::new(), time })
+            .map(|time| crate::player::mpv::Chapter { title: String::new(), time })
             .collect();
         assert_eq!(chapter_at(&chapters, 59.0), Some(0));
         assert_eq!(chapter_at(&chapters, 60.0), Some(1));

@@ -131,7 +131,7 @@ distribute it more widely, switch to an LGPL build of libmpv (mpv built with
 may load as a separate, replaceable DLL.
 
 Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fonts`.
-The app icon is drawn in code (`src/app_icon.rs`); `cargo run --example make_icon`
+The app icon is drawn in code (`src/ui/app_icon.rs`); `cargo run --example make_icon`
 regenerates `assets/icon.ico`, which the build script puts into the executable.
 
 ## Keyboard shortcuts
