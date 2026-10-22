@@ -1433,7 +1433,7 @@ impl App {
     fn sync_panel(&mut self, ctx: &egui::Context, video: egui::Rect) {
         let mut open = self.sync_panel;
         let Playback { sub_delay, sub_speed, .. } = self.playback;
-        egui::Window::new(format!("{}  Sync subtitles", icons::TIMER))
+        egui::Window::new("Sync subtitles")
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
@@ -1522,7 +1522,7 @@ impl App {
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
             ui.set_width(420.0);
-            ui.label(RichText::new(format!("{}  Settings", icons::GEAR)).size(18.0).strong());
+            ui.label(RichText::new("Settings").size(18.0).strong());
             ui.add_space(10.0);
             let section = |ui: &mut egui::Ui, title: &str| {
                 ui.label(RichText::new(title).small().weak());
@@ -1649,7 +1649,7 @@ impl App {
     /// An overview of the keyboard shortcuts.
     fn help_dialog(&mut self, ctx: &egui::Context) {
         let modal = egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
-            ui.label(RichText::new(format!("{}  Keyboard shortcuts", icons::KEYBOARD)).size(18.0).strong());
+            ui.label(RichText::new("Keyboard shortcuts").size(18.0).strong());
             ui.add_space(8.0);
             ui.columns(2, |columns| {
                 for (column, groups) in columns.iter_mut().zip(SHORTCUTS.chunks(SHORTCUTS.len().div_ceil(2))) {
@@ -1677,7 +1677,7 @@ impl App {
     fn reset_dialog(&mut self, ctx: &egui::Context) {
         let modal = egui::Modal::new(egui::Id::unique("reset-progress")).show(ctx, |ui| {
             ui.set_width(380.0);
-            ui.label(RichText::new(format!("{}  Reset all progress?", icons::WARNING)).size(18.0).strong());
+            ui.label(RichText::new("Reset all progress?").size(18.0).strong());
             ui.add_space(8.0);
             ui.label("This forgets the saved position and watched state of every video. Your playlist and settings stay.");
             ui.add_space(4.0);
