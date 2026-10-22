@@ -410,7 +410,7 @@ impl App {
             app.open(open, false, None);
         } else if let Some(index) = app.continue_target() {
             // Pre-open where we left off, paused on that frame.
-            app.load(index, true, ctx);
+            app.load(index, true, true, ctx);
         }
         app.request_durations();
         app.sync_watch();
@@ -644,7 +644,7 @@ impl eframe::App for App {
             && Instant::now() >= up_next.at
         {
             let index = up_next.index;
-            self.actions.push(Action::Play(index));
+            self.actions.push(Action::PlayFromStart(index));
         }
         self.apply_actions(&ctx);
 

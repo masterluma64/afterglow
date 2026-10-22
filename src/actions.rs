@@ -17,6 +17,8 @@ pub(crate) enum Action {
     /// Answers what dropped videos should do, and remembers it.
     ChooseDropBehavior(progress::DroppedVideos),
     Play(usize),
+    /// Plays a video from its start (the next one after a video finishes).
+    PlayFromStart(usize),
     Remove(usize),
     ClearPlaylist,
     /// Moves a playlist entry so it lands before the entry at `to` (or at the end).
@@ -270,6 +272,7 @@ impl App {
                 }
             }
             Action::Play(index) => self.play(index, ctx),
+            Action::PlayFromStart(index) => self.play_from_start(index, ctx),
             Action::Remove(index) => self.remove(index, ctx),
             Action::ClearPlaylist => self.clear_playlist(ctx),
             Action::Move { from, to } => self.reorder(|list| move_item(list, from, to)),
@@ -384,6 +387,10 @@ impl App {
             Action::CancelUpNext => self.up_next = None,
             Action::Next | Action::Prev => {
                 let next = matches!(action, Action::Next);
+                if let Some(up_next) = self.up_next.as_ref().filter(|_| next && self.current.is_none()) {
+                    self.play_from_start(up_next.index, ctx);
+                    return;
+                }
                 let target = match self.current {
                     Some(i) if next => (i + 1 < self.playlist.len()).then_some(i + 1),
                     Some(i) => i.checked_sub(1),
@@ -442,9 +449,9 @@ impl App {
                         mpv.send(&["cycle", "pause"]);
                     }
                     self.notify(if self.playback.paused { "Playing" } else { "Paused" });
-                } else if let Some(index) =
-                    self.current.or(self.up_next.as_ref().map(|u| u.index)).or_else(|| self.continue_target())
-                {
+                } else if let Some(up_next) = self.up_next.as_ref().filter(|_| self.current.is_none()) {
+                    self.play_from_start(up_next.index, ctx);
+                } else if let Some(index) = self.current.or_else(|| self.continue_target()) {
                     self.play(index, ctx);
                 }
             }

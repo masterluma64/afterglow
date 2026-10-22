@@ -91,12 +91,19 @@ impl App {
     }
 
     pub(crate) fn play(&mut self, index: usize, ctx: &egui::Context) {
-        self.load(index, false, ctx);
+        self.load(index, false, true, ctx);
     }
 
-    /// Loads a playlist video at its saved position. With `paused`, it only
-    /// shows that frame, ready to continue.
-    pub(crate) fn load(&mut self, index: usize, paused: bool, ctx: &egui::Context) {
+    /// Plays a playlist video from its start, whatever was saved for it (the
+    /// next video after one finishes).
+    pub(crate) fn play_from_start(&mut self, index: usize, ctx: &egui::Context) {
+        self.load(index, false, false, ctx);
+    }
+
+    /// Loads a playlist video at its saved position (with `resume`;
+    /// otherwise at its start). With `paused`, it only shows that frame, ready
+    /// to continue.
+    pub(crate) fn load(&mut self, index: usize, paused: bool, resume: bool, ctx: &egui::Context) {
         self.up_next = None;
         self.save_current_progress();
         let Ok(mpv) = &self.mpv else { return };
@@ -105,7 +112,7 @@ impl App {
         if !path.is_file() {
             return self.warn(format!("{name} was not found (moved or deleted?)"));
         }
-        let start = self.store.resume_position(&path);
+        let start = if resume { self.store.resume_position(&path) } else { None };
         mpv.set("pause", if paused { "yes" } else { "no" });
         mpv.load_file(&path, start.unwrap_or(0.0), LOAD_TAG);
         self.loads.asked();

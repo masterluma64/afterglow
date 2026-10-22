@@ -143,7 +143,7 @@ impl App {
                 // Centre the two buttons under the text.
                 ui.add_space((ui.available_width() - 150.0).max(0.0) / 2.0);
                 if ui.button(format!("{}  Play now", icons::PLAY)).on_hover_text("Space").clicked() {
-                    self.actions.push(Action::Play(index));
+                    self.actions.push(Action::PlayFromStart(index));
                 }
                 if ui.button("Cancel").clicked() {
                     self.actions.push(Action::CancelUpNext);
