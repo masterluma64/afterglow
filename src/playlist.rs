@@ -1,0 +1,339 @@
+//! Opening folders and videos, and changing the playlist.
+
+use super::*;
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum SortBy {
+    Name,
+    Modified,
+    Length,
+}
+
+/// Finds the length of videos that haven't been played yet, on a background
+/// thread with its own headless mpv.
+pub(crate) struct DurationProbe {
+    pub(crate) requests: Sender<PathBuf>,
+    pub(crate) results: Receiver<(PathBuf, Option<f64>)>,
+    pub(crate) pending: HashSet<PathBuf>,
+}
+
+impl DurationProbe {
+    pub(crate) fn new(ctx: egui::Context) -> Self {
+        let (requests, request_rx) = mpsc::channel::<PathBuf>();
+        let (result_tx, results) = mpsc::channel();
+        let spawned = std::thread::Builder::new().name("duration-probe".into()).spawn(move || {
+            let Ok(prober) = mpv::Prober::new() else { return };
+            for path in request_rx {
+                let duration = prober.duration(&path, PROBE_TIMEOUT);
+                if result_tx.send((path, duration)).is_err() {
+                    return;
+                }
+                ctx.request_repaint();
+            }
+        });
+        if let Err(e) = spawned {
+            eprintln!("could not start the duration probe: {e}");
+        }
+        Self { requests, results, pending: HashSet::new() }
+    }
+
+    pub(crate) fn request(&mut self, path: &Path) {
+        // If the probe thread isn't running (e.g. mpv failed to start), the
+        // send fails and the video simply stays without a length.
+        if self.pending.insert(path.to_path_buf()) && self.requests.send(path.to_path_buf()).is_err() {
+            self.pending.remove(path);
+        }
+    }
+}
+
+/// Moves the item at `from` so it lands before the item now at `to`, or at
+/// the end when `to` is the length.
+pub(crate) fn move_item<T>(list: &mut Vec<T>, from: usize, to: usize) {
+    if from >= list.len() || to > list.len() {
+        return;
+    }
+    let item = list.remove(from);
+    list.insert(if to > from { to - 1 } else { to }, item);
+}
+
+impl App {
+    /// Queues every playlist video whose length isn't known yet.
+    pub(crate) fn request_durations(&mut self) {
+        for path in &self.playlist {
+            if self.store.get(path).duration <= 0.0 {
+                self.durations.request(path);
+            }
+        }
+    }
+
+    pub(crate) fn receive_durations(&mut self) {
+        while let Ok((path, duration)) = self.durations.results.try_recv() {
+            self.durations.pending.remove(&path);
+            if let Some(d) = duration {
+                self.store.set_duration(&path, d);
+            }
+        }
+    }
+
+    pub(crate) fn save_playlist(&mut self) {
+        // Indices may have shifted.
+        self.up_next = None;
+        self.names.clear();
+        self.summary = None;
+        self.request_durations();
+        self.store.set_playlist(&self.playlist);
+        let current = self.current_path().map(Path::to_path_buf);
+        if current.is_some() {
+            self.store.set_current(current.as_deref());
+        }
+        self.store.save();
+    }
+
+    /// Opens dropped or passed paths. Folders replace the playlist with their
+    /// videos (and start playing). Videos are added to the end, unless they
+    /// were dropped: then the drop setting decides, asking the first time.
+    pub(crate) fn open(&mut self, paths: Vec<PathBuf>, dropped: bool, ctx: &egui::Context) {
+        let (folders, files): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| p.is_dir());
+        let (videos, others): (Vec<_>, Vec<_>) = files.into_iter().partition(|p| library::is_video(p));
+        if let Some(other) = others.first() {
+            self.warn(format!("Not a video: {}", display_name(other)));
+        }
+        if folders.is_empty() {
+            match self.store.settings.dropped_videos {
+                _ if !dropped || videos.is_empty() || self.playlist.is_empty() => self.add_videos(videos, ctx),
+                Some(behavior) => self.drop_videos(videos, behavior, ctx),
+                None => self.pending_drop = Some(videos),
+            }
+            return;
+        }
+        let mut list = Vec::new();
+        for folder in &folders {
+            match library::scan_folder(folder, self.store.include_subfolders) {
+                Ok(found) => list.extend(found),
+                Err(e) => self.warn(format!("Could not open {}: {e}", display_name(folder))),
+            }
+        }
+        list.extend(videos);
+        if list.is_empty() {
+            let hint = if self.store.include_subfolders { "" } else { " (subfolders are not included)" };
+            self.warn(format!("No videos found in {}{hint}", display_name(&folders[0])));
+            return;
+        }
+        // Remember a single opened folder, so the subfolder setting can rescan it.
+        self.store.set_folder((folders.len() == 1).then(|| folders[0].as_path()));
+        self.sync_watch();
+        self.replace_playlist(list, ctx);
+    }
+
+    /// Adds dropped videos to the playlist, or makes them the playlist.
+    pub(crate) fn drop_videos(&mut self, videos: Vec<PathBuf>, behavior: progress::DroppedVideos, ctx: &egui::Context) {
+        match behavior {
+            progress::DroppedVideos::Add => self.add_videos(videos, ctx),
+            progress::DroppedVideos::Replace => {
+                // The playlist no longer comes from a folder.
+                self.store.set_folder(None);
+                self.sync_watch();
+                self.replace_playlist(videos, ctx);
+            }
+        }
+    }
+
+    /// Changes whether folders include their subfolders, and rescans the folder
+    /// the playlist came from. Videos added by hand stay, and so does the
+    /// playing video if it is still part of the list.
+    pub(crate) fn set_include_subfolders(&mut self, include: bool, ctx: &egui::Context) {
+        self.store.set_include_subfolders(include);
+        self.store.save();
+        self.sync_watch();
+        let Some(folder) = self.store.folder.clone() else { return };
+        let scanned = match library::scan_folder(&folder, include) {
+            Ok(scanned) => scanned,
+            Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
+        };
+        let added_by_hand = self.playlist.iter().filter(|p| !p.starts_with(&folder)).cloned();
+        let list: Vec<PathBuf> = scanned.into_iter().chain(added_by_hand).collect();
+        let playing = self.current_path().map(Path::to_path_buf);
+        if playing.as_ref().is_some_and(|p| !list.contains(p)) {
+            self.stop(ctx);
+        }
+        self.current = playing.and_then(|p| list.iter().position(|q| *q == p));
+        self.playlist = list;
+        self.save_playlist();
+        let what = if include { "with subfolders" } else { "without subfolders" };
+        self.notify(format!("{}: {} videos {what}", display_name(&folder), self.playlist.len()));
+    }
+
+    pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
+        self.stop(ctx);
+        self.playlist = list;
+        self.show_sidebar = true;
+        self.save_playlist();
+        match self.continue_target() {
+            Some(index) => self.play(index, ctx),
+            None => self.notify(format!("{} videos, all watched", self.playlist.len())),
+        }
+    }
+
+    /// Appends videos (skipping ones already listed). Starts the first of them
+    /// when nothing is playing.
+    pub(crate) fn add_videos(&mut self, videos: Vec<PathBuf>, ctx: &egui::Context) {
+        if videos.is_empty() {
+            return;
+        }
+        let mut first = None;
+        let mut added = 0;
+        for video in videos {
+            let index = match self.playlist.iter().position(|p| *p == video) {
+                Some(i) => i,
+                None => {
+                    self.playlist.push(video);
+                    added += 1;
+                    self.playlist.len() - 1
+                }
+            };
+            first.get_or_insert(index);
+        }
+        self.save_playlist();
+        match first {
+            Some(index) if self.current.is_none() => self.play(index, ctx),
+            _ if added > 0 => self.notify(format!("Added {added} video{} to the playlist", if added == 1 { "" } else { "s" })),
+            _ => self.notify("Already in the playlist"),
+        }
+    }
+
+    pub(crate) fn remove(&mut self, index: usize, ctx: &egui::Context) {
+        if index >= self.playlist.len() {
+            return;
+        }
+        match self.current {
+            Some(c) if c == index => self.stop(ctx),
+            Some(c) if c > index => self.current = Some(c - 1),
+            _ => {}
+        }
+        self.playlist.remove(index);
+        self.save_playlist();
+    }
+
+    /// Points the folder watch at the folder the playlist came from.
+    pub(crate) fn sync_watch(&self) {
+        self.watch.set_target(self.store.folder.clone().map(|f| (f, self.store.include_subfolders)));
+    }
+
+    /// Takes in background rescans of the playlist's folder.
+    /// Drops the playlist entries whose files were found missing at startup.
+    pub(crate) fn receive_missing_files(&mut self) {
+        let Some(missing) = self.missing_files.as_ref().and_then(|rx| rx.try_recv().ok()) else { return };
+        self.missing_files = None;
+        let playing = self.current_path().map(Path::to_path_buf);
+        self.reorder(|list| list.retain(|p| !missing.contains(p) || Some(p) == playing.as_ref()));
+    }
+
+    pub(crate) fn receive_scans(&mut self) {
+        while let Ok((folder, found)) = self.watch.scans.try_recv() {
+            if self.store.folder.as_ref() == Some(&folder) {
+                self.append_new(found);
+            }
+        }
+    }
+
+    /// Adds the videos that aren't in the playlist yet to its end, returning
+    /// how many there were.
+    pub(crate) fn append_new(&mut self, found: Vec<PathBuf>) -> usize {
+        let new: Vec<PathBuf> = found.into_iter().filter(|p| !self.playlist.contains(p)).collect();
+        if new.is_empty() {
+            return 0;
+        }
+        let count = new.len();
+        self.names.clear();
+        self.summary = None;
+        // Appending shifts no indices, so a countdown to the next video stays.
+        self.playlist.extend(new);
+        self.store.set_playlist(&self.playlist);
+        self.request_durations();
+        self.store.save();
+        self.notify(format!("{count} new video{} in the folder", if count == 1 { "" } else { "s" }));
+        count
+    }
+
+    pub(crate) fn refresh_folder(&mut self) {
+        let Some(folder) = self.store.folder.clone() else {
+            return self.notify("The playlist wasn't opened from a folder");
+        };
+        let found = match library::scan_folder(&folder, self.store.include_subfolders) {
+            Ok(found) => found,
+            Err(e) => return self.warn(format!("Could not open {}: {e}", display_name(&folder))),
+        };
+        let before = self.playlist.len();
+        let playing = self.current_path().map(Path::to_path_buf);
+        self.reorder(|list| list.retain(|p| p.is_file() || Some(p) == playing.as_ref()));
+        let removed = before - self.playlist.len();
+        let added = self.append_new(found);
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        self.notify(match (added, removed) {
+            (0, 0) => "No changes in the folder".to_string(),
+            (a, 0) => format!("{a} new video{}", plural(a)),
+            (0, r) => format!("Removed {r} missing video{}", plural(r)),
+            (a, r) => format!("{a} new video{}, removed {r} missing", plural(a)),
+        });
+    }
+
+    /// Rearranges the playlist, keeping track of the playing video.
+    pub(crate) fn reorder(&mut self, rearrange: impl FnOnce(&mut Vec<PathBuf>)) {
+        let playing = self.current_path().map(Path::to_path_buf);
+        rearrange(&mut self.playlist);
+        self.current = playing.and_then(|p| self.playlist.iter().position(|q| *q == p));
+        self.save_playlist();
+    }
+
+    pub(crate) fn sort_playlist(&mut self, by: SortBy) {
+        match by {
+            SortBy::Name => self.reorder(|list| {
+                list.sort_by(|a, b| library::natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()))
+            }),
+            SortBy::Modified => self.reorder(|list| {
+                // Oldest first, like episodes saved in the order they came out.
+                list.sort_by_cached_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+            }),
+            SortBy::Length => {
+                let lengths: std::collections::HashMap<PathBuf, f64> =
+                    self.playlist.iter().map(|p| (p.clone(), self.store.get(p).duration)).collect();
+                // Videos of unknown length go last.
+                let key = |p: &PathBuf| match lengths[p] {
+                    d if d > 0.0 => d,
+                    _ => f64::INFINITY,
+                };
+                self.reorder(|list| list.sort_by(|a, b| key(a).total_cmp(&key(b))));
+            }
+        }
+    }
+
+    pub(crate) fn clear_playlist(&mut self, ctx: &egui::Context) {
+        self.stop(ctx);
+        self.playlist.clear();
+        self.store.set_current(None);
+        self.store.set_folder(None);
+        self.save_playlist();
+        self.sync_watch();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moves_items() {
+        let moved = |from, to| {
+            let mut list = vec!['a', 'b', 'c', 'd'];
+            move_item(&mut list, from, to);
+            list.into_iter().collect::<String>()
+        };
+        assert_eq!(moved(0, 2), "bacd", "before c");
+        assert_eq!(moved(3, 1), "adbc", "before b");
+        assert_eq!(moved(1, 4), "acdb", "to the end");
+        assert_eq!(moved(2, 0), "cabd", "to the start");
+        assert_eq!(moved(1, 1), "abcd");
+        assert_eq!(moved(1, 2), "abcd", "before the next one is where it already is");
+        assert_eq!(moved(9, 0), "abcd", "out of range is ignored");
+    }
+}
