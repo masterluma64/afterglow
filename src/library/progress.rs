@@ -8,6 +8,8 @@ use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
+use super::stats::{Stats, Tally};
+
 /// How many recently opened folders are remembered.
 const RECENT_FOLDERS: usize = 10;
 
@@ -148,6 +150,8 @@ pub struct Store {
     pub autoplay_next: bool,
     /// Where the window was, to open it there again.
     pub window: Option<WindowPlacement>,
+    /// Watching stats, which outlast the progress of deleted videos.
+    pub stats: Stats,
     #[serde(skip)]
     dirty: bool,
     /// Set when the saved file exists but couldn't be read: saving would
@@ -175,6 +179,7 @@ impl Default for Store {
             autoplay_next: true,
             sidebar_pinned: true,
             window: None,
+            stats: Stats::default(),
             settings: Settings::default(),
             dirty: false,
             read_failed: false,
@@ -233,7 +238,11 @@ impl Store {
     /// left alone, and nothing is saved until the next start.
     pub fn load() -> (Self, Option<String>) {
         let Some(path) = file_path() else { return (Self::default(), None) };
-        Self::load_from(&path)
+        let (mut store, warning) = Self::load_from(&path);
+        if !store.read_failed {
+            store.seed_stats();
+        }
+        (store, warning)
     }
 
     fn load_from(path: &Path) -> (Self, Option<String>) {
@@ -336,9 +345,57 @@ impl Store {
         let entry = self.entries.entry(key(path)).or_default();
         entry.position = position;
         entry.duration = duration;
-        if duration > 0.0 && position >= duration * watched_fraction {
+        let finished = !entry.watched && duration > 0.0 && position >= duration * watched_fraction;
+        if finished {
             entry.watched = true;
+            self.count_finished(path);
         }
+        self.dirty = true;
+    }
+
+    /// Marks a video watched because it played to its end, counting it as
+    /// finished in the stats unless it already counted as watched.
+    pub fn finish(&mut self, path: &Path) {
+        if !self.get(path).watched {
+            self.count_finished(path);
+        }
+        self.set_watched(path, true);
+    }
+
+    /// Adds seconds of a video played to the stats.
+    pub fn record_watching(&mut self, path: &Path, seconds: f64) {
+        let series = self.series_of(path);
+        self.stats.add_time(&series, seconds, crate::clock::today());
+        self.dirty = true;
+    }
+
+    fn count_finished(&mut self, path: &Path) {
+        let series = self.series_of(path);
+        self.stats.add_finished(&series, crate::clock::today());
+    }
+
+    /// The series a video counts towards in the stats: the opened folder it
+    /// is in (so seasons in subfolders count as one), or else its own folder.
+    fn series_of(&self, path: &Path) -> String {
+        let folder = self.folder.as_deref().filter(|f| path.starts_with(f)).or_else(|| path.parent());
+        folder.and_then(Path::file_name).map_or_else(|| "Other".into(), |name| name.to_string_lossy().into_owned())
+    }
+
+    /// The first time stats are kept, estimates what was watched before from
+    /// the saved progress.
+    fn seed_stats(&mut self) {
+        if self.stats.seeded {
+            return;
+        }
+        let videos: Vec<(String, Tally)> = self
+            .entries
+            .iter()
+            .map(|(k, e)| {
+                let seconds = if e.watched { e.duration } else { e.position };
+                (self.series_of(Path::new(k)), Tally { seconds: seconds.max(0.0), finished: u32::from(e.watched) })
+            })
+            .collect();
+        self.stats.seed(videos);
         self.dirty = true;
     }
 
@@ -642,6 +699,29 @@ mod tests {
         assert_eq!(store.resume_position(video), None, "past the threshold: nothing to resume");
         store.update_position(video, 61.0, 100.0);
         assert!(store.get(video).watched);
+    }
+
+    #[test]
+    fn keeps_stats_apart_from_progress() {
+        let mut store = Store::default();
+        let (a, b) = (Path::new(r"D:\Shows\Kirby\1.mkv"), Path::new(r"D:\Shows\Kirby\2.mkv"));
+        store.update_position(a, 1000.0, 1200.0);
+        store.seed_stats();
+        assert_eq!(store.stats.before, Tally { seconds: 1000.0, finished: 0 }, "estimated from saved progress");
+
+        store.record_watching(a, 150.0);
+        store.update_position(a, 1150.0, 1200.0);
+        store.update_position(a, 1190.0, 1200.0);
+        store.finish(a);
+        assert_eq!(store.stats.total.finished, 1, "counted once, when it crossed the threshold");
+        store.set_watched(b, true);
+        assert_eq!(store.stats.total.finished, 1, "marking by hand doesn't count");
+        store.finish(b);
+        assert_eq!(store.stats.total.finished, 1);
+
+        store.forget(&[key(a), key(b)]);
+        assert_eq!(store.stats.total, Tally { seconds: 1150.0, finished: 1 }, "forgetting deleted videos keeps their stats");
+        assert_eq!(store.stats.series["Kirby"].seconds, 1150.0);
     }
 
     #[test]

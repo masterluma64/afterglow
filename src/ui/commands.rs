@@ -212,6 +212,7 @@ impl App {
 
         list.push(command(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }, "F", "full screen window maximize", Action::ToggleFullscreen));
         list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
+        list.push(command("Stats", "", "statistics hours watched time streak history", Action::ShowStats));
         list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
         list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
         // Every video in the playlist, to play by name.
@@ -263,6 +264,7 @@ impl App {
             Action::ToggleFullscreen => icons::CORNERS_OUT,
             Action::OpenSettings => icons::GEAR,
             Action::ShowHelp => icons::KEYBOARD,
+            Action::ShowStats => icons::CHART,
             _ => icons::COMMAND,
         }
     }

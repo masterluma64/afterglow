@@ -56,6 +56,9 @@ impl App {
                         self.actions.push(Action::OpenPalette);
                     }
                     ui.separator();
+                    if ui.button(format!("{}  Stats", icons::CHART)).clicked() {
+                        self.actions.push(Action::ShowStats);
+                    }
                     let settings = egui::Button::new(format!("{}  Settings…", icons::GEAR)).shortcut_text("E");
                     if ui.add(settings).clicked() {
                         self.actions.push(Action::OpenSettings);

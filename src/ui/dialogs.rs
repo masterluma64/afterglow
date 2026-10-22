@@ -319,3 +319,99 @@ impl App {
         }
     }
 }
+
+impl App {
+    /// Watching stats: totals, streaks, the last 30 days and the most watched
+    /// series.
+    pub(crate) fn stats_dialog(&mut self, ctx: &egui::Context) {
+        use crate::ui::sidebar::format_total;
+        let s = self.store.stats.summary(clock::today());
+        let days = |n: u32| format!("{n} day{}", if n == 1 { "" } else { "s" });
+        let videos = |n: u32| format!("{n} video{}", if n == 1 { "" } else { "s" });
+        let modal = egui::Modal::new(egui::Id::unique("stats")).show(ctx, |ui| {
+            ui.set_width(400.0);
+            ui.label(RichText::new("Stats").size(18.0).strong());
+            ui.add_space(8.0);
+            egui::Grid::new("stats-totals").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
+                let mut row = |label: &str, value: String| {
+                    ui.label(RichText::new(label).weak());
+                    ui.label(RichText::new(value).strong());
+                    ui.end_row();
+                };
+                row("Total watched", format_total(s.total.seconds));
+                row("Videos finished", s.total.finished.to_string());
+                row("Last 7 days", format_total(s.last_7_days));
+                row("Last 30 days", format!("{}  ·  {} a day", format_total(s.last_30_days), format_total(s.last_30_days / 30.0)));
+                row("Current streak", days(s.current_streak));
+                row("Longest streak", days(s.longest_streak));
+                if let Some((day, seconds)) = s.best_day {
+                    row("Best day", format!("{}  ·  {}", stats::format_date(day), format_total(seconds)));
+                }
+            });
+
+            ui.add_space(14.0);
+            ui.label(RichText::new("LAST 30 DAYS").small().weak());
+            daily_chart(ui, &s.daily);
+
+            if !s.top_series.is_empty() {
+                ui.add_space(14.0);
+                ui.label(RichText::new("MOST WATCHED").small().weak());
+                egui::Grid::new("stats-series").num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
+                    for (name, tally) in &s.top_series {
+                        // A fixed width, so long folder names are cut off rather than squeezed.
+                        let height = ui.spacing().interact_size.y;
+                        ui.allocate_ui_with_layout(vec2(230.0, height), Layout::left_to_right(Align::Center), |ui| {
+                            ui.set_width(230.0);
+                            ui.add(egui::Label::new(name.as_str()).truncate()).on_hover_text(name.as_str());
+                        });
+                        ui.label(RichText::new(format_total(tally.seconds)).strong());
+                        ui.label(RichText::new(videos(tally.finished)).weak());
+                        ui.end_row();
+                    }
+                });
+            }
+
+            ui.add_space(12.0);
+            if s.before.seconds >= 60.0 {
+                let before = format!(
+                    "Includes about {} ({}) watched before stats were kept, estimated from saved progress.",
+                    format_total(s.before.seconds),
+                    videos(s.before.finished)
+                );
+                ui.label(RichText::new(before).small().weak());
+            }
+            ui.weak("Press Esc to close.");
+        });
+        if modal.should_close() {
+            self.stats_open = false;
+        }
+    }
+}
+
+/// Bars for the time watched on each day, oldest first, with the day and
+/// time on hover.
+fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
+    use crate::ui::sidebar::format_total;
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
+    let most = daily.iter().map(|(_, s)| *s).fold(0.0, f64::max).max(60.0);
+    let slot = rect.width() / daily.len().max(1) as f32;
+    let hovered = resp.hover_pos().map(|p| (((p.x - rect.left()) / slot) as usize).min(daily.len().saturating_sub(1)));
+    let visuals = ui.visuals();
+    for (i, (_, seconds)) in daily.iter().enumerate() {
+        let x = rect.left() + slot * i as f32;
+        // Days with nothing get a sliver, so the 30 days stay visible.
+        let height = ((*seconds / most) as f32 * rect.height()).max(2.0);
+        let bar = egui::Rect::from_min_max(egui::pos2(x + 1.5, rect.bottom() - height), egui::pos2(x + slot - 1.5, rect.bottom()));
+        let color = if *seconds < 1.0 {
+            visuals.widgets.inactive.bg_fill
+        } else if hovered == Some(i) {
+            visuals.selection.bg_fill.gamma_multiply(1.3)
+        } else {
+            visuals.selection.bg_fill
+        };
+        ui.painter().rect_filled(bar, 2.0, color);
+    }
+    if let Some((day, seconds)) = hovered.and_then(|i| daily.get(i)) {
+        resp.on_hover_text_at_pointer(format!("{}: {}", stats::format_date(*day), format_total(*seconds)));
+    }
+}

@@ -3,6 +3,7 @@
 pub(crate) mod disk;
 pub(crate) mod playlist;
 pub(crate) mod progress;
+pub(crate) mod stats;
 pub(crate) mod watch;
 
 use std::cmp::Ordering;

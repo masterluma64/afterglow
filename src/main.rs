@@ -6,8 +6,8 @@ mod platform;
 mod player;
 mod ui;
 
-use library::{disk, playlist, progress, watch};
-use platform::{instance, media_keys, power, screen};
+use library::{disk, playlist, progress, stats, watch};
+use platform::{clock, instance, media_keys, power, screen};
 use player::{dll_search, mpv, playback, thumbnails};
 use ui::{app_icon, commands, controls, dialogs, icons, video};
 
@@ -201,6 +201,9 @@ struct App {
     /// Saved track choices being restored: how many subtitle files are still
     /// loading, and the choices to apply after.
     restoring: Option<(usize, progress::TrackPrefs)>,
+    /// The position and time of the last playback sample, to count the
+    /// time watched since then in the stats.
+    watch_mark: Option<(f64, Instant)>,
     /// Seek-bar previews, once started in the background (see `thumbnails_ready`).
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
@@ -234,6 +237,7 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
+    stats_open: bool,
     /// The command palette, while it is open.
     palette: Option<Palette>,
     /// Dropped videos waiting for the answer to what drops should do.
@@ -308,6 +312,7 @@ impl App {
             announce_track: None,
             announce_sub_step: None,
             restoring: None,
+            watch_mark: None,
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
             up_next: None,
@@ -326,6 +331,7 @@ impl App {
             gone_scan: None,
             show_help: false,
             settings_open: false,
+            stats_open: false,
             palette: None,
             pending_drop: None,
             media_keys: None,
@@ -558,6 +564,9 @@ impl eframe::App for App {
         if self.settings_open {
             self.settings_dialog(&ctx);
         }
+        if self.stats_open {
+            self.stats_dialog(&ctx);
+        }
         if self.palette.is_some() {
             self.command_palette(&ctx);
         }
@@ -730,7 +739,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

@@ -28,6 +28,7 @@ pub(crate) enum Action {
     RefreshFolder,
     ClearRecentFolders,
     ShowHelp,
+    ShowStats,
     /// Docks the playlist beside the video, or lets it slide out over it.
     TogglePin,
     OpenSettings,
@@ -104,7 +105,7 @@ impl App {
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.pending_drop.is_some() || self.palette.is_some() {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.stats_open || self.pending_drop.is_some() || self.palette.is_some() {
             return;
         }
         if self.show_help {
@@ -253,6 +254,7 @@ impl App {
             Action::Move { from, to } => self.reorder(|list| move_item(list, from, to)),
             Action::RefreshFolder => self.refresh_folder(),
             Action::ShowHelp => self.show_help = true,
+            Action::ShowStats => self.stats_open = true,
             Action::OpenSettings => self.settings_open = true,
             Action::OpenPalette => {
                 // It offers the recent folders that are there.

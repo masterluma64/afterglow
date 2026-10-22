@@ -126,6 +126,7 @@ impl App {
         self.playback.duration = 0.0;
         self.restoring = None;
         self.tracks_changed_by_user = false;
+        self.watch_mark = None;
         self.current = Some(index);
         self.loaded = false;
         self.store.set_current(Some(&path));
@@ -293,7 +294,7 @@ impl App {
                     }
                     let Some(index) = self.current else { continue };
                     if let Some(path) = self.playlist.get(index).cloned() {
-                        self.store.set_watched(&path, true);
+                        self.store.finish(&path);
                     }
                     self.finish(ctx);
                     if index + 1 >= self.playlist.len() {
@@ -312,6 +313,7 @@ impl App {
     pub(crate) fn sample_playback(&mut self) {
         if self.loaded {
             self.save_current_progress();
+            self.count_watching();
         }
         if self.last_save.elapsed() >= SAVE_INTERVAL {
             self.store.save();
@@ -321,6 +323,27 @@ impl App {
         if let Some(problem) = self.store.save_problem() {
             self.warn(problem);
         }
+    }
+
+    /// Adds the video played since the last sample to the stats. Seeking
+    /// doesn't count: the position may only have moved forward as far as
+    /// playback could have taken it in the time that passed. That also covers
+    /// frames the window didn't draw while minimized.
+    fn count_watching(&mut self) {
+        let (position, now) = (self.playback.position, Instant::now());
+        if let Some((last, at)) = self.watch_mark
+            && !self.playback.paused
+        {
+            let moved = position - last;
+            let possible = now.duration_since(at).as_secs_f64() * self.playback.speed.max(1.0) * 1.1 + 0.5;
+            if moved > 0.0
+                && moved <= possible
+                && let Some(path) = self.current_path().map(Path::to_path_buf)
+            {
+                self.store.record_watching(&path, moved);
+            }
+        }
+        self.watch_mark = Some((position, now));
     }
 }
 

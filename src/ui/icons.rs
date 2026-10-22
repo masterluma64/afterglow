@@ -38,6 +38,7 @@ pub const KEYBOARD: &str = "\u{E2D8}";
 pub const GEAR: &str = "\u{E272}";
 pub const PIN: &str = "\u{E3E2}";
 pub const GAUGE: &str = "\u{E628}";
+pub const CHART: &str = "\u{E150}";
 pub const LIST_NUMBERS: &str = "\u{E2F6}";
 pub const COMMAND: &str = "\u{E1C4}";
 pub const FILM_STRIP: &str = "\u{E792}";
