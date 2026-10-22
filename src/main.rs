@@ -7,6 +7,7 @@ mod controls;
 mod dialogs;
 mod dll_search;
 mod icons;
+mod instance;
 mod library;
 mod media_keys;
 mod mpv;
@@ -75,8 +76,28 @@ fn window_icon() -> egui::IconData {
 /// Set to run without OpenGL: the UI uses wgpu and video is rendered in software.
 const SOFTWARE_VIDEO_ENV: &str = "AFTERGLOW_SOFTWARE_VIDEO";
 
+/// Set on the restart in software mode, which may find its own first try
+/// still running.
+const RESTARTED_ENV: &str = "AFTERGLOW_RESTARTED";
+
 fn main() -> eframe::Result {
     dll_search::restrict();
+    let open = absolute_paths(std::env::args_os().skip(1));
+    // With Afterglow already running (using the same data folder), hand it
+    // the files instead: two at once would save over each other's progress.
+    let pipe = progress::data_dir().map(|dir| instance::pipe_name(&dir));
+    let other_starts = match pipe.as_deref().map(instance::claim) {
+        Some(instance::Claim::First(listener)) => Some(listener),
+        Some(instance::Claim::Running) if std::env::var_os(RESTARTED_ENV).is_none() => {
+            match instance::forward(pipe.as_deref().unwrap_or_default(), &open) {
+                Ok(()) => return Ok(()),
+                // Better two at once than none.
+                Err(e) => eprintln!("could not hand the files to the running Afterglow: {e}"),
+            }
+            None
+        }
+        _ => None,
+    };
     // OpenGL lets mpv draw video straight into the window.
     let software = std::env::var_os(SOFTWARE_VIDEO_ENV).is_some();
     let (store, load_warning) = Store::load();
@@ -100,14 +121,14 @@ fn main() -> eframe::Result {
         renderer: if software { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow },
         ..Default::default()
     };
-    let open = absolute_paths(std::env::args_os().skip(1));
     let result = eframe::run_native(
         APP_NAME,
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
             set_spacing(&cc.egui_ctx);
-            Ok(Box::new(App::new(&cc.egui_ctx, (store, load_warning), open, cc.get_proc_address.clone())))
+            let other_starts = other_starts.map(|listener| listener.listen(cc.egui_ctx.clone()));
+            Ok(Box::new(App::new(&cc.egui_ctx, (store, load_warning), open, other_starts, cc.get_proc_address.clone())))
         }),
     );
     // Without a usable OpenGL driver, start over without it. A window's event
@@ -124,6 +145,7 @@ fn main() -> eframe::Result {
             let restarted = std::process::Command::new(exe)
                 .args(std::env::args_os().skip(1))
                 .env(SOFTWARE_VIDEO_ENV, "1")
+                .env(RESTARTED_ENV, "1")
                 .status();
             if let Ok(status) = restarted {
                 std::process::exit(status.code().unwrap_or(0));
@@ -264,6 +286,8 @@ struct App {
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
+    /// Files from later starts of Afterglow (see `instance`).
+    other_starts: Option<Receiver<Vec<PathBuf>>>,
 }
 
 impl App {
@@ -271,6 +295,7 @@ impl App {
         ctx: &egui::Context,
         (store, load_warning): (Store, Option<String>),
         open: Vec<PathBuf>,
+        other_starts: Option<Receiver<Vec<PathBuf>>>,
         gl: Option<mpv::GetProcAddress>,
     ) -> Self {
         let mpv = Mpv::new(ctx.clone(), gl);
@@ -357,6 +382,7 @@ impl App {
             pending_drop: None,
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
+            other_starts,
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
@@ -413,6 +439,19 @@ impl App {
             },
         };
         self.store.set_window(window);
+    }
+
+    /// Opens the files later starts of Afterglow were given (such as a video
+    /// opened from Explorer), and comes to the front for them.
+    fn receive_other_starts(&mut self, ctx: &egui::Context) {
+        let Some(starts) = &self.other_starts else { return };
+        for paths in starts.try_iter().collect::<Vec<_>>() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            if !paths.is_empty() {
+                self.actions.push(Action::OpenAndPlay(paths));
+            }
+        }
     }
 
     /// Handles media keys and shows what's playing in Windows' media overlay.
@@ -475,6 +514,7 @@ impl eframe::App for App {
         self.sample_playback();
         self.handle_input(&ctx);
         self.media_controls(&ctx, frame);
+        self.receive_other_starts(&ctx);
         self.remember_window(&ctx);
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();

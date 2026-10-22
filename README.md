@@ -80,6 +80,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Media keys**: play/pause, next, previous and stop work from the keyboard's media keys,
   even when another window has focus, and Windows' media overlay shows what's playing.
 - The PC and display stay awake while a video plays (not while paused).
+- **One window**: opening a video or folder (from Explorer, say) while Afterglow is already
+  running plays it in the open window instead of starting a second one.
 - The window opens where you left it, at the same size (and maximized if it was). If that
   spot is on a monitor that is no longer connected, it opens on the main screen instead.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight

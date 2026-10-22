@@ -9,6 +9,9 @@ pub(crate) enum Action {
     Open(Vec<PathBuf>),
     /// Folders and videos dropped onto the window.
     Drop(Vec<PathBuf>),
+    /// Files a later start of Afterglow was given (e.g. a video opened from
+    /// Explorer): opened like `Open`, and the first video plays right away.
+    OpenAndPlay(Vec<PathBuf>),
     /// Answers what dropped videos should do, and remembers it.
     ChooseDropBehavior(progress::DroppedVideos),
     Play(usize),
@@ -224,6 +227,15 @@ impl App {
             }
             Action::Open(paths) => self.open(paths, false, ctx),
             Action::Drop(paths) => self.open(paths, true, ctx),
+            Action::OpenAndPlay(paths) => {
+                let video = paths.iter().find(|p| library::is_video(p)).cloned();
+                self.open(paths, false, ctx);
+                if let Some(index) = video.and_then(|v| self.playlist.iter().position(|p| *p == v)) {
+                    if self.current != Some(index) {
+                        self.play(index, ctx);
+                    }
+                }
+            }
             Action::ChooseDropBehavior(behavior) => {
                 let mut settings = self.store.settings.clone();
                 settings.dropped_videos = Some(behavior);
