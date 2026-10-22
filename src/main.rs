@@ -53,8 +53,6 @@ const SCROLL_NOTCH: f32 = 50.0;
 const SUB_STEP_TAG: u64 = 1;
 /// Tags the replies to subtitle files added back when a video is opened.
 const SUB_RESTORE_TAG: u64 = 2;
-/// Tags the reply to saving a screenshot.
-const SCREENSHOT_TAG: u64 = 3;
 /// Tags the replies to opening a video (see `playback::Loads`).
 const LOAD_TAG: u64 = 4;
 /// How long the next video is announced before it starts by itself.
@@ -130,13 +128,6 @@ struct Playback {
     volume: f64,
     sub_delay: f64,
     sub_speed: f64,
-    audio_delay: f64,
-    /// Forced aspect ratio, or -1 for the video's own.
-    aspect: f64,
-    rotate: i64,
-    zoom: f64,
-    /// How much of the window the picture fills by cropping (0 to 1).
-    panscan: f64,
     speed: f64,
 }
 
@@ -207,8 +198,6 @@ struct App {
     announce_track: Option<&'static str>,
     /// A subtitle step waiting for mpv to report whether there was a line.
     announce_sub_step: Option<&'static str>,
-    /// Screenshots being saved, in order, to announce as mpv reports each.
-    screenshots: Vec<PathBuf>,
     /// Saved track choices being restored: how many subtitle files are still
     /// loading, and the choices to apply after.
     restoring: Option<(usize, progress::TrackPrefs)>,
@@ -270,8 +259,7 @@ impl App {
             // Reading properties can block while mpv waits for the UI thread to
             // draw a frame, so playback state comes in as events instead.
             for name in [
-                "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed", "audio-delay",
-                "video-aspect-override", "video-rotate", "video-zoom", "panscan",
+                "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed",
                 "chapter-list", "track-list",
             ] {
                 mpv.observe(name);
@@ -319,7 +307,6 @@ impl App {
             tracks_changed_by_user: false,
             announce_track: None,
             announce_sub_step: None,
-            screenshots: Vec::new(),
             restoring: None,
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
@@ -648,7 +635,6 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("J / L", "Seek back / forward (Shift: further)"),
         ("\u{E058} / \u{E06C}", "Seek back / forward (Shift: further)"),
         ("Home", "Back to the start"),
-        ("Shift+S", "Save a screenshot"),
         ("0–9", "Jump to 0%–90%"),
         (", / .", "Previous / next frame"),
         ("[ / ]", "Slower / faster"),
@@ -743,8 +729,8 @@ mod tests {
         let regular = [
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
-            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::FRAME_CORNERS, icons::FILM_STRIP, icons::FOLDER_OPEN, icons::ZOOM_IN, icons::ZOOM_OUT, icons::MOON, icons::CROP, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

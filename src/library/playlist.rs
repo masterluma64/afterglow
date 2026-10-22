@@ -4,13 +4,6 @@ use std::collections::HashMap;
 
 use crate::*;
 
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum SortBy {
-    Name,
-    Modified,
-    Length,
-}
-
 /// Finds the length of videos that haven't been played yet, on a background
 /// thread with its own headless mpv.
 pub(crate) struct DurationProbe {
@@ -200,11 +193,6 @@ impl App {
                 }
                 disk::Done::Arrived(videos) => {
                     self.append_new(videos);
-                }
-                disk::Done::Modified(times) => {
-                    // Oldest first, like episodes saved in the order they came out.
-                    self.reorder(|list| list.sort_by_cached_key(|p| times.get(p).copied().flatten()));
-                    self.notify("Sorted by date modified");
                 }
             }
         }
@@ -485,26 +473,6 @@ impl App {
         rearrange(&mut self.playlist);
         self.current = playing.and_then(|p| self.playlist.iter().position(|q| *q == p));
         self.save_playlist();
-    }
-
-    pub(crate) fn sort_playlist(&mut self, by: SortBy) {
-        match by {
-            SortBy::Name => self.reorder(|list| {
-                list.sort_by(|a, b| library::natural_cmp(&a.to_string_lossy(), &b.to_string_lossy()))
-            }),
-            // The times are read on disk first (see `receive_disk`).
-            SortBy::Modified => self.start_disk(disk::Job::Modified(self.playlist.clone()), "the videos' dates".into()),
-            SortBy::Length => {
-                let lengths: std::collections::HashMap<PathBuf, f64> =
-                    self.playlist.iter().map(|p| (p.clone(), self.store.get(p).duration)).collect();
-                // Videos of unknown length go last.
-                let key = |p: &PathBuf| match lengths[p] {
-                    d if d > 0.0 => d,
-                    _ => f64::INFINITY,
-                };
-                self.reorder(|list| list.sort_by(|a, b| key(a).total_cmp(&key(b))));
-            }
-        }
     }
 
     pub(crate) fn clear_playlist(&mut self, ctx: &egui::Context) {

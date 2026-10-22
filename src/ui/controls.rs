@@ -244,18 +244,6 @@ impl App {
         }
         if kind == "audio" {
             ui.separator();
-            ui.horizontal(|ui| {
-                ui.label(format!("Delay {:+.1} s", self.playback.audio_delay));
-                if ui.small_button(icons::MINUS).on_hover_text("Play the sound earlier").clicked() {
-                    self.actions.push(Action::AdjustAudioDelay(-0.1));
-                }
-                if ui.small_button(icons::PLUS).on_hover_text("Play the sound later").clicked() {
-                    self.actions.push(Action::AdjustAudioDelay(0.1));
-                }
-                if self.playback.audio_delay != 0.0 && ui.small_button(icons::RESET).on_hover_text("No delay").clicked() {
-                    self.actions.push(Action::SetAudioDelay(0.0));
-                }
-            });
             let level = egui::Button::selectable(self.store.settings.level_volume, "Even out the volume");
             if ui.add(level).on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter").clicked() {
                 self.actions.push(Action::ToggleLevelVolume);
@@ -302,46 +290,3 @@ impl App {
         }
     }
 }
-
-impl App {
-    /// Aspect ratio, rotation, zoom and cropping, for the right-click menu.
-    pub(crate) fn picture_items(&mut self, ui: &mut egui::Ui) {
-        let Playback { aspect, rotate, zoom, panscan, .. } = self.playback;
-        ui.label(RichText::new("Aspect ratio").small().weak());
-        for (name, value) in ASPECTS {
-            if ui.selectable_label(same_aspect(aspect, value), name).clicked() {
-                self.actions.push(Action::SetAspect(value));
-            }
-        }
-        ui.separator();
-        if ui.button("Rotate clockwise").clicked() {
-            self.actions.push(Action::Rotate { clockwise: true });
-        }
-        if ui.button("Rotate counterclockwise").clicked() {
-            self.actions.push(Action::Rotate { clockwise: false });
-        }
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.label(format!("Zoom {:.0}%", zoom.exp2() * 100.0));
-            if ui.small_button(icons::MINUS).on_hover_text("Zoom out").clicked() {
-                self.actions.push(Action::Zoom(-ZOOM_STEP));
-            }
-            if ui.small_button(icons::PLUS).on_hover_text("Zoom in").clicked() {
-                self.actions.push(Action::Zoom(ZOOM_STEP));
-            }
-        });
-        let fill = egui::Button::selectable(panscan > 0.0, "Fill the window");
-        if ui.add(fill).on_hover_text("Crop the picture's edges so there are no black bars").clicked() {
-            self.actions.push(Action::ToggleFill);
-        }
-        if aspect > 0.0 || rotate != 0 || zoom != 0.0 || panscan > 0.0 {
-            ui.separator();
-            if ui.button(format!("{}  Reset the picture", icons::RESET)).clicked() {
-                self.actions.push(Action::ResetPicture);
-            }
-        }
-    }
-}
-
-/// One zoom step, as a power of 2 (about 10%).
-pub(crate) const ZOOM_STEP: f64 = 0.137;

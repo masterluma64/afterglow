@@ -75,7 +75,6 @@ impl App {
             ui.menu_button(format!("{}  Audio track", icons::WAVEFORM), |ui| self.track_items(ui, "audio"));
             ui.menu_button(format!("{}  Subtitles", icons::SUBTITLES), |ui| self.track_items(ui, "sub"));
             ui.menu_button(format!("{}  Speed  {}", icons::GAUGE, format_speed(self.playback.speed)), |ui| self.speed_items(ui));
-            ui.menu_button(format!("{}  Picture", icons::FRAME_CORNERS), |ui| self.picture_items(ui));
             if !self.chapters.is_empty() {
                 ui.menu_button(format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
                     let now = chapter_at(&self.chapters, self.playback.position);
@@ -87,9 +86,6 @@ impl App {
                         }
                     }
                 });
-            }
-            if item(ui, icons::CAMERA, "Save a screenshot", "Shift+S") {
-                self.actions.push(Action::Screenshot);
             }
             ui.separator();
             let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
@@ -127,11 +123,11 @@ impl App {
     }
 
     /// Everything the command palette offers right now. Choices that don't
-    /// apply (subtitles with no video loaded, sorting an empty playlist) are
+    /// apply (subtitles with no video loaded, clearing an empty playlist) are
     /// left out, and toggles are named for what they will do.
     pub(crate) fn commands(&self) -> Vec<Command> {
         let mut list = Vec::new();
-        let Playback { paused, muted, speed, sub_delay, audio_delay, .. } = self.playback;
+        let Playback { paused, muted, speed, sub_delay, .. } = self.playback;
         if self.loaded {
             list.push(command(if paused { "Play" } else { "Pause" }, "Space", "resume stop", Action::TogglePause));
             if self.current.is_some_and(|i| i + 1 < self.playlist.len()) {
@@ -148,20 +144,6 @@ impl App {
                 for chapter in &self.chapters {
                     list.push(command(format!("Chapter: {}", chapter.title), "", "go to jump", Action::Seek { to: chapter.time, exact: true }));
                 }
-            }
-            list.push(command("Save a screenshot", "Shift+S", "snapshot capture frame image picture png", Action::Screenshot));
-            for (name, value) in ASPECTS {
-                list.push(command(format!("Aspect ratio: {name}"), "", "picture stretched squashed", Action::SetAspect(value)));
-            }
-            list.push(command("Rotate clockwise", "", "picture turn sideways portrait", Action::Rotate { clockwise: true }));
-            list.push(command("Rotate counterclockwise", "", "picture turn sideways portrait", Action::Rotate { clockwise: false }));
-            list.push(command("Zoom in", "", "picture bigger", Action::Zoom(ZOOM_STEP)));
-            list.push(command("Zoom out", "", "picture smaller", Action::Zoom(-ZOOM_STEP)));
-            let fill = if self.playback.panscan > 0.0 { "Show the whole picture" } else { "Fill the window (crop the edges)" };
-            list.push(command(fill, "", "picture black bars zoom crop", Action::ToggleFill));
-            let Playback { aspect, rotate, zoom, panscan, .. } = self.playback;
-            if aspect > 0.0 || rotate != 0 || zoom != 0.0 || panscan > 0.0 {
-                list.push(command("Reset the picture", "", "aspect rotate zoom crop original", Action::ResetPicture));
             }
             list.push(command("Next frame", ".", "step", Action::FrameStep { forward: true }));
             list.push(command("Previous frame", ",", "step back", Action::FrameStep { forward: false }));
@@ -180,11 +162,6 @@ impl App {
             }
             let label = if self.store.settings.level_volume { "Stop evening out the volume" } else { "Even out the volume (night mode)" };
             list.push(command(label, "", "level normalize loudness night quiet loud dialogue compress", Action::ToggleLevelVolume));
-            list.push(command("Play the sound earlier", "", "audio delay sync lip", Action::AdjustAudioDelay(-0.1)));
-            list.push(command("Play the sound later", "", "audio delay sync lip", Action::AdjustAudioDelay(0.1)));
-            if audio_delay != 0.0 {
-                list.push(command("Reset the audio delay", "", "sound sync lip", Action::SetAudioDelay(0.0)));
-            }
             list.push(command("Next subtitle track", "S", "captions cycle", Action::CycleSubtitles));
             list.push(command("Subtitles: Off", "", "captions hide", Action::SetTrack { kind: "sub", id: None }));
             for t in self.tracks("sub") {
@@ -227,10 +204,6 @@ impl App {
         list.push(command(pin, "", "sidebar dock", Action::TogglePin));
         if !self.playlist.is_empty() {
             list.push(command("Search the playlist", "/", "find filter video", Action::FocusSearch));
-            list.push(command("Sort by name", "", "playlist order", Action::Sort(SortBy::Name)));
-            list.push(command("Sort by date modified", "", "playlist order", Action::Sort(SortBy::Modified)));
-            list.push(command("Sort by length", "", "playlist order duration", Action::Sort(SortBy::Length)));
-            list.push(command("Reverse the playlist order", "", "sort", Action::ReverseOrder));
             list.push(command("Clear the playlist", "", "empty remove all", Action::ClearPlaylist));
         }
         let autoplay = self.store.autoplay_next;
@@ -238,7 +211,6 @@ impl App {
         list.push(command(label, "", "autoplay up next countdown", Action::SetAutoplayNext(!autoplay)));
 
         list.push(command(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }, "F", "full screen window maximize", Action::ToggleFullscreen));
-        list.push(command("Open the screenshots folder", "", "snapshot pictures images", Action::OpenScreenshotFolder));
         list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
         list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
         list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
@@ -269,20 +241,12 @@ impl App {
             Action::SetSpeed(_) => icons::GAUGE,
             Action::ToggleMute if self.playback.muted => icons::SPEAKER_HIGH,
             Action::ToggleMute => icons::SPEAKER_X,
-            Action::CycleAudio | Action::AdjustAudioDelay(_) | Action::SetAudioDelay(_) => icons::WAVEFORM,
+            Action::CycleAudio => icons::WAVEFORM,
             Action::SetTrack { kind: "audio", .. } => icons::WAVEFORM,
             Action::SetTrack { .. } | Action::CycleSubtitles | Action::LoadSubtitle => icons::SUBTITLES,
             Action::AdjustSubDelay(_) | Action::SetSubDelay(_) | Action::ToggleSyncPanel => icons::TIMER,
             Action::ToggleLevelVolume => icons::MOON,
-            Action::Screenshot => icons::CAMERA,
-            Action::OpenScreenshotFolder => icons::FOLDER_OPEN,
-            Action::SetAspect(_) => icons::FRAME_CORNERS,
-            Action::Rotate { clockwise: true } => icons::REFRESH,
-            Action::Rotate { clockwise: false } => icons::RESET,
-            Action::Zoom(by) if *by > 0.0 => icons::ZOOM_IN,
-            Action::Zoom(_) => icons::ZOOM_OUT,
-            Action::ToggleFill => icons::CROP,
-            Action::ResetPicture | Action::ConfirmResetProgress => icons::RESET,
+            Action::ConfirmResetProgress => icons::RESET,
             Action::ToggleWatched => icons::CHECK,
             Action::OpenFolder => icons::FOLDER_PLUS,
             Action::OpenVideos => icons::FILE_VIDEO,
@@ -293,7 +257,6 @@ impl App {
             Action::ToggleSidebar => icons::SIDEBAR,
             Action::TogglePin => icons::PIN,
             Action::FocusSearch => icons::SEARCH,
-            Action::Sort(_) | Action::ReverseOrder => icons::SORT,
             Action::ClearPlaylist => icons::TRASH,
             Action::SetAutoplayNext(_) => icons::SKIP_FORWARD,
             Action::ToggleFullscreen if self.fullscreen => icons::CORNERS_IN,

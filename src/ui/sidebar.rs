@@ -199,20 +199,6 @@ impl App {
                     if ui.add(clear).on_hover_text("Clear the playlist (files are not touched)").clicked() {
                         self.actions.push(Action::ClearPlaylist);
                     }
-                    let sort = egui::Button::new(RichText::new(icons::SORT).size(14.0)).frame_when_inactive(false);
-                    let (response, _) = egui::containers::menu::MenuButton::from_button(sort).ui(ui, |ui| {
-                        ui.label(RichText::new("Sort by").small().weak());
-                        for (by, label) in [(SortBy::Name, "Name"), (SortBy::Modified, "Date modified"), (SortBy::Length, "Length")] {
-                            if ui.button(label).clicked() {
-                                self.actions.push(Action::Sort(by));
-                            }
-                        }
-                        ui.separator();
-                        if ui.button("Reverse order").clicked() {
-                            self.actions.push(Action::ReverseOrder);
-                        }
-                    });
-                    response.on_hover_text("Sort the playlist (or drag videos to reorder)");
                 }
             });
         });

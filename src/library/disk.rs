@@ -4,10 +4,9 @@
 //! meanwhile. Jobs run one at a time, in the order they were given, and
 //! each comes back as a [`Done`] for the UI to take in.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::SystemTime;
 
 use eframe::egui;
 
@@ -34,8 +33,6 @@ pub(crate) enum Job {
     /// Videos the folder watch found new in the playlist's folder, taken in
     /// once the jobs before them are done.
     Arrived(Vec<PathBuf>),
-    /// When each video was last changed, to sort by it.
-    Modified(Vec<PathBuf>),
 }
 
 #[derive(Clone, Copy)]
@@ -65,7 +62,6 @@ pub(crate) enum Done {
         missing: HashSet<PathBuf>,
     },
     Arrived(Vec<PathBuf>),
-    Modified(HashMap<PathBuf, Option<SystemTime>>),
 }
 
 pub(crate) struct Disk {
@@ -118,19 +114,12 @@ pub(crate) fn run(job: Job) -> Done {
             Done::Rescanned { folder, include_subfolders, why, found, missing }
         }
         Job::Arrived(videos) => Done::Arrived(videos),
-        Job::Modified(paths) => Done::Modified(
-            paths.into_iter().map(|p| {
-                let modified = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
-                (p, modified)
-            }).collect(),
-        ),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn opens_and_rescans() {
@@ -157,8 +146,6 @@ mod tests {
         assert_eq!(found.unwrap(), [a.clone(), b.clone()]);
         assert_eq!(missing, HashSet::from([dir.join("deleted.mkv")]));
 
-        let Done::Modified(times) = run(Job::Modified(vec![a.clone(), dir.join("deleted.mkv")])) else { panic!("modified") };
-        assert!(times[&a].is_some() && times[Path::new(&dir.join("deleted.mkv"))].is_none());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
