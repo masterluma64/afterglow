@@ -67,6 +67,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   (remembered), fullscreen with controls that float over the video and hide while playing
   (they stay up while paused or while the pointer rests on them). The cursor also hides over
   the video when the mouse is still.
+- **Even out the volume** (night mode, in the audio menu, the palette or Settings): quiet
+  dialogue gets louder and loud scenes quieter.
 - **Media keys**: play/pause, next, previous and stop work from the keyboard's media keys,
   even when another window has focus, and Windows' media overlay shows what's playing.
 - The PC and display stay awake while a video plays (not while paused).
@@ -77,6 +79,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
 
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
+  evening out the volume,
   preferred subtitle and audio languages, hardware decoding, the theme and the accent color
   (a few presets or any color).
 

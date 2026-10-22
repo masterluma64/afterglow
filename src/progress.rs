@@ -58,6 +58,8 @@ pub struct Settings {
     pub sub_languages: String,
     pub audio_languages: String,
     pub hardware_decoding: bool,
+    /// Evens out loud and quiet parts of the sound ("night mode").
+    pub level_volume: bool,
 }
 
 impl Default for Settings {
@@ -73,6 +75,7 @@ impl Default for Settings {
             sub_languages: "en,eng".into(),
             audio_languages: String::new(),
             hardware_decoding: true,
+            level_volume: false,
         }
     }
 }

@@ -107,6 +107,7 @@ impl App {
             mpv.set("slang", &settings.sub_languages);
             mpv.set("alang", &settings.audio_languages);
             mpv.set("hwdec", if settings.hardware_decoding { "auto-safe" } else { "no" });
+            mpv.set("af", if settings.level_volume { mpv::VOLUME_LEVELER } else { "" });
         }
     }
 
@@ -135,6 +136,10 @@ impl App {
                 ui.end_row();
                 ui.label("");
                 ui.checkbox(&mut autoplay, "Play the next video automatically");
+                ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut settings.level_volume, "Even out the volume")
+                    .on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter");
                 ui.end_row();
                 ui.label("Dropped videos")
                     .on_hover_text("What dropping videos onto the window does (dropped folders always replace the playlist)");

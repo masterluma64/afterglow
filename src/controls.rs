@@ -240,6 +240,13 @@ impl App {
         if tracks.is_empty() && kind != "sub" {
             ui.weak("No audio tracks");
         }
+        if kind == "audio" {
+            ui.separator();
+            let level = egui::Button::selectable(self.store.settings.level_volume, "Even out the volume");
+            if ui.add(level).on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter").clicked() {
+                self.actions.push(Action::ToggleLevelVolume);
+            }
+        }
         if kind == "sub" {
             ui.separator();
             if ui.button(format!("{}  Load subtitle file…", icons::PLUS)).clicked() {

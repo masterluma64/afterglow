@@ -53,6 +53,8 @@ pub(crate) enum Action {
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
     CycleAudio,
+    /// Turns evening out the volume ("night mode") on or off.
+    ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
     ToggleWatched,
     /// Leaves fullscreen, or else closes the subtitle sync panel.
@@ -235,6 +237,12 @@ impl App {
             Action::SetSettings(settings) => {
                 self.store.set_settings(settings);
                 self.apply_settings(ctx);
+            }
+            Action::ToggleLevelVolume => {
+                let mut settings = self.store.settings.clone();
+                settings.level_volume = !settings.level_volume;
+                self.notify(if settings.level_volume { "Evening out the volume" } else { "Volume as recorded" });
+                self.apply(Action::SetSettings(settings), ctx);
             }
             Action::ClearRecentFolders => {
                 self.store.clear_recent_folders();

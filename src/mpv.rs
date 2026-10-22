@@ -17,6 +17,10 @@ pub const DLL_NAME: &str = "libmpv-2.dll";
 /// Where Windows builds of libmpv can be downloaded.
 pub const DOWNLOAD_URL: &str = "https://github.com/shinchiro/mpv-winbuild-cmake/releases";
 
+/// Evens out loud and quiet parts ("night mode"): quiet dialogue gets louder
+/// and loud scenes quieter. Set as mpv's `af` (audio filters).
+pub const VOLUME_LEVELER: &str = "@level:dynaudnorm=f=75:g=25:p=0.55";
+
 const MPV_FORMAT_STRING: c_int = 1;
 const MPV_FORMAT_FLAG: c_int = 3;
 const MPV_FORMAT_INT64: c_int = 4;
@@ -1293,6 +1297,33 @@ mod subtitle_sync_tests {
         drop(mpv);
         std::fs::remove_file(video).unwrap();
         std::fs::remove_file(srt).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod audio_filter_tests {
+    use super::tests::{silent_wav, use_built_dll};
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// The volume leveler is a filter this libmpv build has, and audio keeps
+    /// playing through it.
+    #[test]
+    fn levels_volume() {
+        use_built_dll();
+        let wav = silent_wav("afterglow-level.wav", 3);
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        mpv.command(&["set", "ao", "null"]).unwrap();
+        mpv.command(&["set", "af", VOLUME_LEVELER]).expect("the filter is known");
+        mpv.command(&["loadfile", &wav.to_string_lossy()]).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while mpv.get_f64("time-pos").unwrap_or(0.0) < 0.5 {
+            assert!(Instant::now() < deadline, "playback didn't advance");
+            mpv.poll_events();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(mpv.get_str("af").is_some_and(|af| af.contains("dynaudnorm")));
+        assert!(mpv.command(&["set", "af", "@level:nosuchfilter"]).is_err(), "unknown filters are refused");
     }
 }
 

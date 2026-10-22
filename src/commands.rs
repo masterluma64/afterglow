@@ -153,6 +153,8 @@ impl App {
             for t in self.tracks("audio") {
                 list.push(command(format!("Audio: {}", t.label), "", "track language", Action::SetTrack { kind: "audio", id: Some(t.id) }));
             }
+            let label = if self.store.settings.level_volume { "Stop evening out the volume" } else { "Even out the volume (night mode)" };
+            list.push(command(label, "", "level normalize loudness night quiet loud dialogue compress", Action::ToggleLevelVolume));
             list.push(command("Next subtitle track", "S", "captions cycle", Action::CycleSubtitles));
             list.push(command("Subtitles: Off", "", "captions hide", Action::SetTrack { kind: "sub", id: None }));
             for t in self.tracks("sub") {
