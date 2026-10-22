@@ -131,6 +131,10 @@ pub struct Store {
     pub autoplay_next: bool,
     #[serde(skip)]
     dirty: bool,
+    /// Set when the saved file exists but couldn't be read: saving would
+    /// replace it with this empty state, so nothing is saved.
+    #[serde(skip)]
+    read_failed: bool,
     #[serde(skip)]
     saver: Option<Saver>,
 }
@@ -150,6 +154,7 @@ impl Default for Store {
             sidebar_pinned: true,
             settings: Settings::default(),
             dirty: false,
+            read_failed: false,
             saver: None,
         }
     }
@@ -197,20 +202,29 @@ fn file_path() -> Option<PathBuf> {
 }
 
 impl Store {
-    /// Loads the saved state. A file that can't be read is set aside as
+    /// Loads the saved state. A damaged file is set aside as
     /// `progress.bad.json` rather than overwritten, and a warning is returned.
+    /// A file that can't be read at all (e.g. locked by another program) is
+    /// left alone, and nothing is saved until the next start.
     pub fn load() -> (Self, Option<String>) {
         let Some(path) = file_path() else { return (Self::default(), None) };
         Self::load_from(&path)
     }
 
     fn load_from(path: &Path) -> (Self, Option<String>) {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
+        // Read as bytes, so text that isn't UTF-8 counts as damaged below.
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Self::default(), None),
-            Err(e) => return (Self::default(), Some(format!("Could not read saved progress: {e}"))),
+            Err(e) => {
+                let store = Self { read_failed: true, ..Self::default() };
+                let warning = format!(
+                    "Could not read saved progress ({e}). It is left as it is, and nothing will be saved until Afterglow is restarted."
+                );
+                return (store, Some(warning));
+            }
         };
-        match serde_json::from_str(&text) {
+        match serde_json::from_slice(&bytes) {
             Ok(store) => (store, None),
             Err(e) => {
                 let backup = path.with_extension("bad.json");
@@ -227,7 +241,7 @@ impl Store {
     /// Saves if anything changed. The file is written by a background thread,
     /// so a slow disk never holds up the UI.
     pub fn save(&mut self) {
-        if !self.dirty {
+        if !self.dirty || self.read_failed {
             return;
         }
         let Some(path) = file_path() else { return };
@@ -509,8 +523,28 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("progress.bad.json")).unwrap(), "{ not json");
         assert!(!path.exists());
 
+        std::fs::write(&path, b"{\"volume\": \xff}").unwrap();
+        let (_, warning) = Store::load_from(&path);
+        assert!(warning.is_some_and(|w| w.contains("damaged")), "text that isn't UTF-8 is damaged too");
+        assert!(!path.exists());
+
         let (_, warning) = Store::load_from(&dir.join("missing.json"));
         assert!(warning.is_none(), "a missing file is a fresh start, not an error");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn never_saves_over_a_file_it_could_not_read() {
+        // A folder where the file should be can't be read as one.
+        let dir = std::env::temp_dir().join(format!("afterglow-unreadable-{}", std::process::id()));
+        let path = dir.join("progress.json");
+        std::fs::create_dir_all(&path).unwrap();
+        let (mut store, warning) = Store::load_from(&path);
+        assert!(warning.is_some_and(|w| w.contains("nothing will be saved")));
+        assert!(path.is_dir(), "left as it is, not set aside");
+        store.update_position(Path::new("a.mkv"), 60.0, 600.0);
+        store.save();
+        assert!(store.dirty && store.saver.is_none(), "nothing was saved");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
