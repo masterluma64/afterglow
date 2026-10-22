@@ -25,8 +25,10 @@ const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
 const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
+/// Padding inside text fields.
+const TEXT_MARGIN: egui::Margin = egui::Margin::symmetric(8, 5);
 /// Height of a playlist entry, without the spacing between entries.
-const PLAYLIST_ROW_HEIGHT: f32 = 22.0;
+const PLAYLIST_ROW_HEIGHT: f32 = 26.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Scroll distance, in points, of one mouse wheel notch.
 const SCROLL_NOTCH: f32 = 50.0;
@@ -58,6 +60,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
+            set_spacing(&cc.egui_ctx);
             Ok(Box::new(App::new(&cc.egui_ctx, open, cc.get_proc_address.clone())))
         }),
     );
@@ -1550,11 +1553,11 @@ impl App {
                 ui.end_row();
                 section(ui, "LANGUAGES");
                 ui.label("Subtitles");
-                ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).hint_text("e.g. en,eng").desired_width(200.0))
+                ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).margin(TEXT_MARGIN).hint_text("e.g. en,eng").desired_width(200.0))
                     .on_hover_text("Language codes in order of preference, separated by commas. Applies to the next video.");
                 ui.end_row();
                 ui.label("Audio");
-                ui.add(egui::TextEdit::singleline(&mut settings.audio_languages).hint_text("the file's default").desired_width(200.0))
+                ui.add(egui::TextEdit::singleline(&mut settings.audio_languages).margin(TEXT_MARGIN).hint_text("the file's default").desired_width(200.0))
                     .on_hover_text("Language codes in order of preference, e.g. ja,jpn. Applies to the next video.");
                 ui.end_row();
                 section(ui, "VIDEO AND APPEARANCE");
@@ -1834,6 +1837,7 @@ impl App {
         ui.horizontal(|ui| {
             let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { 24.0 };
             let edit = egui::TextEdit::singleline(&mut self.search)
+                .margin(TEXT_MARGIN)
                 .id(id)
                 .hint_text(format!("{}  Search the playlist (/)", icons::SEARCH))
                 .desired_width(width);
@@ -2453,7 +2457,12 @@ fn playlist_row(
     let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
     let button = egui::Button::selectable(playing, "")
         .left_text(text)
-        .right_text(RichText::new(length).weak())
+        .right_text(if playing {
+            // Readable on the accent-colored background.
+            RichText::new(length).color(ui.visuals().selection.stroke.color)
+        } else {
+            RichText::new(length).weak()
+        })
         // One line per entry (cut off with …), so rows have a fixed height.
         .truncate()
         .sense(Sense::click_and_drag());
@@ -2542,8 +2551,21 @@ fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {
     visuals
 }
 
+/// Roomier than egui's defaults, so buttons and fields are easier to hit.
+fn set_spacing(ctx: &egui::Context) {
+    ctx.all_styles_mut(|style| {
+        let spacing = &mut style.spacing;
+        spacing.button_padding = vec2(8.0, 4.0);
+        spacing.interact_size.y = 24.0;
+        spacing.item_spacing = vec2(8.0, 5.0);
+        spacing.menu_margin = egui::Margin::same(8);
+        spacing.icon_width = 16.0;
+        spacing.icon_width_inner = 10.0;
+    });
+}
+
 fn transport_button(icon: &str) -> egui::Button<'static> {
-    egui::Button::new(icons::fill(icon).size(ICON_SIZE)).frame_when_inactive(false).min_size(vec2(30.0, 26.0))
+    egui::Button::new(icons::fill(icon).size(ICON_SIZE)).frame_when_inactive(false).min_size(vec2(34.0, 30.0))
 }
 
 fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
