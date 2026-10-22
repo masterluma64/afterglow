@@ -124,6 +124,10 @@ enum Action {
     /// Docks the playlist beside the video, or lets it slide out over it.
     TogglePin,
     OpenSettings,
+    /// Opens the command palette (Ctrl+K).
+    OpenPalette,
+    /// Asks before resetting every video's progress.
+    ConfirmResetProgress,
     SetSettings(progress::Settings),
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
@@ -242,6 +246,27 @@ struct UpNext {
 }
 
 /// A short message shown over the video: feedback for an action, or a warning.
+/// What is typed into the command palette, and which match Enter runs.
+#[derive(Default)]
+struct Palette {
+    query: String,
+    pick: usize,
+}
+
+/// An entry in the command palette.
+struct Command {
+    label: String,
+    /// Its key, shown beside it.
+    key: &'static str,
+    /// Other words it can be found by.
+    keywords: &'static str,
+    action: Action,
+}
+
+fn command(label: impl Into<String>, key: &'static str, keywords: &'static str, action: Action) -> Command {
+    Command { label: label.into(), key, keywords, action }
+}
+
 struct Notice {
     text: String,
     warning: bool,
@@ -320,6 +345,8 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
+    /// The command palette, while it is open.
+    palette: Option<Palette>,
     /// Dropped videos waiting for the answer to what drops should do.
     pending_drop: Option<Vec<PathBuf>>,
     /// The system media controls, set up once the window exists.
@@ -399,6 +426,7 @@ impl App {
             confirm_reset: false,
             show_help: false,
             settings_open: false,
+            palette: None,
             pending_drop: None,
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
@@ -987,7 +1015,7 @@ impl App {
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.pending_drop.is_some() {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.pending_drop.is_some() || self.palette.is_some() {
             return;
         }
         if self.show_help {
@@ -1011,6 +1039,7 @@ impl App {
                 (M::CTRL, Key::O, Action::OpenVideos),
                 (M::CTRL, Key::F, Action::FocusSearch),
                 (M::CTRL, Key::Comma, Action::OpenSettings),
+                (M::CTRL, Key::K, Action::OpenPalette),
                 (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
                 (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
@@ -1134,6 +1163,8 @@ impl App {
             Action::RefreshFolder => self.refresh_folder(),
             Action::ShowHelp => self.show_help = true,
             Action::OpenSettings => self.settings_open = true,
+            Action::OpenPalette => self.palette = Some(Palette::default()),
+            Action::ConfirmResetProgress => self.confirm_reset = true,
             Action::SetSettings(settings) => {
                 self.store.set_settings(settings);
                 self.apply_settings(ctx);
@@ -1449,6 +1480,10 @@ impl App {
                     if ui.add_enabled(self.store.folder.is_some(), refresh).on_hover_text(tip).clicked() {
                         self.actions.push(Action::RefreshFolder);
                     }
+                    let palette = egui::Button::new(format!("{}  Find a command…", icons::COMMAND)).shortcut_text("Ctrl+K");
+                    if ui.add(palette).clicked() {
+                        self.actions.push(Action::OpenPalette);
+                    }
                     ui.separator();
                     let settings = egui::Button::new(format!("{}  Settings…", icons::GEAR)).shortcut_text("E");
                     if ui.add(settings).clicked() {
@@ -1459,7 +1494,7 @@ impl App {
                         self.actions.push(Action::ShowHelp);
                     }
                     if ui.button(format!("{}  Reset all progress…", icons::RESET)).clicked() {
-                        self.confirm_reset = true;
+                        self.actions.push(Action::ConfirmResetProgress);
                     }
                 });
                 response.on_hover_text("More");
@@ -2335,11 +2370,180 @@ impl App {
             self.actions.push(Action::ToggleSidebar);
         }
         ui.separator();
+        if item(ui, icons::COMMAND, "Find a command…", "Ctrl+K") {
+            self.actions.push(Action::OpenPalette);
+        }
         if item(ui, icons::KEYBOARD, "Keyboard shortcuts", "?") {
             self.actions.push(Action::ShowHelp);
         }
         if item(ui, icons::GEAR, "Settings…", "E") {
             self.actions.push(Action::OpenSettings);
+        }
+    }
+
+    /// Everything the command palette offers right now. Choices that don't
+    /// apply (subtitles with no video loaded, sorting an empty playlist) are
+    /// left out, and toggles are named for what they will do.
+    fn commands(&self) -> Vec<Command> {
+        let mut list = Vec::new();
+        let Playback { paused, muted, speed, sub_delay, .. } = self.playback;
+        if self.loaded {
+            list.push(command(if paused { "Play" } else { "Pause" }, "Space", "resume stop", Action::TogglePause));
+            if self.current.is_some_and(|i| i + 1 < self.playlist.len()) {
+                list.push(command("Next video", "N", "skip", Action::Next));
+            }
+            if self.current.is_some_and(|i| i > 0) {
+                list.push(command("Previous video", "P", "back", Action::Prev));
+            }
+            list.push(command("Back to the start", "Home", "restart beginning rewind", Action::Seek { to: 0.0, exact: true }));
+            if !self.chapters.is_empty() {
+                list.push(command("Next chapter", "PgDn", "skip", Action::Chapter { forward: true }));
+                list.push(command("Previous chapter", "PgUp", "back", Action::Chapter { forward: false }));
+                for chapter in &self.chapters {
+                    list.push(command(format!("Chapter: {}", chapter.title), "", "go to jump", Action::Seek { to: chapter.time, exact: true }));
+                }
+            }
+            list.push(command("Next frame", ".", "step", Action::FrameStep { forward: true }));
+            list.push(command("Previous frame", ",", "step back", Action::FrameStep { forward: false }));
+            list.push(command("Faster", "]", "speed up", Action::SetSpeed(step_speed(speed, true))));
+            list.push(command("Slower", "[", "speed down", Action::SetSpeed(step_speed(speed, false))));
+            if speed != 1.0 {
+                list.push(command("Normal speed", "Backspace", "reset 1×", Action::SetSpeed(1.0)));
+            }
+            for preset in SPEEDS {
+                list.push(command(format!("Speed: {}", format_speed(preset)), "", "playback rate", Action::SetSpeed(preset)));
+            }
+            list.push(command(if muted { "Unmute" } else { "Mute" }, "M", "sound volume quiet", Action::ToggleMute));
+            list.push(command("Next audio track", "A", "language cycle", Action::CycleAudio));
+            for t in self.tracks("audio") {
+                list.push(command(format!("Audio: {}", t.label), "", "track language", Action::SetTrack { kind: "audio", id: Some(t.id) }));
+            }
+            list.push(command("Next subtitle track", "S", "captions cycle", Action::CycleSubtitles));
+            list.push(command("Subtitles: Off", "", "captions hide", Action::SetTrack { kind: "sub", id: None }));
+            for t in self.tracks("sub") {
+                list.push(command(format!("Subtitles: {}", t.label), "", "captions track language", Action::SetTrack { kind: "sub", id: Some(t.id) }));
+            }
+            list.push(command("Load subtitle file…", "", "captions srt ass", Action::LoadSubtitle));
+            list.push(command("Show subtitles earlier", "Z", "captions delay sync", Action::AdjustSubDelay(-0.1)));
+            list.push(command("Show subtitles later", "X", "captions delay sync", Action::AdjustSubDelay(0.1)));
+            if sub_delay != 0.0 {
+                list.push(command("Reset the subtitle delay", "", "captions sync", Action::SetSubDelay(0.0)));
+            }
+            let sync = if self.sync_panel { "Close subtitle sync" } else { "Sync subtitles…" };
+            list.push(command(sync, "T", "captions delay offset timing", Action::ToggleSyncPanel));
+            let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
+            list.push(command(if watched { "Mark as unwatched" } else { "Mark as watched" }, "W", "seen progress", Action::ToggleWatched));
+        } else if self.current.is_none() && !self.playlist.is_empty() {
+            list.push(command("Play", "Space", "resume continue start", Action::TogglePause));
+        }
+
+        list.push(command("Open folder…", "O", "playlist browse", Action::OpenFolder));
+        list.push(command("Add videos…", "I", "files browse", Action::OpenVideos));
+        for folder in self.store.recent_folders.iter().filter(|f| f.is_dir()) {
+            list.push(command(format!("Open recent: {}", display_name(folder)), "", "folder", Action::Open(vec![folder.clone()])));
+        }
+        if !self.store.recent_folders.is_empty() {
+            list.push(command("Clear recent folders", "", "forget history", Action::ClearRecentFolders));
+        }
+        if self.store.folder.is_some() {
+            list.push(command("Refresh the folder", "R", "rescan reload", Action::RefreshFolder));
+            let (label, include) = if self.store.include_subfolders {
+                ("Stop including subfolders", false)
+            } else {
+                ("Include subfolders", true)
+            };
+            list.push(command(label, "", "folders scan recursive", Action::SetIncludeSubfolders(include)));
+        }
+        let shown = if self.sidebar_docked() { self.show_sidebar } else { self.peek.is_some() };
+        list.push(command(if shown { "Hide the playlist" } else { "Show the playlist" }, "B", "sidebar", Action::ToggleSidebar));
+        let pin = if self.store.sidebar_pinned { "Unpin the playlist" } else { "Pin the playlist" };
+        list.push(command(pin, "", "sidebar dock", Action::TogglePin));
+        if !self.playlist.is_empty() {
+            list.push(command("Search the playlist", "/", "find filter video", Action::FocusSearch));
+            list.push(command("Sort by name", "", "playlist order", Action::Sort(SortBy::Name)));
+            list.push(command("Sort by date modified", "", "playlist order", Action::Sort(SortBy::Modified)));
+            list.push(command("Sort by length", "", "playlist order duration", Action::Sort(SortBy::Length)));
+            list.push(command("Reverse the playlist order", "", "sort", Action::ReverseOrder));
+            list.push(command("Clear the playlist", "", "empty remove all", Action::ClearPlaylist));
+        }
+        let autoplay = self.store.autoplay_next;
+        let label = if autoplay { "Stop playing the next video automatically" } else { "Play the next video automatically" };
+        list.push(command(label, "", "autoplay up next countdown", Action::SetAutoplayNext(!autoplay)));
+
+        list.push(command(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }, "F", "full screen window maximize", Action::ToggleFullscreen));
+        list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
+        list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
+        list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
+        list
+    }
+
+    /// Ctrl+K: type to find any command, including ones without a key or a
+    /// button of their own, then run it with Enter or a click.
+    fn command_palette(&mut self, ctx: &egui::Context) {
+        let commands = self.commands();
+        let Some(palette) = &mut self.palette else { return };
+        let query = palette.query.trim().to_lowercase();
+        let mut matches: Vec<usize> = (0..commands.len()).filter(|&i| command_matches(&query, &commands[i])).collect();
+        matches.sort_by_key(|&i| command_rank(&query, &commands[i].label));
+
+        // Taken before the text field sees them, so it keeps focus on Enter.
+        let (down, up, enter) = ctx.input_mut(|i| {
+            use egui::Modifiers as M;
+            (i.consume_key(M::NONE, Key::ArrowDown), i.consume_key(M::NONE, Key::ArrowUp), i.consume_key(M::NONE, Key::Enter))
+        });
+        let last = matches.len().saturating_sub(1);
+        if down {
+            palette.pick = (palette.pick + 1).min(last);
+        }
+        if up {
+            palette.pick = palette.pick.saturating_sub(1);
+        }
+        palette.pick = palette.pick.min(last);
+        let mut chosen = if enter { matches.get(palette.pick).copied() } else { None };
+
+        let id = egui::Id::unique("command-palette");
+        let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 72.0));
+        let modal = egui::Modal::new(id).area(area).show(ctx, |ui| {
+            ui.set_width(480.0);
+            let edit = egui::TextEdit::singleline(&mut palette.query)
+                .margin(TEXT_MARGIN)
+                .hint_text(format!("{}  Type a command", icons::SEARCH))
+                .desired_width(f32::INFINITY);
+            let resp = ui.add(edit);
+            resp.request_focus();
+            if resp.changed() {
+                palette.pick = 0;
+                // The list above was filtered by the previous text.
+                ui.ctx().request_repaint();
+            }
+            ui.add_space(4.0);
+            if matches.is_empty() {
+                ui.weak("No matching commands");
+                return;
+            }
+            egui::ScrollArea::vertical().max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
+                for (n, &i) in matches.iter().enumerate() {
+                    let c = &commands[i];
+                    let button = egui::Button::selectable(n == palette.pick, &c.label)
+                        .shortcut_text(RichText::new(c.key).weak())
+                        .min_size(vec2(ui.available_width(), PLAYLIST_ROW_HEIGHT));
+                    let row = ui.add(button);
+                    if row.clicked() {
+                        chosen = Some(i);
+                    }
+                    if n == palette.pick && (down || up) {
+                        row.scroll_to_me(None);
+                    }
+                }
+            });
+        });
+        if let Some(i) = chosen {
+            self.palette = None;
+            if let Some(c) = commands.into_iter().nth(i) {
+                self.actions.push(c.action);
+            }
+        } else if modal.should_close() {
+            self.palette = None;
         }
     }
 
@@ -2558,8 +2762,8 @@ impl eframe::App for App {
         let moved = ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO || i.pointer.any_down());
         let hover = ctx.pointer_hover_pos();
         let over_controls = self.controls_rect.zip(hover).is_some_and(|(r, p)| r.contains(p));
-        // An open menu also counts, so the cursor stays while choosing.
-        if moved || over_controls || egui::Popup::is_any_open(&ctx) {
+        // An open menu or the command palette also counts, so the cursor stays while choosing.
+        if moved || over_controls || egui::Popup::is_any_open(&ctx) || self.palette.is_some() {
             self.last_activity = Instant::now();
         }
         let idle = self.loaded && !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
@@ -2625,6 +2829,9 @@ impl eframe::App for App {
         }
         if self.settings_open {
             self.settings_dialog(&ctx);
+        }
+        if self.palette.is_some() {
+            self.command_palette(&ctx);
         }
         if self.pending_drop.is_some() {
             self.drop_dialog(&ctx);
@@ -2857,9 +3064,31 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("F", "Fullscreen"),
         ("Esc", "Leave fullscreen, close panels"),
         ("E", "Settings"),
+        ("Ctrl+K", "Find a command"),
         ("?", "This overview"),
     ]),
 ];
+
+/// Whether every word typed into the command palette appears in a command's
+/// name or keywords (ignoring case). `query` is already lowercase.
+fn command_matches(query: &str, command: &Command) -> bool {
+    let text = format!("{} {}", command.label, command.keywords).to_lowercase();
+    query.split_whitespace().all(|word| text.contains(word))
+}
+
+/// Orders palette matches: names starting with the text first, then names
+/// with a word starting with it, then the rest (each in their usual order).
+fn command_rank(query: &str, label: &str) -> u8 {
+    let label = label.to_lowercase();
+    let first = query.split_whitespace().next().unwrap_or("");
+    if label.starts_with(query) {
+        0
+    } else if label.split(|c: char| !c.is_alphanumeric()).any(|word| word.starts_with(first)) {
+        1
+    } else {
+        2
+    }
+}
 
 /// Moves the item at `from` so it lands before the item now at `to`, or at
 /// the end when `to` is the length.
@@ -2929,7 +3158,10 @@ fn format_time(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{chapter_at, chapter_target, format_speed, format_time, format_total, icons, move_item, step_speed};
+    use super::{
+        Action, chapter_at, chapter_target, command, command_matches, command_rank, format_speed, format_time, format_total,
+        icons, move_item, step_speed,
+    };
     use eframe::egui::{Context, FontFamily, FontId};
 
     #[test]
@@ -2940,6 +3172,21 @@ mod tests {
         assert_eq!(format_total(4.0 * 3600.0 + 12.0 * 60.0 + 20.0), "4 h 12 min");
         assert_eq!(format_time(65.0), "01:05");
         assert_eq!(format_time(3725.0), "1:02:05");
+    }
+
+    #[test]
+    fn finds_commands_by_any_word() {
+        let mute = command("Mute", "M", "sound volume quiet", Action::ToggleMute);
+        assert!(command_matches("", &mute));
+        assert!(command_matches("mu", &mute));
+        assert!(command_matches("vol", &mute), "keywords count");
+        assert!(command_matches("quiet sound", &mute), "words in any order");
+        assert!(!command_matches("mute subtitles", &mute), "every word must match");
+
+        assert_eq!(command_rank("sub", "Subtitles: English"), 0);
+        assert_eq!(command_rank("sub", "Next subtitle track"), 1);
+        assert_eq!(command_rank("sub", "Load subtitle file…"), 1);
+        assert_eq!(command_rank("delay", "Show subtitles later"), 2, "found by a keyword only");
     }
 
     #[test]
@@ -2995,7 +3242,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

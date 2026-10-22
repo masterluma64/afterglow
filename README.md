@@ -52,6 +52,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   subtitle tracks, speed, chapters, marking the video watched, fullscreen, the playlist and
   Settings. Each item shows its key, and it also works in fullscreen while the controls are
   hidden.
+- **Command palette** (Ctrl+K, or the ⋯ and right-click menus): type a few letters to find
+  any command, including the ones without a key or button, such as a specific audio or
+  subtitle track, a chapter, a speed, sorting, a recent folder or turning auto-play off.
+  ↑ / ↓ pick one and Enter runs it.
 - **On-screen feedback**: seeking, volume, mute, subtitle changes and video changes show a
   short notice over the video, so keyboard control works without the controls visible.
 - **Seek bar previews**: hovering or dragging the seek bar shows a preview frame and the
@@ -128,6 +132,7 @@ in the app for an overview.
 | Esc | Leave fullscreen, or close the subtitle sync panel |
 | E | Settings |
 | ? | Keyboard shortcut overview (also in the ⋯ menu) |
+| Ctrl+K | Command palette: find any command by typing |
 | Scroll over the video | Volume |
 | Middle-click the video | Play / pause |
 | Right-click the video | Menu with tracks, speed, chapters and more |
