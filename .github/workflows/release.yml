@@ -2,6 +2,8 @@
 # as a GitHub release named after the version in Cargo.toml. If that version
 # is already released, the build and tests still run as a check, but nothing
 # is published: bump the version in Cargo.toml to release again.
+# The libmpv it ships is a GPL build, so releases are for private use (the
+# repository is private); see Licensing in the README.
 name: Release
 
 on:
@@ -53,12 +55,14 @@ jobs:
           New-Item -ItemType Directory $name | Out-Null
           Copy-Item target\release\afterglow.exe, target\release\libmpv-2.dll, README.md $name
           @"
+          This build of Afterglow is for private use only; please don't share it.
+
           libmpv-2.dll is mpv (https://mpv.io), as built by
           https://github.com/shinchiro/mpv-winbuild-cmake (release $env:MPV_TAG).
-          mpv and the FFmpeg libraries in it are free software under the GNU GPL
-          and LGPL; their source code and exact license terms are at
-          https://github.com/mpv-player/mpv and https://ffmpeg.org, and the build
-          recipe at https://github.com/shinchiro/mpv-winbuild-cmake.
+          It is a GPL build: mpv and the FFmpeg libraries in it are free software
+          under the GNU GPL and LGPL. Their source code and exact license terms are
+          at https://github.com/mpv-player/mpv and https://ffmpeg.org, and the
+          build recipe at https://github.com/shinchiro/mpv-winbuild-cmake.
 
           The icons are Phosphor (https://phosphoricons.com), under the MIT license.
           "@ | Set-Content -Encoding utf8 "$name\THIRD-PARTY.txt"

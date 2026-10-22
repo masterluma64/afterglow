@@ -107,14 +107,21 @@ cargo run --release
 cargo run --release -- "D:\Shows\Foo"    # play a folder
 ```
 
-To distribute, ship `afterglow.exe` together with `libmpv-2.dll`, in a folder the user can
-write to (the `data` folder is created next to them).
+To run it elsewhere, keep `afterglow.exe` and `libmpv-2.dll` together in a folder the user
+can write to (the `data` folder is created next to them).
 
 Every push or merge to `main` runs `.github/workflows/release.yml`: it downloads the newest
 libmpv, runs the tests, and publishes a GitHub release with a zip of the exe and DLL, named
 after the version in `Cargo.toml`. If that version was already released, nothing is
 published, so bump the version to make a new release. Set `MPV_BUILD` in the workflow to pin
 a specific libmpv build.
+
+**Licensing:** Afterglow is closed source and meant for private use. The libmpv builds it
+uses (from shinchiro) are GPL builds, so don't share releases publicly while that's the
+case: the GPL would then require Afterglow's source to be offered under the GPL too. To
+distribute it more widely, switch to an LGPL build of libmpv (mpv built with
+`-Dgpl=false`, with an FFmpeg built without `--enable-gpl`), which a closed-source program
+may load as a separate, replaceable DLL.
 
 Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fonts`.
 The app icon is drawn in code (`src/app_icon.rs`); `cargo run --example make_icon`
