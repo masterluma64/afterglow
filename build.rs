@@ -17,6 +17,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(packed_mpv)");
     let src = PathBuf::from("vendor/libmpv-2.dll");
     println!("cargo:rerun-if-changed={}", src.display());
+    println!("cargo:rerun-if-changed=vendor/libmpv-2.dll.sha256");
     if !src.exists() {
         println!("cargo:warning=vendor/libmpv-2.dll not found; the player needs it at runtime");
         return;
@@ -34,9 +35,23 @@ fn main() {
 
     // Packing takes a minute or so, so debug builds skip it.
     if std::env::var("PROFILE").as_deref() == Ok("release") {
+        check_pinned(&src);
         // The stamp names the packing method too, so changing it packs again.
         pack(&src, &out, &format!("xz x86 9e {:?}", stamp(&src)));
         println!("cargo:rustc-cfg=packed_mpv");
+    }
+}
+
+/// libmpv decodes every video Afterglow opens, so release builds only pack the
+/// DLL pinned in `vendor/libmpv-2.dll.sha256`. To update libmpv, test the new
+/// one and put its SHA-256 there.
+fn check_pinned(src: &Path) {
+    use sha2::Digest;
+    let pinned = std::fs::read_to_string("vendor/libmpv-2.dll.sha256").expect("vendor/libmpv-2.dll.sha256 is missing");
+    let pinned = pinned.split_whitespace().next().unwrap_or_default().to_lowercase();
+    let hash: String = sha2::Sha256::digest(std::fs::read(src).expect("failed to read libmpv-2.dll")).iter().map(|b| format!("{b:02x}")).collect();
+    if hash != pinned {
+        panic!("vendor/libmpv-2.dll has SHA-256 {hash}, not the pinned {pinned} (vendor/libmpv-2.dll.sha256). If you meant to update libmpv, test it and put its checksum there.");
     }
 }
 

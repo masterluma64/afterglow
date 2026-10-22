@@ -108,25 +108,20 @@ next to the executable, and release builds also pack it into the executable, com
 xz (this takes a minute or two the first time, and again only when the DLL changes).
 The build Afterglow is tested with is release
 [20261016](https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261016), and
-`vendor/libmpv-2.dll.sha256` pins it: since libmpv decodes every video Afterglow opens, the
-packaging script below only ships that exact DLL. To update libmpv, test the new one and put
-its SHA-256 in that file.
+`vendor/libmpv-2.dll.sha256` pins it: since libmpv decodes every video Afterglow opens,
+release builds refuse any other DLL. To update libmpv, test the new one and put its SHA-256
+in that file.
 
 ```sh
 cargo run --release
 cargo run --release -- "D:\Shows\Foo"    # play a folder
 ```
 
-A release `afterglow.exe` runs on its own: on the first start it unpacks libmpv into its
-`data` folder (about 120 MB, taking a second or two), and uses that from then on. A
-`libmpv-2.dll` next to the exe is used instead if there is one. Put the exe in a folder the
-user can write to, since the `data` folder is created next to it.
-
-To package it, run `scripts\package.cmd` (or double-click it). It runs the tests, builds,
-and writes `dist\afterglow-<version>-windows-x64.exe` (just under 50 MB), plus a zip of the
-exe (about 40 MB) with a notice saying which commit and libmpv it was built from. The
-version comes from `Cargo.toml`; building the same version again replaces them.
-`-SkipTests` skips the tests.
+The release build, `target\release\afterglow.exe` (just under 50 MB), runs on its own: on
+the first start it unpacks libmpv into its `data` folder (about 120 MB, taking a second or
+two), and uses that from then on. A `libmpv-2.dll` next to the exe is used instead if there
+is one. Put the exe in a folder the user can write to, since the `data` folder is created
+next to it.
 
 **Licensing:** Afterglow is closed source and meant for private use. The libmpv builds it
 uses (from shinchiro) are GPL builds, so don't share builds publicly while that's the

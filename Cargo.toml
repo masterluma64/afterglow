@@ -17,6 +17,7 @@ souvlaki = { version = "0.8.3", default-features = false }
 [build-dependencies]
 embed-resource = "3.0.12"
 liblzma = "0.4.9"
+sha2 = "0.11.1"
 
 [profile.release]
 # Smaller and a bit faster.
