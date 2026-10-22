@@ -3,6 +3,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender};
+use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +105,8 @@ pub struct Store {
     pub autoplay_next: bool,
     #[serde(skip)]
     dirty: bool,
+    #[serde(skip)]
+    saver: Option<Saver>,
 }
 
 impl Default for Store {
@@ -119,6 +123,7 @@ impl Default for Store {
             autoplay_next: true,
             settings: Settings::default(),
             dirty: false,
+            saver: None,
         }
     }
 }
@@ -192,30 +197,27 @@ impl Store {
         }
     }
 
+    /// Saves if anything changed. The file is written by a background thread,
+    /// so a slow disk never holds up the UI.
     pub fn save(&mut self) {
         if !self.dirty {
             return;
         }
         let Some(path) = file_path() else { return };
-        self.save_to(&path);
-    }
-
-    /// Writes to a temporary file that replaces the old one only once it is
-    /// fully on disk, so a crash mid-save never leaves a half-written file.
-    fn save_to(&mut self, path: &Path) {
-        let write = || -> std::io::Result<()> {
-            std::fs::create_dir_all(path.parent().unwrap())?;
-            let tmp = path.with_extension("json.tmp");
-            let mut file = std::fs::File::create(&tmp)?;
-            std::io::Write::write_all(&mut file, &serde_json::to_vec_pretty(self)?)?;
-            file.sync_all()?;
-            drop(file);
-            std::fs::rename(tmp, path)
-        };
-        match write() {
-            Ok(()) => self.dirty = false,
+        match serde_json::to_vec_pretty(self) {
+            Ok(bytes) => {
+                self.saver.get_or_insert_with(|| Saver::new(path)).write(bytes);
+                self.dirty = false;
+            }
             Err(e) => eprintln!("failed to save progress: {e}"),
         }
+    }
+
+    #[cfg(test)]
+    fn save_to(&mut self, path: &Path) {
+        let bytes = serde_json::to_vec_pretty(self).unwrap();
+        write_atomically(path, &bytes).unwrap();
+        self.dirty = false;
     }
 
     pub fn get(&self, path: &Path) -> Entry {
@@ -326,6 +328,62 @@ impl Store {
     }
 }
 
+/// Writes to a temporary file that replaces the old one only once it is
+/// fully on disk, so a crash mid-save never leaves a half-written file.
+fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    let tmp = path.with_extension("json.tmp");
+    let mut file = std::fs::File::create(&tmp)?;
+    std::io::Write::write_all(&mut file, bytes)?;
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(tmp, path)
+}
+
+/// Writes saved state on a background thread. When saves pile up only the
+/// newest is written. Dropping it waits for the last write to finish.
+struct Saver {
+    queue: Option<Sender<Vec<u8>>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl Saver {
+    fn new(path: PathBuf) -> Self {
+        let (queue, saves) = mpsc::channel::<Vec<u8>>();
+        let thread = std::thread::Builder::new()
+            .name("save".into())
+            .spawn(move || {
+                while let Ok(mut bytes) = saves.recv() {
+                    while let Ok(newer) = saves.try_recv() {
+                        bytes = newer;
+                    }
+                    if let Err(e) = write_atomically(&path, &bytes) {
+                        eprintln!("failed to save progress: {e}");
+                    }
+                }
+            })
+            .map_err(|e| eprintln!("could not start saving in the background: {e}"))
+            .ok();
+        Self { queue: Some(queue), thread }
+    }
+
+    fn write(&self, bytes: Vec<u8>) {
+        if let Some(queue) = &self.queue {
+            let _ = queue.send(bytes);
+        }
+    }
+}
+
+impl Drop for Saver {
+    fn drop(&mut self) {
+        // Closing the queue ends the thread once it has written what's left.
+        self.queue = None;
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +405,21 @@ mod tests {
             assert_eq!(entry.duration, length, "lengths are kept");
         }
         assert_eq!(store.playlist.len(), 3);
+    }
+
+    #[test]
+    fn saves_in_the_background_and_finishes_on_drop() {
+        let dir = std::env::temp_dir().join(format!("afterglow-saver-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("progress.json");
+        let saver = Saver::new(path.clone());
+        for i in 0..50 {
+            saver.write(format!("{{\"n\": {i}}}").into_bytes());
+        }
+        drop(saver);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"n\": 49}", "the newest save is on disk");
+        assert!(!dir.join("progress.json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
