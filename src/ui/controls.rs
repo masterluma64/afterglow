@@ -26,7 +26,7 @@ impl App {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
-                let (response, _) = egui::containers::menu::MenuButton::from_button(more).ui(ui, |ui| {
+                let (response, _) = ui::menu_button(more).ui(ui, |ui| {
                     let recent = self.store.recent_folders.clone();
                     // Checked in the background while the menu is open.
                     self.recent.check(&recent, ui.ctx());
@@ -217,7 +217,7 @@ impl App {
         let (icon, tip) = if kind == "sub" { (icons::SUBTITLES, "Subtitles (S to cycle)") } else { (icons::WAVEFORM, "Audio track (A to cycle)") };
         ui.add_enabled_ui(self.loaded, |ui| {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
-            let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+            let (response, _) = ui::menu_button(button).ui(ui, |ui| {
                 ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).small().weak());
                 self.track_items(ui, kind);
             });
@@ -274,7 +274,7 @@ impl App {
         let label = RichText::new(format_speed(speed)).monospace();
         let label = if speed == 1.0 { label.weak() } else { label.strong() };
         let button = egui::Button::new(label).frame_when_inactive(false);
-        let (response, _) = egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+        let (response, _) = ui::menu_button(button).ui(ui, |ui| {
             ui.label(RichText::new("Speed").small().weak());
             self.speed_items(ui);
         });

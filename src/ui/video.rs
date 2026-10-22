@@ -43,7 +43,7 @@ impl App {
             self.placeholder(ui, rect);
         }
         if self.mpv.is_ok() {
-            resp.context_menu(|ui| self.video_menu(ui));
+            ui::context_menu(&resp, |ui| self.video_menu(ui));
         }
         self.paint_notice(ui, rect);
     }

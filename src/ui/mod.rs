@@ -7,3 +7,21 @@ pub(crate) mod dialogs;
 pub(crate) mod icons;
 pub(crate) mod sidebar;
 pub(crate) mod video;
+
+use eframe::egui;
+
+/// egui's menu style, with roomier items than its default.
+fn menu_style(style: &mut egui::Style) {
+    egui::containers::menu::menu_style(style);
+    style.spacing.button_padding = egui::vec2(12.0, 6.0);
+}
+
+/// A button that opens a menu in our style; its submenus follow it.
+pub(crate) fn menu_button(button: egui::Button<'_>) -> egui::containers::menu::MenuButton<'_> {
+    egui::containers::menu::MenuButton::from_button(button).config(egui::containers::menu::MenuConfig::new().style(menu_style))
+}
+
+/// A right-click menu in our style.
+pub(crate) fn context_menu(response: &egui::Response, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Popup::context_menu(response).style(menu_style).show(add_contents);
+}

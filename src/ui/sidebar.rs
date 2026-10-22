@@ -13,20 +13,14 @@ pub(crate) fn playlist_row(
     playing: bool,
 ) -> egui::Response {
     let entry = store.get(path);
-    let text = if entry.watched {
-        RichText::new(format!("{}  {name}", icons::CHECK)).weak()
-    } else {
-        RichText::new(name)
-    };
+    // Dimmed text is hard to read on the accent-colored background of the
+    // playing row, so there it uses the selection's text color.
+    let dim = |text: RichText| if playing { text.color(ui.visuals().selection.stroke.color) } else { text.weak() };
+    let text = if entry.watched { dim(RichText::new(format!("{}  {name}", icons::CHECK))) } else { RichText::new(name) };
     let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
     let button = egui::Button::selectable(playing, "")
         .left_text(text)
-        .right_text(if playing {
-            // Readable on the accent-colored background.
-            RichText::new(length).color(ui.visuals().selection.stroke.color)
-        } else {
-            RichText::new(length).weak()
-        })
+        .right_text(dim(RichText::new(length)))
         // One line per entry (cut off with …), so rows have a fixed height.
         .truncate()
         .sense(Sense::click_and_drag());
@@ -40,7 +34,7 @@ pub(crate) fn playlist_row(
     if resp.clicked() {
         actions.push(Action::Play(index));
     }
-    resp.context_menu(|ui| {
+    ui::context_menu(&resp, |ui| {
         if ui.button(format!("{}  Play from start", icons::PLAY)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), false));
             actions.push(Action::Play(index));
@@ -173,7 +167,7 @@ impl App {
         // The same scope docked or slid out, so the list keeps its scroll position.
         ui.scope_builder(egui::UiBuilder::new().scope_id(egui::Id::unique("playlist")), |ui| self.sidebar_contents(ui));
         let include = self.store.include_subfolders;
-        background.context_menu(|ui| subfolder_option(ui, include, &mut self.actions));
+        ui::context_menu(&background, |ui| subfolder_option(ui, include, &mut self.actions));
     }
 
     pub(crate) fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
