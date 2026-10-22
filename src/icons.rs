@@ -43,6 +43,12 @@ pub const LIST_NUMBERS: &str = "\u{E2F6}";
 pub const COMMAND: &str = "\u{E1C4}";
 pub const CAMERA: &str = "\u{E10E}";
 pub const FRAME_CORNERS: &str = "\u{E626}";
+pub const FILM_STRIP: &str = "\u{E792}";
+pub const FOLDER_OPEN: &str = "\u{E256}";
+pub const ZOOM_IN: &str = "\u{E310}";
+pub const ZOOM_OUT: &str = "\u{E30E}";
+pub const MOON: &str = "\u{E330}";
+pub const CROP: &str = "\u{E1D4}";
 // The text font has no arrows; shortcut texts use these code points inline.
 #[cfg(test)]
 pub const ARROW_LEFT: &str = "\u{E058}";

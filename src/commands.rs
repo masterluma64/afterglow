@@ -21,10 +21,13 @@ pub(crate) struct Command {
     pub(crate) action: Action,
     /// Videos are only listed once something is typed, after the commands.
     pub(crate) video: bool,
+    /// Shown in front of the label; set from the action (see `App::command_icon`)
+    /// unless given.
+    pub(crate) icon: &'static str,
 }
 
 pub(crate) fn command(label: impl Into<String>, key: &'static str, keywords: &'static str, action: Action) -> Command {
-    Command { label: label.into(), key: key.into(), keywords, action, video: false }
+    Command { label: label.into(), key: key.into(), keywords, action, video: false, icon: "" }
 }
 
 /// Whether every word typed into the command palette appears in a command's
@@ -137,7 +140,8 @@ impl App {
             if self.current.is_some_and(|i| i > 0) {
                 list.push(command("Previous video", "P", "back", Action::Prev));
             }
-            list.push(command("Back to the start", "Home", "restart beginning rewind", Action::Seek { to: 0.0, exact: true }));
+            let start = command("Back to the start", "Home", "restart beginning rewind", Action::Seek { to: 0.0, exact: true });
+            list.push(Command { icon: icons::RESET, ..start });
             if !self.chapters.is_empty() {
                 list.push(command("Next chapter", "PgDn", "skip", Action::Chapter { forward: true }));
                 list.push(command("Previous chapter", "PgUp", "back", Action::Chapter { forward: false }));
@@ -242,10 +246,62 @@ impl App {
         for (index, path) in self.playlist.iter().enumerate() {
             let entry = self.store.get(path);
             let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
-            let label = format!("{}  {}", icons::FILE_VIDEO, display_name(path));
-            list.push(Command { label, key: length.into(), keywords: "play video", action: Action::Play(index), video: true });
+            let label = display_name(path);
+            list.push(Command { label, key: length.into(), keywords: "play video", action: Action::Play(index), video: true, icon: "" });
+        }
+        for c in list.iter_mut().filter(|c| c.icon.is_empty()) {
+            c.icon = self.command_icon(&c.action);
         }
         list
+    }
+
+    /// The icon for a palette entry, matching the menus where they overlap.
+    /// Toggles show what they will do, like their labels.
+    fn command_icon(&self, action: &Action) -> &'static str {
+        match action {
+            Action::TogglePause if self.loaded && !self.playback.paused => icons::PAUSE,
+            Action::TogglePause => icons::PLAY,
+            Action::Next => icons::SKIP_FORWARD,
+            Action::Prev => icons::SKIP_BACK,
+            Action::Play(_) => icons::FILE_VIDEO,
+            Action::Seek { .. } | Action::Chapter { .. } => icons::LIST_NUMBERS,
+            Action::FrameStep { .. } => icons::FILM_STRIP,
+            Action::SetSpeed(_) => icons::GAUGE,
+            Action::ToggleMute if self.playback.muted => icons::SPEAKER_HIGH,
+            Action::ToggleMute => icons::SPEAKER_X,
+            Action::CycleAudio | Action::AdjustAudioDelay(_) | Action::SetAudioDelay(_) => icons::WAVEFORM,
+            Action::SetTrack { kind: "audio", .. } => icons::WAVEFORM,
+            Action::SetTrack { .. } | Action::CycleSubtitles | Action::LoadSubtitle => icons::SUBTITLES,
+            Action::AdjustSubDelay(_) | Action::SetSubDelay(_) | Action::ToggleSyncPanel => icons::TIMER,
+            Action::ToggleLevelVolume => icons::MOON,
+            Action::Screenshot => icons::CAMERA,
+            Action::OpenScreenshotFolder => icons::FOLDER_OPEN,
+            Action::SetAspect(_) => icons::FRAME_CORNERS,
+            Action::Rotate { clockwise: true } => icons::REFRESH,
+            Action::Rotate { clockwise: false } => icons::RESET,
+            Action::Zoom(by) if *by > 0.0 => icons::ZOOM_IN,
+            Action::Zoom(_) => icons::ZOOM_OUT,
+            Action::ToggleFill => icons::CROP,
+            Action::ResetPicture | Action::ConfirmResetProgress => icons::RESET,
+            Action::ToggleWatched => icons::CHECK,
+            Action::OpenFolder => icons::FOLDER_PLUS,
+            Action::OpenVideos => icons::FILE_VIDEO,
+            Action::Open(_) => icons::FOLDER,
+            Action::ClearRecentFolders => icons::RECENT,
+            Action::RefreshFolder => icons::REFRESH,
+            Action::SetIncludeSubfolders(_) => icons::FOLDER,
+            Action::ToggleSidebar => icons::SIDEBAR,
+            Action::TogglePin => icons::PIN,
+            Action::FocusSearch => icons::SEARCH,
+            Action::Sort(_) | Action::ReverseOrder => icons::SORT,
+            Action::ClearPlaylist => icons::TRASH,
+            Action::SetAutoplayNext(_) => icons::SKIP_FORWARD,
+            Action::ToggleFullscreen if self.fullscreen => icons::CORNERS_IN,
+            Action::ToggleFullscreen => icons::CORNERS_OUT,
+            Action::OpenSettings => icons::GEAR,
+            Action::ShowHelp => icons::KEYBOARD,
+            _ => icons::COMMAND,
+        }
     }
 
     /// Ctrl+K: type to find any command, including ones without a key or a
@@ -278,11 +334,16 @@ impl App {
         let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 72.0));
         let modal = egui::Modal::new(id).area(area).show(ctx, |ui| {
             ui.set_width(480.0);
-            let edit = egui::TextEdit::singleline(&mut palette.query)
-                .margin(TEXT_MARGIN)
-                .hint_text(format!("{}  Type a command", icons::SEARCH))
-                .desired_width(f32::INFINITY);
-            let resp = ui.add(edit);
+            let resp = ui
+                .horizontal(|ui| {
+                    ui.label(RichText::new(icons::SEARCH).size(ICON_SIZE).weak());
+                    let edit = egui::TextEdit::singleline(&mut palette.query)
+                        .margin(TEXT_MARGIN)
+                        .hint_text("Type a command or a video's name")
+                        .desired_width(f32::INFINITY);
+                    ui.add(edit)
+                })
+                .inner;
             resp.request_focus();
             if resp.changed() {
                 palette.pick = 0;
@@ -297,7 +358,7 @@ impl App {
             egui::ScrollArea::vertical().max_height(360.0).auto_shrink([false, true]).show(ui, |ui| {
                 for (n, &i) in matches.iter().enumerate() {
                     let c = &commands[i];
-                    let button = egui::Button::selectable(n == palette.pick, &c.label)
+                    let button = egui::Button::selectable(n == palette.pick, format!("{}  {}", c.icon, c.label))
                         .shortcut_text(RichText::new(c.key.as_ref()).weak())
                         .min_size(vec2(ui.available_width(), PLAYLIST_ROW_HEIGHT));
                     let row = ui.add(button);
