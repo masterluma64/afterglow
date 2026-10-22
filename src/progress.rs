@@ -41,6 +41,8 @@ pub struct Settings {
     pub watched_percent: f64,
     /// What dropping videos onto the window does; `None` asks (the first time).
     pub dropped_videos: Option<DroppedVideos>,
+    /// Which side of the video the playlist is on.
+    pub sidebar_side: Side,
     pub theme: Theme,
     /// Accent color (selection, seek bar, progress); `None` for the default blue.
     pub accent: Option<[u8; 3]>,
@@ -57,6 +59,7 @@ impl Default for Settings {
             seek_long: 30.0,
             watched_percent: 90.0,
             dropped_videos: None,
+            sidebar_side: Side::Left,
             theme: Theme::System,
             accent: None,
             sub_languages: "en,eng".into(),
@@ -72,6 +75,13 @@ pub enum DroppedVideos {
     Add,
     /// Make them the playlist.
     Replace,
+}
+
+#[derive(Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub enum Side {
+    #[default]
+    Left,
+    Right,
 }
 
 #[derive(Clone, Copy, PartialEq, Default, Serialize, Deserialize)]

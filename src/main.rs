@@ -27,7 +27,7 @@ const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
 /// Padding inside text fields.
 const TEXT_MARGIN: egui::Margin = egui::Margin::symmetric(8, 5);
-/// How close to the video's left edge the pointer brings out the unpinned playlist.
+/// How close to the video's edge the pointer brings out the unpinned playlist.
 const EDGE_WIDTH: f32 = 24.0;
 /// How long the unpinned playlist stays after the pointer leaves it.
 const PEEK_HIDE_DELAY: Duration = Duration::from_millis(300);
@@ -1472,11 +1472,14 @@ impl App {
     }
 
     /// The unpinned playlist: it slides out over the video when the pointer
-    /// reaches the left edge (or from the keyboard) and hides once the
+    /// reaches its edge of the video (or from the keyboard) and hides once the
     /// pointer leaves it, unless it's in use.
     fn floating_sidebar(&mut self, ctx: &egui::Context, video: egui::Rect) {
         let pointer = ctx.pointer_hover_pos();
-        let at_edge = pointer.is_some_and(|p| video.contains(p) && p.x < video.left() + EDGE_WIDTH);
+        let right = self.store.settings.sidebar_side == progress::Side::Right;
+        let at_edge = pointer.is_some_and(|p| {
+            video.contains(p) && if right { p.x > video.right() - EDGE_WIDTH } else { p.x < video.left() + EDGE_WIDTH }
+        });
         if self.peek.is_none() && at_edge && !ctx.input(|i| i.pointer.any_down()) {
             self.peek = Some(Peek { entered: true, left_at: None });
         }
@@ -1485,7 +1488,8 @@ impl App {
         }
         let size = vec2(self.sidebar_width, video.height());
         let area = egui::Area::new(egui::Id::unique("floating-sidebar"))
-            .fixed_pos(video.left_top())
+            .fixed_pos(if right { video.right_top() } else { video.left_top() })
+            .pivot(if right { egui::Align2::RIGHT_TOP } else { egui::Align2::LEFT_TOP })
             .constrain(false)
             .show(ctx, |ui| {
                 let frame = egui::Frame::side_top_panel(ui.style()).shadow(ui.visuals().popup_shadow);
@@ -1664,6 +1668,13 @@ impl App {
                     }
                 });
                 ui.end_row();
+                ui.label("Playlist side");
+                ui.horizontal(|ui| {
+                    for (side, label) in [(progress::Side::Left, "Left"), (progress::Side::Right, "Right")] {
+                        ui.selectable_value(&mut settings.sidebar_side, side, label);
+                    }
+                });
+                ui.end_row();
                 ui.label("Accent color");
                 ui.horizontal(|ui| {
                     let blue = accent_selection(None, ui.visuals().dark_mode).bg_fill;
@@ -1809,7 +1820,7 @@ impl App {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let pinned = self.store.sidebar_pinned;
                 let (pin, tip) = if pinned {
-                    (icons::fill(icons::PIN), "Unpin: hide the playlist until you point at the left edge")
+                    (icons::fill(icons::PIN), "Unpin: hide the playlist until you point at the edge of the video")
                 } else {
                     (RichText::new(icons::PIN), "Pin the playlist beside the video")
                 };
@@ -2459,7 +2470,11 @@ impl eframe::App for App {
                 .show(ui, |ui| self.controls(ui));
         }
         if self.sidebar_docked() && self.show_sidebar {
-            let panel = egui::Panel::left("sidebar")
+            let panel = match self.store.settings.sidebar_side {
+                progress::Side::Left => egui::Panel::left("sidebar"),
+                progress::Side::Right => egui::Panel::right("sidebar"),
+            };
+            let panel = panel
                 .resizable(true)
                 .default_size(280.0)
                 .size_range(180.0..=600.0)
