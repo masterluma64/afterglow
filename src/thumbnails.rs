@@ -1,6 +1,7 @@
 //! Preview frames for the seek bar, from a second, silent mpv instance.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
 
 use eframe::egui::{self, TextureHandle, TextureOptions};
 
@@ -20,7 +21,22 @@ pub struct Thumbnails {
 }
 
 impl Thumbnails {
-    pub fn new(ctx: &egui::Context) -> Result<Self, String> {
+    /// Starts the previewer on a background thread, since starting mpv takes
+    /// a moment; it arrives on the returned channel.
+    pub fn start(ctx: &egui::Context) -> Receiver<Result<Self, String>> {
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new().name("preview-start".into()).spawn(move || {
+            let _ = tx.send(Self::new(&ctx));
+            ctx.request_repaint();
+        });
+        if let Err(e) = spawned {
+            eprintln!("could not start the seek bar previews: {e}");
+        }
+        rx
+    }
+
+    fn new(ctx: &egui::Context) -> Result<Self, String> {
         let mpv = Mpv::thumbnailer(ctx.clone())?;
         mpv.set_render_size(SIZE[0], SIZE[1]);
         Ok(Self { mpv, path: None, loaded: false, requested: None, texture: None })

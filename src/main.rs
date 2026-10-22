@@ -251,8 +251,9 @@ struct App {
     /// Saved track choices being restored: how many subtitle files are still
     /// loading, and the choices to apply after.
     restoring: Option<(usize, progress::TrackPrefs)>,
-    /// Seek-bar previews, started the first time they are needed.
+    /// Seek-bar previews, once started in the background (see `thumbnails_ready`).
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
+    thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
     up_next: Option<UpNext>,
     watch: watch::FolderWatch,
     /// The playlist entry being dragged to a new place.
@@ -319,6 +320,7 @@ impl App {
             announce_sub_step: None,
             restoring: None,
             thumbnails: None,
+            thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
             up_next: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
             drag_row: None,
@@ -721,6 +723,7 @@ impl App {
     }
 
     fn file_loaded(&mut self) {
+        self.open_for_preview();
         let Ok(mpv) = &self.mpv else { return };
         self.loaded = true;
         // Restore this video's track choices. The subtitle delay is global in
@@ -750,6 +753,15 @@ impl App {
             mpv.set("sid", sid);
         }
         self.restoring = None;
+    }
+
+    /// Opens the playing video in the previewer too, so the first hover over
+    /// the seek bar only has to seek.
+    fn open_for_preview(&mut self) {
+        let Some(path) = self.current_path().map(Path::to_path_buf) else { return };
+        if let Some(Ok(thumbnails)) = &mut self.thumbnails {
+            thumbnails.request(&path, self.playback.position, 1.0);
+        }
     }
 
     /// Takes in a changed property that was asked for with `observe`.
@@ -1862,7 +1874,7 @@ impl App {
             Some(i) => format!("{}  ·  {}", format_time(at), self.chapters[i].title),
             None => format_time(at),
         };
-        let preview = self.preview(ctx, at, duration);
+        let preview = self.preview(at, duration);
         egui::Area::new(egui::Id::unique("seek-preview"))
             .order(egui::Order::Tooltip)
             .fixed_pos(anchor)
@@ -1882,11 +1894,11 @@ impl App {
             });
     }
 
-    /// A preview frame of the playing video near `at`, starting the previewer
-    /// on first use. The frame may still be from a moment ago.
-    fn preview(&mut self, ctx: &egui::Context, at: f64, duration: f64) -> Option<egui::TextureId> {
+    /// A preview frame of the playing video near `at`, once the previewer has
+    /// started. The frame may still be from a moment ago.
+    fn preview(&mut self, at: f64, duration: f64) -> Option<egui::TextureId> {
         let path = self.current_path()?.to_path_buf();
-        let thumbnails = self.thumbnails.get_or_insert_with(|| thumbnails::Thumbnails::new(ctx)).as_mut().ok()?;
+        let thumbnails = self.thumbnails.as_mut()?.as_mut().ok()?;
         // About 300 distinct previews along the video, at most one per second.
         thumbnails.request(&path, at, (duration / 300.0).max(1.0));
         thumbnails.texture(&path).map(TextureHandle::id)
@@ -2145,6 +2157,13 @@ impl eframe::App for App {
         self.receive_durations();
         self.receive_scans();
         self.update_frame(&ctx);
+        if let Some(ready) = &self.thumbnails_ready {
+            if let Ok(thumbnails) = ready.try_recv() {
+                self.thumbnails = Some(thumbnails);
+                self.thumbnails_ready = None;
+                self.open_for_preview();
+            }
+        }
         if let Some(Ok(thumbnails)) = &mut self.thumbnails {
             thumbnails.update(&ctx);
         }
