@@ -110,14 +110,14 @@ cargo run --release -- "D:\Shows\Foo"    # play a folder
 To run it elsewhere, keep `afterglow.exe` and `libmpv-2.dll` together in a folder the user
 can write to (the `data` folder is created next to them).
 
-Every push or merge to `main` runs `.github/workflows/release.yml`: it downloads the newest
-libmpv, runs the tests, and publishes a GitHub release with a zip of the exe and DLL, named
-after the version in `Cargo.toml`. If that version was already released, nothing is
-published, so bump the version to make a new release. Set `MPV_BUILD` in the workflow to pin
-a specific libmpv build.
+To make a zip of it, run `scripts\package.cmd` (or double-click it). It runs the tests,
+builds, and writes `dist\Afterglow-<version>-windows-x64.zip` with the exe, the DLL, this
+README and a notice saying which commit and libmpv it was built from. The version comes
+from `Cargo.toml`; building the same version again replaces its zip. `-SkipTests` skips the
+tests.
 
 **Licensing:** Afterglow is closed source and meant for private use. The libmpv builds it
-uses (from shinchiro) are GPL builds, so don't share releases publicly while that's the
+uses (from shinchiro) are GPL builds, so don't share builds publicly while that's the
 case: the GPL would then require Afterglow's source to be offered under the GPL too. To
 distribute it more widely, switch to an LGPL build of libmpv (mpv built with
 `-Dgpl=false`, with an FFmpeg built without `--enable-gpl`), which a closed-source program
