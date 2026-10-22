@@ -120,10 +120,11 @@ impl App {
         self.open_for_preview();
         let Ok(mpv) = &self.mpv else { return };
         self.loaded = true;
-        // Restore this video's track choices. The subtitle delay is global in
-        // mpv, so it is always set, back to 0 if nothing was chosen.
+        // Restore this video's track choices. The delays are global in mpv,
+        // so they are always set, back to 0 if nothing was chosen.
         let prefs = self.current_path().and_then(|p| self.store.tracks(p)).cloned().unwrap_or_default();
         mpv.set("sub-delay", &prefs.sub_delay.to_string());
+        mpv.set("audio-delay", &prefs.audio_delay.to_string());
         mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
         self.line_marks = [None, None];
         // Subtitle files load in the background when sent without waiting, so
@@ -171,6 +172,7 @@ impl App {
             "speed" => p.speed = value.as_f64().unwrap_or(1.0),
             "sub-delay" => p.sub_delay = value.as_f64().unwrap_or(0.0),
             "sub-speed" => p.sub_speed = value.as_f64().unwrap_or(1.0),
+            "audio-delay" => p.audio_delay = value.as_f64().unwrap_or(0.0),
             "chapter-list" => self.chapters = mpv::Chapter::list(&value),
             "track-list" => {
                 self.tracks = mpv::Track::list(&value);
@@ -185,7 +187,7 @@ impl App {
             }
             _ => {}
         }
-        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed") {
+        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed" | "audio-delay") {
             self.remember_tracks();
         }
     }
@@ -204,11 +206,12 @@ impl App {
         // In mpv's terms: a track id, or "no" for none.
         let selected = |kind| self.tracks(kind).find(|t| t.selected).map_or("no".to_string(), |t| t.id.to_string());
         let (audio, subtitle) = (selected("audio"), selected("sub"));
-        let Playback { sub_delay, sub_speed, .. } = self.playback;
+        let Playback { sub_delay, sub_speed, audio_delay, .. } = self.playback;
         let prefs = self.store.tracks_mut(&path);
         prefs.audio = Some(audio);
         prefs.subtitle = Some(subtitle);
         prefs.sub_delay = sub_delay;
+        prefs.audio_delay = audio_delay;
         prefs.sub_speed = ((sub_speed - 1.0).abs() > 1e-6).then_some(sub_speed);
     }
 

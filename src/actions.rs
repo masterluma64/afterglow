@@ -65,6 +65,10 @@ pub(crate) enum Action {
     LoadSubtitle,
     AdjustSubDelay(f64),
     SetSubDelay(f64),
+    /// Shifts the sound later (positive) or earlier, for videos whose sound
+    /// is out of sync with the picture.
+    AdjustAudioDelay(f64),
+    SetAudioDelay(f64),
     /// Shifts subtitles so the previous (-1) or next (1) line shows right now.
     SubStep(i32),
     /// Marks the moment a subtitle line appears, or when it is actually
@@ -393,6 +397,8 @@ impl App {
                         | Action::LoadSubtitle
                         | Action::AdjustSubDelay(_)
                         | Action::SetSubDelay(_)
+                        | Action::AdjustAudioDelay(_)
+                        | Action::SetAudioDelay(_)
                         | Action::SubStep(_)
                         | Action::MarkLine { .. }
                         | Action::SetSubSpeed(_)
@@ -476,6 +482,14 @@ impl App {
             Action::SetSubDelay(delay) if self.loaded => {
                 mpv.set("sub-delay", &delay.to_string());
                 self.notify(format!("Subtitle delay {delay:+.1} s"));
+            }
+            Action::AdjustAudioDelay(by) if self.loaded => {
+                mpv.send(&["add", "audio-delay", &by.to_string()]);
+                self.notify(format!("Audio delay {:+.1} s", self.playback.audio_delay + by));
+            }
+            Action::SetAudioDelay(delay) if self.loaded => {
+                mpv.set("audio-delay", &delay.to_string());
+                self.notify(format!("Audio delay {delay:+.1} s"));
             }
             Action::SubStep(_) if self.loaded && !self.tracks.iter().any(|t| t.kind == "sub" && t.selected) => {
                 self.notify("Subtitles are off");

@@ -143,6 +143,7 @@ struct Playback {
     volume: f64,
     sub_delay: f64,
     sub_speed: f64,
+    audio_delay: f64,
     speed: f64,
 }
 
@@ -272,7 +273,7 @@ impl App {
             // Reading properties can block while mpv waits for the UI thread to
             // draw a frame, so playback state comes in as events instead.
             for name in [
-                "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed",
+                "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed", "audio-delay",
                 "chapter-list", "track-list",
             ] {
                 mpv.observe(name);

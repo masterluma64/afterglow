@@ -48,8 +48,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   (Ctrl+← / Ctrl+→); or mark when a subtitle appears (G) and when the line is actually
   spoken (H) to shift by the difference; or nudge the delay by 0.1 s or 1 s. Subtitles that
   drift further off over time (made for 25 fps vs 23.976 fps video) can be retimed.
-- **Per-video choices**: the audio track, subtitle track, subtitle delay and subtitle files
-  you load are remembered for each video and restored when you open it again.
+- **Per-video choices**: the audio track, subtitle track, subtitle and audio delays and subtitle
+  files you load are remembered for each video and restored when you open it again.
 - **Right-click the video** for a menu with play/pause, next and previous video, audio and
   subtitle tracks, speed, chapters, marking the video watched, fullscreen, the playlist and
   Settings. Each item shows its key, and it also works in fullscreen while the controls are
@@ -68,6 +68,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   (remembered), fullscreen with controls that float over the video and hide while playing
   (they stay up while paused or while the pointer rests on them). The cursor also hides over
   the video when the mouse is still.
+- **Audio delay** (audio menu or palette): plays the sound earlier or later in 0.1 s steps,
+  for videos whose sound is out of sync with the picture.
 - **Even out the volume** (night mode, in the audio menu, the palette or Settings): quiet
   dialogue gets louder and loud scenes quieter.
 - **Screenshots** (Shift+S, the right-click menu or the palette) save the current frame with

@@ -242,6 +242,18 @@ impl App {
         }
         if kind == "audio" {
             ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(format!("Delay {:+.1} s", self.playback.audio_delay));
+                if ui.small_button(icons::MINUS).on_hover_text("Play the sound earlier").clicked() {
+                    self.actions.push(Action::AdjustAudioDelay(-0.1));
+                }
+                if ui.small_button(icons::PLUS).on_hover_text("Play the sound later").clicked() {
+                    self.actions.push(Action::AdjustAudioDelay(0.1));
+                }
+                if self.playback.audio_delay != 0.0 && ui.small_button(icons::RESET).on_hover_text("No delay").clicked() {
+                    self.actions.push(Action::SetAudioDelay(0.0));
+                }
+            });
             let level = egui::Button::selectable(self.store.settings.level_volume, "Even out the volume");
             if ui.add(level).on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter").clicked() {
                 self.actions.push(Action::ToggleLevelVolume);

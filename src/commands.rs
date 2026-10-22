@@ -127,7 +127,7 @@ impl App {
     /// left out, and toggles are named for what they will do.
     pub(crate) fn commands(&self) -> Vec<Command> {
         let mut list = Vec::new();
-        let Playback { paused, muted, speed, sub_delay, .. } = self.playback;
+        let Playback { paused, muted, speed, sub_delay, audio_delay, .. } = self.playback;
         if self.loaded {
             list.push(command(if paused { "Play" } else { "Pause" }, "Space", "resume stop", Action::TogglePause));
             if self.current.is_some_and(|i| i + 1 < self.playlist.len()) {
@@ -162,6 +162,11 @@ impl App {
             }
             let label = if self.store.settings.level_volume { "Stop evening out the volume" } else { "Even out the volume (night mode)" };
             list.push(command(label, "", "level normalize loudness night quiet loud dialogue compress", Action::ToggleLevelVolume));
+            list.push(command("Play the sound earlier", "", "audio delay sync lip", Action::AdjustAudioDelay(-0.1)));
+            list.push(command("Play the sound later", "", "audio delay sync lip", Action::AdjustAudioDelay(0.1)));
+            if audio_delay != 0.0 {
+                list.push(command("Reset the audio delay", "", "sound sync lip", Action::SetAudioDelay(0.0)));
+            }
             list.push(command("Next subtitle track", "S", "captions cycle", Action::CycleSubtitles));
             list.push(command("Subtitles: Off", "", "captions hide", Action::SetTrack { kind: "sub", id: None }));
             for t in self.tracks("sub") {
