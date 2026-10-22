@@ -80,7 +80,7 @@ impl App {
                     let now = chapter_at(&self.chapters, self.playback.position);
                     for (i, chapter) in self.chapters.iter().enumerate() {
                         let label = egui::Button::selectable(now == Some(i), &chapter.title)
-                            .shortcut_text(RichText::new(format_time(chapter.time)).weak());
+                            .shortcut_text(ui::secondary(ui, now == Some(i), format_time(chapter.time)));
                         if ui.add(label).clicked() {
                             self.actions.push(Action::Seek { to: chapter.time, exact: true });
                         }
@@ -324,7 +324,7 @@ impl App {
                 for (n, &i) in matches.iter().enumerate() {
                     let c = &commands[i];
                     let button = egui::Button::selectable(n == palette.pick, format!("{}  {}", c.icon, c.label))
-                        .shortcut_text(RichText::new(c.key.as_ref()).weak())
+                        .shortcut_text(ui::secondary(ui, n == palette.pick, c.key.as_ref()))
                         .min_size(vec2(ui.available_width(), PLAYLIST_ROW_HEIGHT));
                     let row = ui.add(button);
                     if row.clicked() {

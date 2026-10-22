@@ -25,3 +25,10 @@ pub(crate) fn menu_button(button: egui::Button<'_>) -> egui::containers::menu::M
 pub(crate) fn context_menu(response: &egui::Response, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Popup::context_menu(response).style(menu_style).show(add_contents);
 }
+
+/// Secondary text, dimmed, except on a selected (accent-colored) background:
+/// dimmed text is hard to read there, so it takes the selection's text color.
+pub(crate) fn secondary(ui: &egui::Ui, on_accent: bool, text: impl Into<egui::RichText>) -> egui::RichText {
+    let text = text.into();
+    if on_accent { text.color(ui.visuals().selection.stroke.color) } else { text.weak() }
+}

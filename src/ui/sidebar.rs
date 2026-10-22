@@ -18,9 +18,7 @@ pub(crate) fn playlist_row(
     let entry = store.get(path);
     // Painted under the row once its size is known.
     let background = ui.painter().add(egui::Shape::Noop);
-    // Dimmed text is hard to read on the accent-colored background of the
-    // playing row, so there it uses the selection's text color.
-    let dim = |text: RichText| if playing { text.color(ui.visuals().selection.stroke.color) } else { text.weak() };
+    let dim = |text: RichText| ui::secondary(ui, playing, text);
     let text = if entry.watched { dim(RichText::new(format!("{}  {name}", icons::CHECK))) } else { RichText::new(name) };
     let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
     let button = egui::Button::selectable(playing, "")
