@@ -53,6 +53,9 @@ pub(crate) enum Action {
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
     CycleAudio,
+    /// Saves the current frame, with subtitles, as a PNG in Pictures\Afterglow.
+    Screenshot,
+    OpenScreenshotFolder,
     /// Turns evening out the volume ("night mode") on or off.
     ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
@@ -142,6 +145,7 @@ impl App {
                 (M::NONE, Key::N, Action::Next),
                 (M::NONE, Key::P, Action::Prev),
                 (M::NONE, Key::W, Action::ToggleWatched),
+                (M::SHIFT, Key::S, Action::Screenshot),
                 (M::NONE, Key::S, Action::CycleSubtitles),
                 (M::NONE, Key::A, Action::CycleAudio),
                 (M::NONE, Key::T, Action::ToggleSyncPanel),
@@ -348,6 +352,14 @@ impl App {
                     self.sync_panel = false;
                 }
             }
+            Action::Screenshot => self.screenshot(),
+            Action::OpenScreenshotFolder => match screenshot_folder() {
+                Some(folder) => {
+                    let _ = std::fs::create_dir_all(&folder);
+                    let _ = std::process::Command::new("explorer").arg(folder).spawn();
+                }
+                None => self.warn("There is no Pictures folder to keep screenshots in"),
+            },
             Action::ToggleWatched => {
                 if let Some(path) = self.current_path().map(Path::to_path_buf) {
                     let watched = self.store.get(&path).watched;
@@ -517,4 +529,44 @@ impl App {
     }
 
     // ---------------------------------------------------------------- UI
+}
+
+impl App {
+    /// Saves the current frame as `<video name> <time>.png` in the
+    /// screenshots folder; mpv reports when it's written.
+    fn screenshot(&mut self) {
+        let (Ok(mpv), true) = (&self.mpv, self.loaded) else { return };
+        let Some(folder) = screenshot_folder() else {
+            return self.warn("There is no Pictures folder to keep screenshots in");
+        };
+        if let Err(e) = std::fs::create_dir_all(&folder) {
+            return self.warn(format!("Could not create {}: {e}", folder.display()));
+        }
+        let name = self.current_path().map(display_name).unwrap_or_default();
+        let time = format_time(self.playback.position).replace(':', ".");
+        let mut path = folder.join(format!("{name} {time}.png"));
+        // Several of the same second (stepping through frames) are numbered,
+        // also while earlier ones are still being written.
+        let mut n = 2;
+        while path.exists() || self.screenshots.contains(&path) {
+            path = folder.join(format!("{name} {time} ({n}).png"));
+            n += 1;
+        }
+        mpv.send_tagged(SCREENSHOT_TAG, &["screenshot-to-file", &path.to_string_lossy(), "subtitles"]);
+        self.screenshots.push(path);
+    }
+}
+
+/// Where screenshots go: an Afterglow folder in the user's Pictures.
+pub(crate) fn screenshot_folder() -> Option<PathBuf> {
+    dirs::picture_dir().map(|pictures| pictures.join(APP_NAME))
+}
+
+/// A file's folder and the one above it, e.g. `Pictures\Afterglow`.
+pub(crate) fn short_folder(path: &Path) -> String {
+    let folder = path.parent().unwrap_or(path);
+    match (folder.parent().and_then(Path::file_name), folder.file_name()) {
+        (Some(above), Some(name)) => Path::new(above).join(name).display().to_string(),
+        _ => folder.display().to_string(),
+    }
 }

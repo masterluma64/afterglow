@@ -234,6 +234,16 @@ impl App {
                     }
                     self.select_saved_tracks();
                 }
+                mpv::Event::CommandDone { tag: SCREENSHOT_TAG, ok } => {
+                    if !self.screenshots.is_empty() {
+                        let path = self.screenshots.remove(0);
+                        if ok {
+                            self.notify(format!("Screenshot saved in {}", short_folder(&path)));
+                        } else {
+                            self.warn(format!("Could not save the screenshot to {}", path.display()));
+                        }
+                    }
+                }
                 mpv::Event::CommandDone { .. } => {}
                 mpv::Event::EndFile { eof, error } => {
                     self.loaded = false;

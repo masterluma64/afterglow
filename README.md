@@ -70,6 +70,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   the video when the mouse is still.
 - **Even out the volume** (night mode, in the audio menu, the palette or Settings): quiet
   dialogue gets louder and loud scenes quieter.
+- **Screenshots** (Shift+S, the right-click menu or the palette) save the current frame with
+  its subtitles as a PNG in `Pictures\Afterglow`, named after the video and the time.
 - **Media keys**: play/pause, next, previous and stop work from the keyboard's media keys,
   even when another window has focus, and Windows' media overlay shows what's playing.
 - The PC and display stay awake while a video plays (not while paused).
@@ -119,6 +121,7 @@ in the app for an overview.
 | Home | Back to the start |
 | 0–9 | Jump to 0%–90% |
 | , / . | Previous / next frame (pauses) |
+| Shift+S | Save a screenshot (in Pictures\Afterglow) |
 | [ / ] | Slower / faster (Backspace: normal speed) |
 | PgUp / PgDn | Previous / next chapter |
 | ↑ / ↓ | Volume |

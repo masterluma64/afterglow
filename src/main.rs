@@ -59,6 +59,8 @@ const SCROLL_NOTCH: f32 = 50.0;
 const SUB_STEP_TAG: u64 = 1;
 /// Tags the replies to subtitle files added back when a video is opened.
 const SUB_RESTORE_TAG: u64 = 2;
+/// Tags the reply to saving a screenshot.
+const SCREENSHOT_TAG: u64 = 3;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 const MIN_WINDOW_SIZE: [f32; 2] = [480.0, 300.0];
@@ -212,6 +214,8 @@ struct App {
     announce_track: Option<&'static str>,
     /// A subtitle step waiting for mpv to report whether there was a line.
     announce_sub_step: Option<&'static str>,
+    /// Screenshots being saved, in order, to announce as mpv reports each.
+    screenshots: Vec<PathBuf>,
     /// Saved track choices being restored: how many subtitle files are still
     /// loading, and the choices to apply after.
     restoring: Option<(usize, progress::TrackPrefs)>,
@@ -322,6 +326,7 @@ impl App {
             tracks_changed_by_user: false,
             announce_track: None,
             announce_sub_step: None,
+            screenshots: Vec::new(),
             restoring: None,
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
@@ -624,6 +629,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("J / L", "Seek back / forward (Shift: further)"),
         ("\u{E058} / \u{E06C}", "Seek back / forward (Shift: further)"),
         ("Home", "Back to the start"),
+        ("Shift+S", "Save a screenshot"),
         ("0–9", "Jump to 0%–90%"),
         (", / .", "Previous / next frame"),
         ("[ / ]", "Slower / faster"),
@@ -711,7 +717,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

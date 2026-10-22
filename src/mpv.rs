@@ -1425,3 +1425,37 @@ mod prober_tests {
         std::fs::remove_file(wav).unwrap();
     }
 }
+
+#[cfg(test)]
+mod screenshot_tests {
+    use super::tests::use_built_dll;
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Screenshots work while video is drawn through the render API, as
+    /// Afterglow does.
+    #[test]
+    fn saves_screenshots() {
+        use_built_dll();
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        mpv.set("mute", "yes");
+        mpv.set_render_size(320, 180);
+        mpv.command(&["loadfile", "av://lavfi:testsrc=duration=5:size=640x360:rate=25"]).unwrap();
+        let path = std::env::temp_dir().join(format!("afterglow-screenshot-{}.png", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut frames = 0;
+        while frames < 5 {
+            assert!(Instant::now() < deadline, "no frames");
+            mpv.poll_events();
+            if mpv.take_frame().is_some_and(|img| img.pixels.iter().any(|p| *p != Color32::BLACK)) {
+                frames += 1;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        mpv.command(&["screenshot-to-file", &path.to_string_lossy(), "subtitles"]).expect("screenshot");
+        let png = std::fs::read(&path).expect("screenshot written");
+        assert!(png.starts_with(b"\x89PNG"), "saved as PNG");
+        let _ = std::fs::remove_file(&path);
+    }
+}

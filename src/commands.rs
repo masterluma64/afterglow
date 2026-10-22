@@ -84,6 +84,9 @@ impl App {
                     }
                 });
             }
+            if item(ui, icons::CAMERA, "Save a screenshot", "Shift+S") {
+                self.actions.push(Action::Screenshot);
+            }
             ui.separator();
             let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
             let (icon, text) = if watched { (icons::RESET, "Mark as unwatched") } else { (icons::CHECK, "Mark as watched") };
@@ -141,6 +144,7 @@ impl App {
                     list.push(command(format!("Chapter: {}", chapter.title), "", "go to jump", Action::Seek { to: chapter.time, exact: true }));
                 }
             }
+            list.push(command("Save a screenshot", "Shift+S", "snapshot capture frame image picture png", Action::Screenshot));
             list.push(command("Next frame", ".", "step", Action::FrameStep { forward: true }));
             list.push(command("Previous frame", ",", "step back", Action::FrameStep { forward: false }));
             list.push(command("Faster", "]", "speed up", Action::SetSpeed(step_speed(speed, true))));
@@ -211,6 +215,7 @@ impl App {
         list.push(command(label, "", "autoplay up next countdown", Action::SetAutoplayNext(!autoplay)));
 
         list.push(command(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }, "F", "full screen window maximize", Action::ToggleFullscreen));
+        list.push(command("Open the screenshots folder", "", "snapshot pictures images", Action::OpenScreenshotFolder));
         list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
         list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
         list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
