@@ -21,10 +21,23 @@ function Run($what, [scriptblock]$command) {
 if (-not (Test-Path vendor\libmpv-2.dll)) {
     throw "vendor\libmpv-2.dll is missing; see Building in the README"
 }
+# libmpv decodes every video Afterglow opens, so only the build pinned in
+# vendor\libmpv-2.dll.sha256 is packaged. To update it, test the new DLL and
+# put its SHA-256 there.
+$pinned = ((Get-Content vendor\libmpv-2.dll.sha256 -TotalCount 1) -split '\s+')[0]
+function Check-Libmpv($path) {
+    $hash = (Get-FileHash $path -Algorithm SHA256).Hash
+    if ($hash -ne $pinned) {
+        throw "$path has SHA-256 $hash, not the pinned $pinned (vendor\libmpv-2.dll.sha256). If you meant to update libmpv, test it and put its checksum there."
+    }
+}
+Check-Libmpv vendor\libmpv-2.dll
 if (-not $SkipTests) {
     Run 'Testing' { cargo test --release }
 }
 Run 'Building' { cargo build --release }
+# The copy that ships, which the build script put next to the exe.
+Check-Libmpv target\release\libmpv-2.dll
 
 $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
 $commit = git rev-parse --short HEAD

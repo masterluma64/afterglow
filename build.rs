@@ -22,8 +22,10 @@ fn main() {
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let profile_dir = out.ancestors().nth(3).unwrap();
     let dst = profile_dir.join("libmpv-2.dll");
-    let stale = std::fs::metadata(&dst).map(|m| m.len()).ok() != std::fs::metadata(&src).map(|m| m.len()).ok();
-    if stale {
+    // Copying keeps the modified time, so another build of the DLL differs in
+    // it even when its size happens to be the same.
+    let stamp = |path: &PathBuf| std::fs::metadata(path).map(|m| (m.len(), m.modified().ok())).ok();
+    if stamp(&dst) != stamp(&src) {
         std::fs::copy(&src, &dst).expect("failed to copy libmpv-2.dll");
     }
 }

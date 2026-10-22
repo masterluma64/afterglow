@@ -102,7 +102,11 @@ so the whole folder can be moved or carried on a USB stick. Data from earlier ve
 
 Requires `libmpv-2.dll` in `vendor/` (from the `mpv-dev-x86_64-*.7z` archive at
 <https://github.com/shinchiro/mpv-winbuild-cmake/releases>). The build script copies it
-next to the executable.
+next to the executable. The build Afterglow is tested with is release
+[20261016](https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261016), and
+`vendor/libmpv-2.dll.sha256` pins it: since libmpv decodes every video Afterglow opens, the
+packaging script below only ships that exact DLL. To update libmpv, test the new one and put
+its SHA-256 in that file.
 
 ```sh
 cargo run --release
