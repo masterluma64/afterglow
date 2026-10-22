@@ -1487,9 +1487,19 @@ impl App {
             return;
         }
         let size = vec2(self.sidebar_width, video.height());
-        let area = egui::Area::new(egui::Id::unique("floating-sidebar"))
-            .fixed_pos(if right { video.right_top() } else { video.left_top() })
-            .pivot(if right { egui::Align2::RIGHT_TOP } else { egui::Align2::LEFT_TOP })
+        let (pos, pivot) = if right { (video.right_top(), egui::Align2::RIGHT_TOP) } else { (video.left_top(), egui::Align2::LEFT_TOP) };
+        let id = egui::Id::unique("floating-sidebar");
+        // A new area is normally laid out invisibly on its first frame to
+        // measure it, which flashes the video through when unpinning. Its size
+        // is known, so skip that.
+        if egui::AreaState::load(ctx, id).and_then(|s| s.size) != Some(size) {
+            let state = egui::AreaState { pivot_pos: Some(pos), pivot, size: Some(size), interactable: true, last_became_visible_at: None };
+            ctx.memory_mut(|m| m.areas_mut().set_state(egui::LayerId::new(egui::Order::Middle, id), state));
+        }
+        let area = egui::Area::new(id)
+            .fade_in(false)
+            .fixed_pos(pos)
+            .pivot(pivot)
             .constrain(false)
             .show(ctx, |ui| {
                 let frame = egui::Frame::side_top_panel(ui.style()).shadow(ui.visuals().popup_shadow);
@@ -1804,7 +1814,8 @@ impl App {
         // Right-clicking where there are no videos (registered first, so the
         // rows and buttons on top take precedence).
         let background = ui.interact(ui.max_rect(), egui::Id::unique("playlist-area"), Sense::click());
-        self.sidebar_contents(ui);
+        // The same scope docked or slid out, so the list keeps its scroll position.
+        ui.scope_builder(egui::UiBuilder::new().scope_id(egui::Id::unique("playlist")), |ui| self.sidebar_contents(ui));
         let include = self.store.include_subfolders;
         background.context_menu(|ui| subfolder_option(ui, include, &mut self.actions));
     }
