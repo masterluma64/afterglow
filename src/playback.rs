@@ -296,6 +296,10 @@ impl App {
             self.store.save();
             self.last_save = Instant::now();
         }
+        // Without a console, a failing save would otherwise go unnoticed.
+        if let Some(problem) = self.store.save_problem() {
+            self.warn(problem);
+        }
     }
 }
 

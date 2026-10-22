@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
@@ -172,6 +172,9 @@ pub struct Store {
     /// replace it with this empty state, so nothing is saved.
     #[serde(skip)]
     read_failed: bool,
+    /// Whether the last save failed, so a failure is reported only once.
+    #[serde(skip)]
+    save_failing: bool,
     #[serde(skip)]
     saver: Option<Saver>,
 }
@@ -193,6 +196,7 @@ impl Default for Store {
             settings: Settings::default(),
             dirty: false,
             read_failed: false,
+            save_failing: false,
             saver: None,
         }
     }
@@ -295,6 +299,26 @@ impl Store {
             }
             Err(e) => eprintln!("failed to save progress: {e}"),
         }
+    }
+
+    /// Says what went wrong once saving starts failing (e.g. Afterglow's
+    /// folder can't be written to). After that it stays quiet until a save
+    /// works again, so a lasting problem is reported once.
+    pub fn save_problem(&mut self) -> Option<String> {
+        let saver = self.saver.as_ref()?;
+        let mut problem = None;
+        for result in saver.results.try_iter() {
+            match result {
+                Err(e) if !self.save_failing => {
+                    self.save_failing = true;
+                    problem = Some(e);
+                }
+                Err(_) => {}
+                Ok(()) => self.save_failing = false,
+            }
+        }
+        let folder = saver.path.parent().unwrap_or(&saver.path).display();
+        problem.map(|e| format!("Progress can't be saved in {folder} ({e}). Afterglow needs a folder it can write to."))
     }
 
     #[cfg(test)]
@@ -498,13 +522,18 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// Writes saved state on a background thread. When saves pile up only the
 /// newest is written. Dropping it waits for the last write to finish.
 struct Saver {
+    path: PathBuf,
     queue: Option<Sender<Vec<u8>>>,
+    /// How each write went.
+    results: Receiver<Result<(), String>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Saver {
     fn new(path: PathBuf) -> Self {
         let (queue, saves) = mpsc::channel::<Vec<u8>>();
+        let (result_tx, results) = mpsc::channel();
+        let thread_path = path.clone();
         let thread = std::thread::Builder::new()
             .name("save".into())
             .spawn(move || {
@@ -512,14 +541,16 @@ impl Saver {
                     while let Ok(newer) = saves.try_recv() {
                         bytes = newer;
                     }
-                    if let Err(e) = write_atomically(&path, &bytes) {
+                    let result = write_atomically(&thread_path, &bytes);
+                    if let Err(e) = &result {
                         eprintln!("failed to save progress: {e}");
                     }
+                    let _ = result_tx.send(result.map_err(|e| e.to_string()));
                 }
             })
             .map_err(|e| eprintln!("could not start saving in the background: {e}"))
             .ok();
-        Self { queue: Some(queue), thread }
+        Self { path, queue: Some(queue), results, thread }
     }
 
     fn write(&self, bytes: Vec<u8>) {
@@ -614,6 +645,50 @@ mod tests {
         drop(saver);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"n\": 49}", "the newest save is on disk");
         assert!(!dir.join("progress.json.tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reports_a_failing_save_once() {
+        let dir = std::env::temp_dir().join(format!("afterglow-unwritable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file where the data folder should be: nothing can be saved in it.
+        let blocker = dir.join("data");
+        std::fs::write(&blocker, b"").unwrap();
+        let mut store = Store { saver: Some(Saver::new(blocker.join("progress.json"))), ..Store::default() };
+        let write = |store: &Store| store.saver.as_ref().unwrap().write(b"{}".to_vec());
+        // Saves happen in the background: collect what they report until `done`.
+        let collect = |store: &mut Store, done: &dyn Fn(&Store) -> bool| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let mut problems = Vec::new();
+            while !done(store) && std::time::Instant::now() < deadline {
+                problems.extend(store.save_problem());
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            problems
+        };
+        write(&store);
+        let problems = collect(&mut store, &|s| s.save_failing);
+        assert_eq!(problems.len(), 1, "the failure is reported");
+        assert!(problems[0].contains(&blocker.display().to_string()), "{}", problems[0]);
+
+        // More failures, then a save that works: results come in order, so
+        // once it's seen, the failures before it have been too.
+        write(&store);
+        write(&store);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::fs::remove_file(&blocker).unwrap();
+        write(&store);
+        assert!(collect(&mut store, &|s| !s.save_failing).is_empty(), "a lasting problem is reported once");
+        assert!(!store.save_failing, "saving works again");
+
+        // After a save that worked, the next failure is reported again.
+        std::fs::remove_dir_all(&blocker).unwrap();
+        std::fs::write(&blocker, b"").unwrap();
+        write(&store);
+        assert_eq!(collect(&mut store, &|s| s.save_failing).len(), 1);
+        drop(store);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
