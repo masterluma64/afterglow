@@ -177,6 +177,9 @@ impl Default for Store {
     }
 }
 
+/// The UTF-8 byte order mark.
+const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+
 fn key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -241,7 +244,9 @@ impl Store {
                 return (store, Some(warning));
             }
         };
-        match serde_json::from_slice(&bytes) {
+        // Editors such as Notepad may save the file with a byte order mark.
+        let json = bytes.strip_prefix(BOM).unwrap_or(&bytes);
+        match serde_json::from_slice(json) {
             Ok(store) => (store, None),
             Err(e) => {
                 let backup = path.with_extension("bad.json");
@@ -539,6 +544,13 @@ mod tests {
         assert_eq!((prefs.subtitle.as_deref(), prefs.audio.as_deref(), prefs.sub_delay), (Some("3"), None, -1.5));
         assert_eq!(prefs.sub_files, [PathBuf::from("a.en.srt")]);
         assert!(!dir.join("progress.json.tmp").exists());
+
+        let mut with_bom = BOM.to_vec();
+        with_bom.extend(std::fs::read(&path).unwrap());
+        std::fs::write(&path, with_bom).unwrap();
+        let (loaded, warning) = Store::load_from(&path);
+        assert!(warning.is_none(), "a byte order mark is fine");
+        assert_eq!(loaded.get(Path::new("a.mkv")).position, 60.0);
 
         std::fs::write(&path, "{ not json").unwrap();
         let (loaded, warning) = Store::load_from(&path);
