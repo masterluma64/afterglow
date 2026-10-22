@@ -243,7 +243,7 @@ fn copy_from_appdata(dir: &Path) {
         return;
     }
     let Some(config) = dirs::config_dir() else { return };
-    let old = ["Afterglow", "minimal-video-player"].iter().map(|name| config.join(name).join("progress.json")).find(|p| p.is_file());
+    let old = ["afterglow", "minimal-video-player"].iter().map(|name| config.join(name).join("progress.json")).find(|p| p.is_file());
     if let Some(old) = old {
         let copied = std::fs::create_dir_all(dir).and_then(|()| std::fs::copy(&old, &target));
         if let Err(e) = copied {

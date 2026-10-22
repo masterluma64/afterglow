@@ -40,7 +40,10 @@ use playback::*;
 use playlist::*;
 use video::*;
 
+/// The name shown in the UI.
 const APP_NAME: &str = "Afterglow";
+/// The name used for files, folders and other technical names.
+const APP_ID: &str = "afterglow";
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
 const NOTICE_DURATION: Duration = Duration::from_millis(1500);
@@ -125,7 +128,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     let result = eframe::run_native(
-        APP_NAME,
+        APP_ID,
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);

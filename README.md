@@ -77,7 +77,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Even out the volume** (night mode, in the audio menu, the palette or Settings): quiet
   dialogue gets louder and loud scenes quieter.
 - **Screenshots** (Shift+S, the right-click menu or the palette) save the current frame with
-  its subtitles as a PNG in `Pictures\Afterglow`, named after the video and the time.
+  its subtitles as a PNG in `Pictures\afterglow`, named after the video and the time.
 - **Media keys**: play/pause, next, previous and stop work from the keyboard's media keys,
   even when another window has focus, and Windows' media overlay shows what's playing.
 - The PC and display stay awake while a video plays (not while paused).
@@ -96,7 +96,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 
 Afterglow is portable: its state is stored in `data\progress.json` next to `afterglow.exe`,
 so the whole folder can be moved or carried on a USB stick. Data from earlier versions in
-`%APPDATA%\Afterglow` is copied over on first start (the original is left in place). Set
+`%APPDATA%\afterglow` is copied over on first start (the original is left in place). Set
 `AFTERGLOW_DATA_DIR` to use another folder, e.g. for testing.
 
 ## Building
@@ -118,7 +118,7 @@ To run it elsewhere, keep `afterglow.exe` and `libmpv-2.dll` together in a folde
 can write to (the `data` folder is created next to them).
 
 To make a zip of it, run `scripts\package.cmd` (or double-click it). It runs the tests,
-builds, and writes `dist\Afterglow-<version>-windows-x64.zip` with the exe, the DLL, this
+builds, and writes `dist\afterglow-<version>-windows-x64.zip` with the exe, the DLL, this
 README and a notice saying which commit and libmpv it was built from. The version comes
 from `Cargo.toml`; building the same version again replaces its zip. `-SkipTests` skips the
 tests.
@@ -146,7 +146,7 @@ in the app for an overview.
 | Home | Back to the start |
 | 0–9 | Jump to 0%–90% |
 | , / . | Previous / next frame (pauses) |
-| Shift+S | Save a screenshot (in Pictures\Afterglow) |
+| Shift+S | Save a screenshot (in Pictures\afterglow) |
 | [ / ] | Slower / faster (Backspace: normal speed) |
 | PgUp / PgDn | Previous / next chapter |
 | ↑ / ↓ | Volume |

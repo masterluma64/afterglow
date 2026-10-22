@@ -20,7 +20,7 @@ pub struct MediaKeys {
 impl MediaKeys {
     /// Registers with the system for the window `hwnd`.
     pub fn new(hwnd: *mut std::ffi::c_void, ctx: egui::Context) -> Result<Self, String> {
-        let config = PlatformConfig { display_name: crate::APP_NAME, dbus_name: "afterglow", hwnd: Some(hwnd) };
+        let config = PlatformConfig { display_name: crate::APP_NAME, dbus_name: crate::APP_ID, hwnd: Some(hwnd) };
         let mut controls = MediaControls::new(config).map_err(|e| format!("{e:?}"))?;
         let (tx, events) = mpsc::channel();
         controls

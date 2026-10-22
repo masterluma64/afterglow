@@ -1,5 +1,5 @@
 # Builds Afterglow and zips it with libmpv into dist\, ready to run on another
-# PC: dist\Afterglow-<version>-windows-x64.zip.
+# PC: dist\afterglow-<version>-windows-x64.zip.
 #
 #   scripts\package.cmd               (or double-click it)
 #   scripts\package.cmd -SkipTests
@@ -44,7 +44,7 @@ $commit = git rev-parse --short HEAD
 if (git status --porcelain) { $commit += ' (with uncommitted changes)' }
 $mpv = (Get-Item vendor\libmpv-2.dll).VersionInfo.ProductVersion
 
-$name = "Afterglow-$version"
+$name = "afterglow-$version"
 $folder = Join-Path dist $name
 $zip = Join-Path dist "$name-windows-x64.zip"
 Remove-Item -Recurse -Force $folder, $zip -ErrorAction SilentlyContinue

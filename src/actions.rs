@@ -60,7 +60,7 @@ pub(crate) enum Action {
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
     CycleAudio,
-    /// Saves the current frame, with subtitles, as a PNG in Pictures\Afterglow.
+    /// Saves the current frame, with subtitles, as a PNG in Pictures\afterglow.
     Screenshot,
     OpenScreenshotFolder,
     /// Turns evening out the volume ("night mode") on or off.
@@ -656,12 +656,12 @@ impl App {
     }
 }
 
-/// Where screenshots go: an Afterglow folder in the user's Pictures.
+/// Where screenshots go: an afterglow folder in the user's Pictures.
 pub(crate) fn screenshot_folder() -> Option<PathBuf> {
-    dirs::picture_dir().map(|pictures| pictures.join(APP_NAME))
+    dirs::picture_dir().map(|pictures| pictures.join(APP_ID))
 }
 
-/// A file's folder and the one above it, e.g. `Pictures\Afterglow`.
+/// A file's folder and the one above it, e.g. `Pictures\afterglow`.
 pub(crate) fn short_folder(path: &Path) -> String {
     let folder = path.parent().unwrap_or(path);
     match (folder.parent().and_then(Path::file_name), folder.file_name()) {
