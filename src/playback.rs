@@ -125,6 +125,10 @@ impl App {
         let prefs = self.current_path().and_then(|p| self.store.tracks(p)).cloned().unwrap_or_default();
         mpv.set("sub-delay", &prefs.sub_delay.to_string());
         mpv.set("audio-delay", &prefs.audio_delay.to_string());
+        mpv.set("video-aspect-override", &aspect_value(prefs.aspect.unwrap_or(-1.0)));
+        mpv.set("video-rotate", &prefs.rotate.to_string());
+        mpv.set("video-zoom", &prefs.zoom.to_string());
+        mpv.set("panscan", if prefs.fill { "1" } else { "0" });
         mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
         self.line_marks = [None, None];
         // Subtitle files load in the background when sent without waiting, so
@@ -173,6 +177,10 @@ impl App {
             "sub-delay" => p.sub_delay = value.as_f64().unwrap_or(0.0),
             "sub-speed" => p.sub_speed = value.as_f64().unwrap_or(1.0),
             "audio-delay" => p.audio_delay = value.as_f64().unwrap_or(0.0),
+            "video-aspect-override" => p.aspect = value.as_f64().unwrap_or(-2.0),
+            "video-rotate" => p.rotate = value.as_f64().unwrap_or(0.0) as i64,
+            "video-zoom" => p.zoom = value.as_f64().unwrap_or(0.0),
+            "panscan" => p.panscan = value.as_f64().unwrap_or(0.0),
             "chapter-list" => self.chapters = mpv::Chapter::list(&value),
             "track-list" => {
                 self.tracks = mpv::Track::list(&value);
@@ -187,7 +195,7 @@ impl App {
             }
             _ => {}
         }
-        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed" | "audio-delay") {
+        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed" | "audio-delay" | "video-aspect-override" | "video-rotate" | "video-zoom" | "panscan") {
             self.remember_tracks();
         }
     }
@@ -206,12 +214,16 @@ impl App {
         // In mpv's terms: a track id, or "no" for none.
         let selected = |kind| self.tracks(kind).find(|t| t.selected).map_or("no".to_string(), |t| t.id.to_string());
         let (audio, subtitle) = (selected("audio"), selected("sub"));
-        let Playback { sub_delay, sub_speed, audio_delay, .. } = self.playback;
+        let Playback { sub_delay, sub_speed, audio_delay, aspect, rotate, zoom, panscan, .. } = self.playback;
         let prefs = self.store.tracks_mut(&path);
         prefs.audio = Some(audio);
         prefs.subtitle = Some(subtitle);
         prefs.sub_delay = sub_delay;
         prefs.audio_delay = audio_delay;
+        prefs.aspect = (aspect > 0.0).then_some(aspect);
+        prefs.rotate = rotate;
+        prefs.zoom = zoom;
+        prefs.fill = panscan > 0.0;
         prefs.sub_speed = ((sub_speed - 1.0).abs() > 1e-6).then_some(sub_speed);
     }
 

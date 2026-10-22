@@ -132,6 +132,14 @@ pub struct TrackPrefs {
     pub sub_speed: Option<f64>,
     /// Subtitle files loaded by hand, in the order they were added.
     pub sub_files: Vec<PathBuf>,
+    /// Aspect ratio the picture is shown at, if not the video's own.
+    pub aspect: Option<f64>,
+    /// Degrees the picture is turned clockwise.
+    pub rotate: i64,
+    /// Zoom as mpv's `video-zoom` (a power of 2; 0 for none).
+    pub zoom: f64,
+    /// Whether the picture fills the window, cropping its edges.
+    pub fill: bool,
 }
 
 #[derive(Serialize, Deserialize)]

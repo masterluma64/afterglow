@@ -144,6 +144,12 @@ struct Playback {
     sub_delay: f64,
     sub_speed: f64,
     audio_delay: f64,
+    /// Forced aspect ratio, or -1 for the video's own.
+    aspect: f64,
+    rotate: i64,
+    zoom: f64,
+    /// How much of the window the picture fills by cropping (0 to 1).
+    panscan: f64,
     speed: f64,
 }
 
@@ -274,6 +280,7 @@ impl App {
             // draw a frame, so playback state comes in as events instead.
             for name in [
                 "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed", "audio-delay",
+                "video-aspect-override", "video-rotate", "video-zoom", "panscan",
                 "chapter-list", "track-list",
             ] {
                 mpv.observe(name);
@@ -718,7 +725,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SORT, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::LIST_NUMBERS, icons::COMMAND, icons::CAMERA, icons::FRAME_CORNERS, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

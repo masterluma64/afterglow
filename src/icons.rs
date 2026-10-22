@@ -42,6 +42,7 @@ pub const GAUGE: &str = "\u{E628}";
 pub const LIST_NUMBERS: &str = "\u{E2F6}";
 pub const COMMAND: &str = "\u{E1C4}";
 pub const CAMERA: &str = "\u{E10E}";
+pub const FRAME_CORNERS: &str = "\u{E626}";
 // The text font has no arrows; shortcut texts use these code points inline.
 #[cfg(test)]
 pub const ARROW_LEFT: &str = "\u{E058}";

@@ -1459,3 +1459,51 @@ mod screenshot_tests {
         let _ = std::fs::remove_file(&path);
     }
 }
+
+#[cfg(test)]
+mod picture_tests {
+    use super::tests::use_built_dll;
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Waits for the next frame with picture in it.
+    fn next_frame(mpv: &Mpv) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            assert!(Instant::now() < deadline, "no frame");
+            mpv.poll_events();
+            if let Some(img) = mpv.take_frame() {
+                if img.pixels.iter().any(|p| *p != Color32::BLACK) {
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Rotation reaches the video output, and the aspect ratio override reads
+    /// back as a number, as the menus expect. (The software renderer used
+    /// here ignores rotation; the OpenGL one Afterglow normally uses applies
+    /// it.)
+    #[test]
+    fn rotates_and_reshapes_the_picture() {
+        use_built_dll();
+        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        mpv.set("mute", "yes");
+        mpv.set_render_size(320, 180);
+        mpv.command(&["loadfile", "av://lavfi:color=c=red:size=640x360:rate=25:duration=5"]).unwrap();
+        next_frame(&mpv);
+        mpv.command(&["set", "video-rotate", "90"]).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while mpv.get_str("video-out-params/rotate").as_deref() != Some("90") {
+            assert!(Instant::now() < deadline, "the rotation wasn't applied");
+            next_frame(&mpv);
+        }
+
+        assert!(mpv.get_f64("video-aspect-override").is_some_and(|a| crate::same_aspect(a, -1.0)), "no override");
+        mpv.command(&["set", "video-aspect-override", &(4.0f64 / 3.0).to_string()]).unwrap();
+        assert!(mpv.get_f64("video-aspect-override").is_some_and(|a| (a - 4.0 / 3.0).abs() < 0.01));
+        mpv.command(&["set", "video-aspect-override", &crate::aspect_value(-1.0)]).unwrap();
+        assert!(mpv.get_f64("video-aspect-override").is_some_and(|a| crate::same_aspect(a, -1.0)), "back to none");
+    }
+}

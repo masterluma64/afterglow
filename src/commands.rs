@@ -72,6 +72,7 @@ impl App {
             ui.menu_button(format!("{}  Audio track", icons::WAVEFORM), |ui| self.track_items(ui, "audio"));
             ui.menu_button(format!("{}  Subtitles", icons::SUBTITLES), |ui| self.track_items(ui, "sub"));
             ui.menu_button(format!("{}  Speed  {}", icons::GAUGE, format_speed(self.playback.speed)), |ui| self.speed_items(ui));
+            ui.menu_button(format!("{}  Picture", icons::FRAME_CORNERS), |ui| self.picture_items(ui));
             if !self.chapters.is_empty() {
                 ui.menu_button(format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
                     let now = chapter_at(&self.chapters, self.playback.position);
@@ -145,6 +146,19 @@ impl App {
                 }
             }
             list.push(command("Save a screenshot", "Shift+S", "snapshot capture frame image picture png", Action::Screenshot));
+            for (name, value) in ASPECTS {
+                list.push(command(format!("Aspect ratio: {name}"), "", "picture stretched squashed", Action::SetAspect(value)));
+            }
+            list.push(command("Rotate clockwise", "", "picture turn sideways portrait", Action::Rotate { clockwise: true }));
+            list.push(command("Rotate counterclockwise", "", "picture turn sideways portrait", Action::Rotate { clockwise: false }));
+            list.push(command("Zoom in", "", "picture bigger", Action::Zoom(ZOOM_STEP)));
+            list.push(command("Zoom out", "", "picture smaller", Action::Zoom(-ZOOM_STEP)));
+            let fill = if self.playback.panscan > 0.0 { "Show the whole picture" } else { "Fill the window (crop the edges)" };
+            list.push(command(fill, "", "picture black bars zoom crop", Action::ToggleFill));
+            let Playback { aspect, rotate, zoom, panscan, .. } = self.playback;
+            if aspect > 0.0 || rotate != 0 || zoom != 0.0 || panscan > 0.0 {
+                list.push(command("Reset the picture", "", "aspect rotate zoom crop original", Action::ResetPicture));
+            }
             list.push(command("Next frame", ".", "step", Action::FrameStep { forward: true }));
             list.push(command("Previous frame", ",", "step back", Action::FrameStep { forward: false }));
             list.push(command("Faster", "]", "speed up", Action::SetSpeed(step_speed(speed, true))));

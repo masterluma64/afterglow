@@ -69,6 +69,16 @@ pub(crate) enum Action {
     /// is out of sync with the picture.
     AdjustAudioDelay(f64),
     SetAudioDelay(f64),
+    /// Shows the picture at an aspect ratio, or -1 for the video's own.
+    SetAspect(f64),
+    /// Turns the picture a quarter clockwise (or counterclockwise).
+    Rotate { clockwise: bool },
+    /// Zooms in (positive) or out, in mpv's `video-zoom` steps.
+    Zoom(f64),
+    /// Fills the window by cropping the picture's edges, or shows all of it.
+    ToggleFill,
+    /// Back to the video's own aspect ratio, unrotated and unzoomed.
+    ResetPicture,
     /// Shifts subtitles so the previous (-1) or next (1) line shows right now.
     SubStep(i32),
     /// Marks the moment a subtitle line appears, or when it is actually
@@ -399,6 +409,11 @@ impl App {
                         | Action::SetSubDelay(_)
                         | Action::AdjustAudioDelay(_)
                         | Action::SetAudioDelay(_)
+                        | Action::SetAspect(_)
+                        | Action::Rotate { .. }
+                        | Action::Zoom(_)
+                        | Action::ToggleFill
+                        | Action::ResetPicture
                         | Action::SubStep(_)
                         | Action::MarkLine { .. }
                         | Action::SetSubSpeed(_)
@@ -482,6 +497,32 @@ impl App {
             Action::SetSubDelay(delay) if self.loaded => {
                 mpv.set("sub-delay", &delay.to_string());
                 self.notify(format!("Subtitle delay {delay:+.1} s"));
+            }
+            Action::SetAspect(aspect) if self.loaded => {
+                mpv.set("video-aspect-override", &aspect_value(aspect));
+                let name = ASPECTS.iter().find(|(_, a)| same_aspect(*a, aspect)).map_or("custom", |(name, _)| *name);
+                self.notify(format!("Aspect ratio: {name}"));
+            }
+            Action::Rotate { clockwise } if self.loaded => {
+                let rotate = (self.playback.rotate + if clockwise { 90 } else { -90 }).rem_euclid(360);
+                mpv.set("video-rotate", &rotate.to_string());
+                self.notify(if rotate == 0 { "Not rotated".to_string() } else { format!("Rotated {rotate}°") });
+            }
+            Action::Zoom(by) if self.loaded => {
+                let zoom = (self.playback.zoom + by).clamp(-2.0, 3.0);
+                mpv.set("video-zoom", &zoom.to_string());
+                self.notify(format!("Zoom {:.0}%", zoom.exp2() * 100.0));
+            }
+            Action::ToggleFill if self.loaded => {
+                let fill = self.playback.panscan == 0.0;
+                mpv.set("panscan", if fill { "1" } else { "0" });
+                self.notify(if fill { "Filling the window (edges cropped)" } else { "Showing the whole picture" });
+            }
+            Action::ResetPicture if self.loaded => {
+                for (name, value) in [("video-aspect-override", "no"), ("video-rotate", "0"), ("video-zoom", "0"), ("panscan", "0")] {
+                    mpv.set(name, value);
+                }
+                self.notify("Picture as recorded");
             }
             Action::AdjustAudioDelay(by) if self.loaded => {
                 mpv.send(&["add", "audio-delay", &by.to_string()]);
@@ -583,4 +624,19 @@ pub(crate) fn short_folder(path: &Path) -> String {
         (Some(above), Some(name)) => Path::new(above).join(name).display().to_string(),
         _ => folder.display().to_string(),
     }
+}
+
+/// Aspect ratios offered for videos shown stretched or squashed (-1 for the
+/// video's own).
+pub(crate) const ASPECTS: [(&str, f64); 4] = [("Original", -1.0), ("4:3", 4.0 / 3.0), ("16:9", 16.0 / 9.0), ("21:9", 21.0 / 9.0)];
+
+/// Whether mpv's `video-aspect-override` value `a` is the aspect ratio `b`.
+/// mpv reports no override as a negative number.
+pub(crate) fn same_aspect(a: f64, b: f64) -> bool {
+    if b < 0.0 { a < 0.0 } else { (a - b).abs() < 0.01 }
+}
+
+/// An aspect ratio as mpv's `video-aspect-override` takes it.
+pub(crate) fn aspect_value(aspect: f64) -> String {
+    if aspect > 0.0 { aspect.to_string() } else { "no".into() }
 }
