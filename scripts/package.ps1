@@ -1,6 +1,6 @@
 # Builds Afterglow, with libmpv packed into the exe, ready to run on another
-# PC: dist\afterglow-<version>-windows-x64.exe on its own, and a zip of it
-# with the README and a notice.
+# PC: dist\afterglow-<version>-windows-x64.exe, and a zip of it (with a short
+# notice), which is about 10 MB smaller.
 #
 #   scripts\package.cmd               (or double-click it)
 #   scripts\package.cmd -SkipTests
@@ -50,7 +50,7 @@ $exe = Join-Path dist "$name-windows-x64.exe"
 Remove-Item -Recurse -Force $folder, $zip, $exe -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $folder | Out-Null
 Copy-Item target\release\afterglow.exe $exe
-Copy-Item target\release\afterglow.exe, README.md $folder
+Copy-Item target\release\afterglow.exe $folder
 @"
 Afterglow $version, built from commit $commit.
 This build of Afterglow is for private use only; please don't share it.
@@ -65,7 +65,8 @@ recipe at https://github.com/shinchiro/mpv-winbuild-cmake.
 
 The icons are Phosphor (https://phosphoricons.com), under the MIT license.
 "@ | Set-Content -Encoding utf8 (Join-Path $folder 'THIRD-PARTY.txt')
-Compress-Archive -Path $folder -DestinationPath $zip
+# The files sit at the top of the zip, so its afterglow.exe is easy to find.
+Compress-Archive -Path (Join-Path $folder '*') -DestinationPath $zip -CompressionLevel Optimal
 Remove-Item -Recurse -Force $folder
 
 function Size($path) { [math]::Round((Get-Item $path).Length / 1e6, 1) }

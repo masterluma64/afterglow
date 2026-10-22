@@ -122,8 +122,8 @@ A release `afterglow.exe` runs on its own: on the first start it unpacks libmpv 
 user can write to, since the `data` folder is created next to it.
 
 To package it, run `scripts\package.cmd` (or double-click it). It runs the tests, builds,
-and writes `dist\afterglow-<version>-windows-x64.exe` (just under 50 MB), plus a zip with
-the exe, this README and a notice saying which commit and libmpv it was built from. The
+and writes `dist\afterglow-<version>-windows-x64.exe` (just under 50 MB), plus a zip of the
+exe (about 40 MB) with a notice saying which commit and libmpv it was built from. The
 version comes from `Cargo.toml`; building the same version again replaces them.
 `-SkipTests` skips the tests.
 
