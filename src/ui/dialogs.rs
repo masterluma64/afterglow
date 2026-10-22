@@ -328,50 +328,56 @@ impl App {
         let s = self.store.stats.summary(clock::today());
         let days = |n: u32| format!("{n} day{}", if n == 1 { "" } else { "s" });
         let videos = |n: u32| format!("{n} video{}", if n == 1 { "" } else { "s" });
+        let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("stats")).show(ctx, |ui| {
-            ui.set_width(400.0);
+            ui.set_width(440.0);
             ui.label(RichText::new("Stats").size(18.0).strong());
-            ui.add_space(8.0);
-            egui::Grid::new("stats-totals").num_columns(2).spacing([24.0, 6.0]).show(ui, |ui| {
-                let mut row = |label: &str, value: String| {
-                    ui.label(RichText::new(label).weak());
-                    ui.label(RichText::new(value).strong());
-                    ui.end_row();
-                };
-                row("Total watched", format_total(s.total.seconds));
-                row("Videos finished", s.total.finished.to_string());
-                row("Last 7 days", format_total(s.last_7_days));
-                row("Last 30 days", format!("{}  ·  {} a day", format_total(s.last_30_days), format_total(s.last_30_days / 30.0)));
-                row("Current streak", days(s.current_streak));
-                row("Longest streak", days(s.longest_streak));
-                if let Some((day, seconds)) = s.best_day {
-                    row("Best day", format!("{}  ·  {}", stats::format_date(day), format_total(seconds)));
-                }
-            });
+            ui.add_space(10.0);
 
-            ui.add_space(14.0);
-            ui.label(RichText::new("LAST 30 DAYS").small().weak());
-            daily_chart(ui, &s.daily);
-
-            if !s.top_series.is_empty() {
-                ui.add_space(14.0);
-                ui.label(RichText::new("MOST WATCHED").small().weak());
-                egui::Grid::new("stats-series").num_columns(3).spacing([16.0, 4.0]).show(ui, |ui| {
-                    for (name, tally) in &s.top_series {
-                        // A fixed width, so long folder names are cut off rather than squeezed.
-                        let height = ui.spacing().interact_size.y;
-                        ui.allocate_ui_with_layout(vec2(230.0, height), Layout::left_to_right(Align::Center), |ui| {
-                            ui.set_width(230.0);
-                            ui.add(egui::Label::new(name.as_str()).truncate()).on_hover_text(name.as_str());
-                        });
-                        ui.label(RichText::new(format_total(tally.seconds)).strong());
-                        ui.label(RichText::new(videos(tally.finished)).weak());
-                        ui.end_row();
+            let gap = 8.0;
+            let tile_width = (ui.available_width() - 2.0 * gap) / 3.0;
+            let best = s.best_day.map(|(day, seconds)| (format_total(seconds), stats::format_date(day)));
+            let tiles = [
+                ("Total watched", format_total(s.total.seconds), None),
+                ("Videos finished", s.total.finished.to_string(), None),
+                ("Current streak", days(s.current_streak), Some(format!("Longest: {}", days(s.longest_streak)))),
+                ("Last 7 days", format_total(s.last_7_days), None),
+                ("Last 30 days", format_total(s.last_30_days), Some(format!("{} a day", format_total(s.last_30_days / 30.0)))),
+                ("Best day", best.as_ref().map_or("–".into(), |b| b.0.clone()), best.map(|b| b.1)),
+            ];
+            for row in tiles.chunks(3) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for (label, value, detail) in row {
+                        stat_tile(ui, tile_width, label, value, detail.as_deref());
                     }
                 });
+                ui.add_space(gap - ui.spacing().item_spacing.y);
             }
 
             ui.add_space(12.0);
+            daily_chart(ui, &s.daily);
+
+            if let Some((_, top)) = s.top_series.first() {
+                ui.add_space(14.0);
+                ui.label(RichText::new("MOST WATCHED").small().weak());
+                ui.add_space(2.0);
+                for (name, tally) in &s.top_series {
+                    ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(videos(tally.finished)).weak());
+                        ui.label(RichText::new(format_total(tally.seconds)).strong());
+                        // The name takes the room left, cut off with … when long.
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(egui::Label::new(name.as_str()).truncate()).on_hover_text(name.as_str());
+                        });
+                    });
+                    let share = (tally.seconds / top.seconds.max(1.0)) as f32;
+                    meter(ui, share);
+                    ui.add_space(4.0);
+                }
+            }
+
+            ui.add_space(10.0);
             if s.before.seconds >= 60.0 {
                 let before = format!(
                     "Includes about {} ({}) watched before stats were kept, estimated from saved progress.",
@@ -379,39 +385,89 @@ impl App {
                     videos(s.before.finished)
                 );
                 ui.label(RichText::new(before).small().weak());
+                ui.add_space(6.0);
             }
-            ui.weak("Press Esc to close.");
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
+                close = ui.button("Close").clicked();
+            });
         });
-        if modal.should_close() {
+        if close || modal.should_close() {
             self.stats_open = false;
         }
     }
 }
 
-/// Bars for the time watched on each day, oldest first, with the day and
-/// time on hover.
+/// A faint background for the stat tiles, a step away from the dialog's own.
+fn tile_fill(ui: &egui::Ui) -> Color32 {
+    if ui.visuals().dark_mode { Color32::from_white_alpha(10) } else { Color32::from_black_alpha(10) }
+}
+
+/// A tile with a label, a big value and an optional detail line below it.
+fn stat_tile(ui: &mut egui::Ui, width: f32, label: &str, value: &str, detail: Option<&str>) {
+    egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.set_width(width - 24.0);
+            // All tiles as tall as one with a detail line.
+            ui.set_min_height(58.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.label(RichText::new(label).small().weak());
+            ui.label(RichText::new(value).size(19.0).strong());
+            if let Some(detail) = detail {
+                ui.label(RichText::new(detail).small().weak());
+            }
+        });
+    });
+}
+
+/// A thin bar filled to `share` (0 to 1) in the accent color.
+fn meter(ui: &mut egui::Ui, share: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
+    ui.painter().rect_filled(rect, 2.0, tile_fill(ui));
+    let filled = egui::Rect::from_min_size(rect.min, vec2(rect.width() * share.clamp(0.0, 1.0), rect.height()));
+    ui.painter().rect_filled(filled, 2.0, ui.visuals().selection.bg_fill);
+}
+
+/// Bars for the time watched on each day, oldest first, in a tile with the
+/// busiest day's time as its scale; hovering a bar shows its day and time.
 fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
     use crate::ui::sidebar::format_total;
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
-    let most = daily.iter().map(|(_, s)| *s).fold(0.0, f64::max).max(60.0);
-    let slot = rect.width() / daily.len().max(1) as f32;
-    let hovered = resp.hover_pos().map(|p| (((p.x - rect.left()) / slot) as usize).min(daily.len().saturating_sub(1)));
-    let visuals = ui.visuals();
-    for (i, (_, seconds)) in daily.iter().enumerate() {
-        let x = rect.left() + slot * i as f32;
-        // Days with nothing get a sliver, so the 30 days stay visible.
-        let height = ((*seconds / most) as f32 * rect.height()).max(2.0);
-        let bar = egui::Rect::from_min_max(egui::pos2(x + 1.5, rect.bottom() - height), egui::pos2(x + slot - 1.5, rect.bottom()));
-        let color = if *seconds < 1.0 {
-            visuals.widgets.inactive.bg_fill
-        } else if hovered == Some(i) {
-            visuals.selection.bg_fill.gamma_multiply(1.3)
-        } else {
-            visuals.selection.bg_fill
-        };
-        ui.painter().rect_filled(bar, 2.0, color);
-    }
-    if let Some((day, seconds)) = hovered.and_then(|i| daily.get(i)) {
-        resp.on_hover_text_at_pointer(format!("{}: {}", stats::format_date(*day), format_total(*seconds)));
-    }
+    let most = daily.iter().map(|(_, s)| *s).fold(0.0, f64::max);
+    egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("LAST 30 DAYS").small().weak());
+            if most >= 1.0 {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(RichText::new(format!("Most in a day: {}", format_total(most))).small().weak());
+                });
+            }
+        });
+        ui.add_space(6.0);
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
+        let slot = rect.width() / daily.len().max(1) as f32;
+        let hovered = resp.hover_pos().map(|p| (((p.x - rect.left()) / slot) as usize).min(daily.len().saturating_sub(1)));
+        let visuals = ui.visuals();
+        for (i, (_, seconds)) in daily.iter().enumerate() {
+            let x = rect.left() + slot * i as f32;
+            if *seconds < 1.0 {
+                // Days with nothing get a dot, so all 30 days stay visible.
+                let c = egui::pos2(x + slot / 2.0, rect.bottom() - 1.5);
+                ui.painter().circle_filled(c, 1.5, visuals.widgets.inactive.bg_fill);
+                continue;
+            }
+            let height = ((*seconds / most.max(1.0)) as f32 * rect.height()).max(4.0);
+            let bar = egui::Rect::from_min_max(egui::pos2(x + 1.5, rect.bottom() - height), egui::pos2(x + slot - 1.5, rect.bottom()));
+            let color = if hovered == Some(i) { visuals.selection.bg_fill.gamma_multiply(1.3) } else { visuals.selection.bg_fill };
+            ui.painter().rect_filled(bar, 2.0, color);
+        }
+        if let Some((day, seconds)) = hovered.and_then(|i| daily.get(i)) {
+            resp.on_hover_text_at_pointer(format!("{}: {}", stats::format_date(*day), format_total(*seconds)));
+        }
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            // "Sep 23", without the year.
+            let first = daily.first().map(|(d, _)| stats::format_date(*d)).unwrap_or_default();
+            ui.label(RichText::new(first.split(',').next().unwrap_or_default()).small().weak());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new("Today").small().weak()));
+        });
+    });
 }
