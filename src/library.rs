@@ -1,6 +1,7 @@
 //! Finding videos on disk.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub const VIDEO_EXTENSIONS: &[&str] = &[
@@ -19,7 +20,7 @@ pub fn is_video(path: &Path) -> bool {
 pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<PathBuf>> {
     std::fs::read_dir(dir)?;
     let mut videos = Vec::new();
-    collect(dir, include_subfolders, &mut videos);
+    collect(dir, include_subfolders, &mut HashSet::new(), &mut videos);
     // Files directly in the folder come first, then subfolders in order.
     let key = |p: &PathBuf| {
         let rel = p.strip_prefix(dir).unwrap_or(p);
@@ -32,12 +33,27 @@ pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<
     Ok(videos)
 }
 
-fn collect(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) {
+/// `seen` holds the folders already scanned, so a link back up the tree
+/// (a symbolic link or junction) is followed only once.
+fn collect(dir: &Path, recursive: bool, seen: &mut HashSet<PathBuf>, out: &mut Vec<PathBuf>) {
+    if let Ok(real) = std::fs::canonicalize(dir) {
+        if !seen.insert(real) {
+            return;
+        }
+    }
     let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for path in entries.flatten().map(|e| e.path()) {
-        if path.is_dir() {
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // The entry's own type needs no extra disk access; only links are
+        // looked up to see what they point to.
+        let is_dir = match entry.file_type() {
+            Ok(t) if t.is_symlink() => path.is_dir(),
+            Ok(t) => t.is_dir(),
+            Err(_) => continue,
+        };
+        if is_dir {
             if recursive {
-                collect(&path, true, out);
+                collect(&path, true, seen, out);
             }
         } else if is_video(&path) {
             out.push(path);
@@ -112,5 +128,30 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(flat, ["b 2.mp4", "b 10.mkv"]);
         assert_eq!(nested, ["b 2.mp4", "b 10.mkv", "Part 2/y.mkv", "Part 10/x.mkv"]);
+    }
+
+    /// A link back up the tree is followed once, not forever.
+    #[test]
+    fn survives_folder_loops() {
+        let root = std::env::temp_dir().join(format!("afterglow-loop-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("a.mkv"), b"").unwrap();
+        std::fs::write(root.join("sub/b.mkv"), b"").unwrap();
+        // A junction needs no special rights, unlike a symbolic link.
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("sub").join("loop"))
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink failed: {}", String::from_utf8_lossy(&made.stderr));
+        let found = scan_folder(&root, true);
+        std::fs::remove_dir_all(&root).unwrap();
+        let names: Vec<String> = found
+            .unwrap()
+            .iter()
+            .map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/"))
+            .collect();
+        assert_eq!(names, ["a.mkv", "sub/b.mkv"]);
     }
 }
