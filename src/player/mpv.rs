@@ -1,8 +1,8 @@
 //! Minimal libmpv binding, loaded at runtime from `libmpv-2.dll`.
 //!
 //! Video is rendered with mpv's OpenGL render API straight into the UI's GL
-//! context when one is available. Otherwise mpv's software renderer draws on
-//! a dedicated thread and frames are handed to the UI as `egui::ColorImage`s.
+//! context. Thumbnails (and tests) use mpv's software renderer instead, which
+//! draws on a dedicated thread and hands frames over as `egui::ColorImage`s.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::path::Path;
@@ -434,11 +434,16 @@ pub struct Mpv {
 }
 
 impl Mpv {
-    /// Starts mpv. With `gl`, video is rendered on the GPU in the UI's OpenGL
-    /// context, which must be current on this thread; without it (or if that
-    /// fails) it is rendered in software.
-    pub fn new(egui_ctx: egui::Context, gl: Option<GetProcAddress>) -> Result<Self, String> {
-        Self::create(egui_ctx, gl, &[])
+    /// Starts mpv, rendering video on the GPU in the UI's OpenGL context,
+    /// which must be current on this thread.
+    pub fn new(egui_ctx: egui::Context, gl: GetProcAddress) -> Result<Self, String> {
+        Self::create(egui_ctx, Some(gl), &[])
+    }
+
+    /// Starts mpv rendering in software, for tests that need no window.
+    #[cfg(test)]
+    pub fn software(egui_ctx: egui::Context) -> Result<Self, String> {
+        Self::create(egui_ctx, None, &[])
     }
 
     /// A silent, paused instance rendering small frames in software, for
@@ -495,22 +500,16 @@ impl Mpv {
             return Err(format!("mpv_initialize failed: {e}"));
         }
 
-        let gl_render = gl.and_then(|gl| match GlRender::new(api.clone(), Ptr(handle), gl, egui_ctx.clone()) {
-            Ok(render) => Some(render),
+        let render = match gl {
+            Some(gl) => GlRender::new(api.clone(), Ptr(handle), gl, egui_ctx).map(Render::OpenGl),
+            None => Self::software_render(&api, handle, egui_ctx),
+        };
+        let render = match render {
+            Ok(render) => render,
             Err(e) => {
-                eprintln!("OpenGL video output unavailable, rendering in software: {e}");
-                None
+                unsafe { (api.terminate_destroy)(handle) };
+                return Err(e);
             }
-        });
-        let render = match gl_render {
-            Some(render) => Render::OpenGl(render),
-            None => match Self::software_render(&api, handle, egui_ctx) {
-                Ok(render) => render,
-                Err(e) => {
-                    unsafe { (api.terminate_destroy)(handle) };
-                    return Err(e);
-                }
-            },
         };
         Ok(Self { api, handle: Ptr(handle), render })
     }
@@ -1177,7 +1176,7 @@ mod tests {
     fn renders_frames_and_subtitles() {
         use_built_dll();
 
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.set("mute", "yes");
         mpv.set_render_size(320, 180);
         mpv.observe("track-list");
@@ -1279,7 +1278,7 @@ mod subtitle_sync_tests {
         let lines = "1\n00:00:03,000 --> 00:00:04,000\nOne\n\n2\n00:00:06,000 --> 00:00:07,000\nTwo\n";
         std::fs::write(&srt, lines).unwrap();
 
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.set("pause", "yes");
         mpv.load_file(&video, 5.0, 0);
         let deadline = Instant::now() + Duration::from_secs(10);
@@ -1338,7 +1337,7 @@ mod audio_filter_tests {
     fn levels_volume() {
         use_built_dll();
         let wav = silent_wav("afterglow-level.wav", 3);
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.command(&["set", "ao", "null"]).unwrap();
         mpv.command(&["set", "af", VOLUME_LEVELER]).expect("the filter is known");
         mpv.command(&["loadfile", &wav.to_string_lossy()]).unwrap();
@@ -1372,7 +1371,7 @@ mod chapter_tests {
         let text = format!("# mpv EDL v0\n{}{}{}", segment(0, "Intro"), segment(2, "Middle"), segment(4, "End"));
         std::fs::write(&edl, text).unwrap();
 
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.set("pause", "yes");
         mpv.observe("chapter-list");
         mpv.load_file(&edl, 0.0, 0);
@@ -1408,7 +1407,7 @@ mod entry_tests {
     fn ends_name_the_file_they_are_about() {
         use_built_dll();
         let (one, two) = (silent_wav("afterglow-entry-1.wav", 1), silent_wav("afterglow-entry-2.wav", 1));
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.set("mute", "yes");
         let mut events = Vec::new();
         let until = |done: &dyn Fn(&[Event]) -> bool, events: &mut Vec<Event>| {
@@ -1508,7 +1507,7 @@ mod screenshot_tests {
     #[test]
     fn saves_screenshots() {
         use_built_dll();
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.set("mute", "yes");
         mpv.set_render_size(320, 180);
         mpv.command(&["loadfile", "av://lavfi:testsrc=duration=5:size=640x360:rate=25"]).unwrap();
@@ -1559,7 +1558,7 @@ mod picture_tests {
     #[test]
     fn rotates_and_reshapes_the_picture() {
         use_built_dll();
-        let mpv = Mpv::new(egui::Context::default(), None).expect("libmpv");
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
         mpv.set("mute", "yes");
         mpv.set_render_size(320, 180);
         mpv.command(&["loadfile", "av://lavfi:color=c=red:size=640x360:rate=25:duration=5"]).unwrap();

@@ -48,33 +48,12 @@ impl App {
         self.paint_notice(ui, rect);
     }
 
-    /// Takes mpv's latest frame into the video texture.
-    pub(crate) fn update_frame(&mut self, ctx: &egui::Context) {
-        let Ok(mpv) = &self.mpv else { return };
-        if let Some(image) = mpv.take_frame() {
-            match &mut self.texture {
-                Some(tex) => tex.set(image, TextureOptions::LINEAR),
-                None => self.texture = Some(ctx.load_texture("video", image, TextureOptions::LINEAR)),
-            }
-        }
-    }
-
-    /// Paints the latest video frame from mpv fitted into `rect`.
+    /// Paints the video into `rect`; mpv fits the video into it itself.
     pub(crate) fn paint_frame(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
-        let Ok(mpv) = &self.mpv else { return };
-        // On the GPU, mpv fits the video into the rect itself.
-        if let Some(callback) = mpv.paint_callback(rect) {
+        if let Ok(mpv) = &self.mpv
+            && let Some(callback) = mpv.paint_callback(rect)
+        {
             ui.painter().add(callback);
-            return;
-        }
-        let ppp = ui.ctx().pixels_per_point();
-        mpv.set_render_size((rect.width() * ppp).round() as u32, (rect.height() * ppp).round() as u32);
-        if let Some(tex) = &self.texture {
-            let size = tex.size_vec2();
-            let scale = (rect.width() / size.x).min(rect.height() / size.y);
-            let img_rect = egui::Rect::from_center_size(rect.center(), size * scale);
-            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            ui.painter().image(tex.id(), img_rect, uv, Color32::WHITE);
         }
     }
 

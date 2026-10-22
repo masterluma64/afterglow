@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Align, Color32, Key, Layout, RichText, Sense, TextureHandle, TextureOptions, vec2};
+use eframe::egui::{self, Align, Color32, Key, Layout, RichText, Sense, TextureHandle, vec2};
 
 use mpv::Mpv;
 use progress::Store;
@@ -68,13 +68,6 @@ fn window_icon() -> egui::IconData {
     egui::IconData { rgba: app_icon::render(SIZE), width: SIZE, height: SIZE }
 }
 
-/// Set to run without OpenGL: the UI uses wgpu and video is rendered in software.
-const SOFTWARE_VIDEO_ENV: &str = "AFTERGLOW_SOFTWARE_VIDEO";
-
-/// Set on the restart in software mode, which may find its own first try
-/// still running.
-const RESTARTED_ENV: &str = "AFTERGLOW_RESTARTED";
-
 fn main() -> eframe::Result {
     dll_search::restrict();
     let open = absolute_paths(std::env::args_os().skip(1));
@@ -83,7 +76,7 @@ fn main() -> eframe::Result {
     let pipe = progress::data_dir().map(|dir| instance::pipe_name(&dir));
     let other_starts = match pipe.as_deref().map(instance::claim) {
         Some(instance::Claim::First(listener)) => Some(listener),
-        Some(instance::Claim::Running) if std::env::var_os(RESTARTED_ENV).is_none() => {
+        Some(instance::Claim::Running) => {
             match instance::forward(pipe.as_deref().unwrap_or_default(), &open) {
                 Ok(()) => return Ok(()),
                 // Better two at once than none.
@@ -93,8 +86,6 @@ fn main() -> eframe::Result {
         }
         _ => None,
     };
-    // OpenGL lets mpv draw video straight into the window.
-    let software = std::env::var_os(SOFTWARE_VIDEO_ENV).is_some();
     let (store, load_warning) = Store::load();
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_NAME)
@@ -113,10 +104,11 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions {
         viewport,
-        renderer: if software { eframe::Renderer::Wgpu } else { eframe::Renderer::Glow },
+        // OpenGL lets mpv draw video straight into the window.
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
-    let result = eframe::run_native(
+    eframe::run_native(
         APP_ID,
         options,
         Box::new(|cc| {
@@ -125,29 +117,7 @@ fn main() -> eframe::Result {
             let other_starts = other_starts.map(|listener| listener.listen(cc.egui_ctx.clone()));
             Ok(Box::new(App::new(&cc.egui_ctx, (store, load_warning), open, other_starts, cc.get_proc_address.clone())))
         }),
-    );
-    // Without a usable OpenGL driver, start over without it. A window's event
-    // loop can't be created twice in one process, hence a new process.
-    let gl_failed = matches!(
-        result,
-        Err(eframe::Error::Glutin(_) | eframe::Error::NoGlutinConfigs(..) | eframe::Error::OpenGL(_))
-    );
-    if gl_failed && !software {
-        if let Err(e) = &result {
-            eprintln!("OpenGL is unavailable ({e}); restarting with software video");
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            let restarted = std::process::Command::new(exe)
-                .args(std::env::args_os().skip(1))
-                .env(SOFTWARE_VIDEO_ENV, "1")
-                .env(RESTARTED_ENV, "1")
-                .status();
-            if let Ok(status) = restarted {
-                std::process::exit(status.code().unwrap_or(0));
-            }
-        }
-    }
-    result
+    )
 }
 
 /// Playback state sampled from mpv once per frame.
@@ -204,7 +174,6 @@ struct App {
     /// Which video an end-of-file event is about.
     loads: Loads,
     playback: Playback,
-    texture: Option<TextureHandle>,
     show_sidebar: bool,
     fullscreen: bool,
     /// Seek-bar position while the user drags it.
@@ -295,7 +264,7 @@ impl App {
         other_starts: Option<Receiver<Vec<PathBuf>>>,
         gl: Option<mpv::GetProcAddress>,
     ) -> Self {
-        let mpv = Mpv::new(ctx.clone(), gl);
+        let mpv = gl.ok_or_else(|| "OpenGL is unavailable".to_string()).and_then(|gl| Mpv::new(ctx.clone(), gl));
         if let Ok(mpv) = &mpv {
             mpv.set("volume", &store.volume.to_string());
             // Reading properties can block while mpv waits for the UI thread to
@@ -330,7 +299,6 @@ impl App {
             loaded: false,
             loads: Loads::default(),
             playback: Playback::default(),
-            texture: None,
             show_sidebar: true,
             fullscreen: false,
             scrub: None,
@@ -517,7 +485,6 @@ impl eframe::App for App {
         self.receive_scans();
         self.receive_missing_files();
         self.receive_gone();
-        self.update_frame(&ctx);
         if let Some(ready) = &self.thumbnails_ready
             && let Ok(thumbnails) = ready.try_recv()
         {

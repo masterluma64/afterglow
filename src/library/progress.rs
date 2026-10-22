@@ -227,29 +227,9 @@ pub fn data_dir() -> Option<PathBuf> {
         if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
             return Some(PathBuf::from(dir));
         }
-        let dir = std::env::current_exe().ok()?.parent()?.join("data");
-        copy_from_appdata(&dir);
-        Some(dir)
+        Some(std::env::current_exe().ok()?.parent()?.join("data"))
     })
     .clone()
-}
-
-/// Earlier versions kept their data in the user's AppData folder (first as
-/// "minimal-video-player"). Copies it next to the executable the first time,
-/// leaving the original in place.
-fn copy_from_appdata(dir: &Path) {
-    let target = dir.join("progress.json");
-    if target.exists() {
-        return;
-    }
-    let Some(config) = dirs::config_dir() else { return };
-    let old = ["afterglow", "minimal-video-player"].iter().map(|name| config.join(name).join("progress.json")).find(|p| p.is_file());
-    if let Some(old) = old {
-        let copied = std::fs::create_dir_all(dir).and_then(|()| std::fs::copy(&old, &target));
-        if let Err(e) = copied {
-            eprintln!("could not copy {} to {}: {e}", old.display(), target.display());
-        }
-    }
 }
 
 fn file_path() -> Option<PathBuf> {

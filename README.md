@@ -87,8 +87,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - The window opens where you left it, at the same size (and maximized if it was). If that
   spot is on a monitor that is no longer connected, it opens on the main screen instead.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
-  into the window through OpenGL. Without a working OpenGL driver Afterglow restarts in
-  software mode (also available by setting `AFTERGLOW_SOFTWARE_VIDEO=1`).
+  into the window through OpenGL, which Afterglow needs.
 
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
   evening out the volume,
@@ -96,9 +95,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   (a few presets or any color).
 
 Afterglow is portable: its state is stored in `data\progress.json` next to `afterglow.exe`,
-so the whole folder can be moved or carried on a USB stick. Data from earlier versions in
-`%APPDATA%\afterglow` is copied over on first start (the original is left in place). Set
-`AFTERGLOW_DATA_DIR` to use another folder, e.g. for testing.
+so the whole folder can be moved or carried on a USB stick. Set `AFTERGLOW_DATA_DIR` to use
+another folder, e.g. for testing.
 
 ## Building
 

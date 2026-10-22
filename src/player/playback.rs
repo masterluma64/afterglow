@@ -118,7 +118,6 @@ impl App {
         self.loads.asked();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
         // Drop the previous frame so it never shows under the new video.
-        self.texture = None;
         mpv.hide_frames();
         self.chapters.clear();
         // Until mpv reports the new video's values, don't let the previous

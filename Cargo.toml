@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 dirs = "7.0.0"
-eframe = { version = "0.37.0", features = ["glow"] }
+# Without wgpu, Linux and web support: the UI is drawn with OpenGL only.
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "accesskit", "clipboard", "default_fonts", "links", "system_fonts"] }
 libloading = "0.9.0"
 liblzma = "0.4.9"
 raw-window-handle = "0.6.2"
