@@ -27,6 +27,10 @@ const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
 /// Padding inside text fields.
 const TEXT_MARGIN: egui::Margin = egui::Margin::symmetric(8, 5);
+/// How close to the video's left edge the pointer brings out the unpinned playlist.
+const EDGE_WIDTH: f32 = 8.0;
+/// How long the unpinned playlist stays after the pointer leaves it.
+const PEEK_HIDE_DELAY: Duration = Duration::from_millis(300);
 /// Height of a playlist entry, without the spacing between entries.
 const PLAYLIST_ROW_HEIGHT: f32 = 26.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -108,6 +112,8 @@ enum Action {
     RefreshFolder,
     ClearRecentFolders,
     ShowHelp,
+    /// Docks the playlist beside the video, or lets it slide out over it.
+    TogglePin,
     OpenSettings,
     SetSettings(progress::Settings),
     SetIncludeSubfolders(bool),
@@ -210,6 +216,16 @@ impl DurationProbe {
     }
 }
 
+/// The unpinned playlist, slid out over the video.
+#[derive(Default)]
+struct Peek {
+    /// Whether the pointer has been over it; only then does it hide when the
+    /// pointer leaves (opened from the keyboard, it stays until then).
+    entered: bool,
+    /// When the pointer left it.
+    left_at: Option<Instant>,
+}
+
 /// The video that starts by itself once the countdown ends.
 struct UpNext {
     index: usize,
@@ -239,6 +255,10 @@ struct App {
     scrub: Option<f64>,
     last_save: Instant,
     last_activity: Instant,
+    /// The unpinned playlist while it is out.
+    peek: Option<Peek>,
+    /// Width of the docked playlist, which the slid-out one copies.
+    sidebar_width: f32,
     /// Where the floating fullscreen controls were last drawn.
     controls_rect: Option<egui::Rect>,
     /// Scrolling over the video not yet turned into volume steps.
@@ -341,6 +361,8 @@ impl App {
             last_save: Instant::now(),
             last_activity: Instant::now(),
             controls_rect: None,
+            peek: None,
+            sidebar_width: 280.0,
             scroll_volume: 0.0,
             notice: None,
             actions: Vec::new(),
@@ -1115,6 +1137,17 @@ impl App {
             Action::FocusSearch => {
                 self.show_sidebar = true;
                 self.focus_search = true;
+                if !self.sidebar_docked() && self.peek.is_none() {
+                    self.peek = Some(Peek::default());
+                }
+            }
+            Action::TogglePin => {
+                let pinned = !self.store.sidebar_pinned;
+                self.store.set_sidebar_pinned(pinned);
+                self.store.save();
+                // Unpinning from the panel leaves it out while the pointer is on it.
+                self.peek = (!pinned).then_some(Peek { entered: true, left_at: None });
+                self.show_sidebar = true;
             }
             Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include, ctx),
             Action::SetWatched(path, watched) => {
@@ -1189,9 +1222,12 @@ impl App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
                 }
             }
-            Action::ToggleSidebar => self.show_sidebar = !self.show_sidebar,
+            Action::ToggleSidebar if self.sidebar_docked() => self.show_sidebar = !self.show_sidebar,
+            Action::ToggleSidebar => self.peek = if self.peek.is_some() { None } else { Some(Peek::default()) },
             Action::Escape => {
-                if self.fullscreen {
+                if self.peek.is_some() {
+                    self.peek = None;
+                } else if self.fullscreen {
                     self.apply(Action::ExitFullscreen, ctx);
                 } else {
                     self.sync_panel = false;
@@ -1427,6 +1463,58 @@ impl App {
                 });
             });
         });
+    }
+
+    /// Whether the playlist sits beside the video. Unpinned (and in fullscreen)
+    /// it slides out over the video instead.
+    fn sidebar_docked(&self) -> bool {
+        self.store.sidebar_pinned && !self.fullscreen
+    }
+
+    /// The unpinned playlist: it slides out over the video when the pointer
+    /// reaches the left edge (or from the keyboard) and hides once the
+    /// pointer leaves it, unless it's in use.
+    fn floating_sidebar(&mut self, ctx: &egui::Context, video: egui::Rect) {
+        let pointer = ctx.pointer_hover_pos();
+        let at_edge = pointer.is_some_and(|p| video.contains(p) && p.x < video.left() + EDGE_WIDTH);
+        if self.peek.is_none() && at_edge && !ctx.input(|i| i.pointer.any_down()) {
+            self.peek = Some(Peek { entered: true, left_at: None });
+        }
+        if self.peek.is_none() {
+            return;
+        }
+        let size = vec2(self.sidebar_width, video.height());
+        let area = egui::Area::new(egui::Id::unique("floating-sidebar"))
+            .fixed_pos(video.left_top())
+            .constrain(false)
+            .show(ctx, |ui| {
+                let frame = egui::Frame::side_top_panel(ui.style()).shadow(ui.visuals().popup_shadow);
+                let inner = size - frame.total_margin().sum();
+                frame.show(ui, |ui| {
+                    ui.set_min_size(inner);
+                    ui.set_max_size(inner);
+                    self.sidebar(ui);
+                });
+            });
+        let inside = pointer.is_some_and(|p| area.response.rect.expand(12.0).contains(p));
+        if inside {
+            // Keeps the cursor from hiding while it rests on the playlist.
+            self.last_activity = Instant::now();
+        }
+        let searching = ctx.memory(|m| m.has_focus(egui::Id::unique("playlist-search")));
+        let busy = searching || self.drag_row.is_some() || egui::Popup::is_any_open(ctx);
+        let Some(peek) = &mut self.peek else { return };
+        if inside || busy {
+            peek.entered |= inside;
+            peek.left_at = None;
+        } else if peek.entered {
+            let left_at = *peek.left_at.get_or_insert_with(Instant::now);
+            if left_at.elapsed() >= PEEK_HIDE_DELAY {
+                self.peek = None;
+            } else {
+                ctx.request_repaint_after(PEEK_HIDE_DELAY);
+            }
+        }
     }
 
     /// Tools for subtitles that are out of sync, in a panel over the video.
@@ -1714,10 +1802,21 @@ impl App {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("PLAYLIST").small().weak());
-            if !self.playlist.is_empty() {
-                let count = self.playlist.len();
+            let count = self.playlist.len();
+            if count > 0 {
                 ui.label(RichText::new(format!("{count} video{}", if count == 1 { "" } else { "s" })).small().weak());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let pinned = self.store.sidebar_pinned;
+                let (pin, tip) = if pinned {
+                    (icons::fill(icons::PIN), "Unpin: hide the playlist until you point at the left edge")
+                } else {
+                    (RichText::new(icons::PIN), "Pin the playlist beside the video")
+                };
+                if ui.add(egui::Button::new(pin.size(14.0)).frame_when_inactive(false)).on_hover_text(tip).clicked() {
+                    self.actions.push(Action::TogglePin);
+                }
+                if count > 0 {
                     let clear = egui::Button::new(RichText::new(icons::TRASH).size(14.0)).frame_when_inactive(false);
                     if ui.add(clear).on_hover_text("Clear the playlist (files are not touched)").clicked() {
                         self.actions.push(Action::ClearPlaylist);
@@ -1736,8 +1835,8 @@ impl App {
                         }
                     });
                     response.on_hover_text("Sort the playlist (or drag videos to reorder)");
-                });
-            }
+                }
+            });
         });
         if !self.playlist.is_empty() {
             self.playlist_summary(ui);
@@ -1859,6 +1958,7 @@ impl App {
                     if let Some(index) = results.get(self.search_pick) {
                         self.actions.push(Action::Play(*index));
                         self.search.clear();
+                        self.peek = None;
                     }
                 }
             }
@@ -2358,18 +2458,22 @@ impl eframe::App for App {
                 .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)))
                 .show(ui, |ui| self.controls(ui));
         }
-        if !self.fullscreen && self.show_sidebar {
-            egui::Panel::left("sidebar")
+        if self.sidebar_docked() && self.show_sidebar {
+            let panel = egui::Panel::left("sidebar")
                 .resizable(true)
                 .default_size(280.0)
                 .size_range(180.0..=600.0)
                 .show(ui, |ui| self.sidebar(ui));
+            self.sidebar_width = panel.response.rect.width();
         }
         let video = egui::CentralPanel::no_frame()
             .frame(egui::Frame::NONE.fill(Color32::BLACK))
             .show(ui, |ui| self.video_area(ui))
             .response
             .rect;
+        if !self.sidebar_docked() {
+            self.floating_sidebar(&ctx, video);
+        }
         self.controls_rect = None;
         if self.fullscreen && !idle {
             let accent = self.store.settings.accent;

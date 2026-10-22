@@ -115,6 +115,8 @@ pub struct Store {
     pub include_subfolders: bool,
     pub volume: f64,
     pub settings: Settings,
+    /// Whether the playlist is docked beside the video, or slides out over it.
+    pub sidebar_pinned: bool,
     /// Whether the next video starts by itself when one finishes.
     pub autoplay_next: bool,
     #[serde(skip)]
@@ -135,6 +137,7 @@ impl Default for Store {
             include_subfolders: false,
             volume: 100.0,
             autoplay_next: true,
+            sidebar_pinned: true,
             settings: Settings::default(),
             dirty: false,
             saver: None,
@@ -333,6 +336,11 @@ impl Store {
 
     pub fn set_settings(&mut self, settings: Settings) {
         self.settings = settings;
+        self.dirty = true;
+    }
+
+    pub fn set_sidebar_pinned(&mut self, pinned: bool) {
+        self.sidebar_pinned = pinned;
         self.dirty = true;
     }
 

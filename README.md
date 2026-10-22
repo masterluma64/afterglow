@@ -7,6 +7,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 ## Features
 
 - **Playlist**: one playlist in the sidebar, restored on restart.
+  - The pin icon in its header docks it beside the video, or unpins it: then it stays
+    hidden and slides out over the video when you point at the left edge (or press B),
+    hiding again when the pointer leaves. In fullscreen it always works that way.
   - *Open folder* (O, or drop a folder) replaces it with the videos in that
     folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
     Turn on *Include subfolders* (right-click the playlist) to also pick up videos in
@@ -111,7 +114,7 @@ in the app for an overview.
 | O | Open folder as playlist |
 | I | Add videos to the playlist |
 | R | Refresh the playlist's folder |
-| B | Show or hide the playlist |
+| B | Show or hide the playlist (slides it out when unpinned) |
 | F / double-click video | Fullscreen |
 | Esc | Leave fullscreen, or close the subtitle sync panel |
 | E | Settings |
