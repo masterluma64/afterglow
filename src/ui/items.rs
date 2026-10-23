@@ -113,6 +113,11 @@ impl App {
             Action::ClearSelection => item(icons::SELECTION_SLASH, "Clear selection", "Esc").enabled(!self.selected.is_empty()),
             Action::ClearPlaylist => item(icons::TRASH, "Clear playlist", "").enabled(has_videos),
             Action::OpenFolder => item(icons::FOLDER_PLUS, "Open folder…", "O"),
+            Action::OpenVideo => item(icons::FILM_SLATE, "Open video…", "Shift+O"),
+            Action::OpenSingle(video) => {
+                let name = self.store.title(video).map_or_else(|| display_name(video), str::to_string);
+                item(icons::MONITOR_PLAY, name, "").enabled(self.recent.found(video))
+            }
             Action::OpenVideos => item(icons::FILE_VIDEO, "Add videos…", "I"),
             Action::Open(paths) => {
                 let folder = paths.first();
@@ -120,6 +125,7 @@ impl App {
                 item(icons::FOLDER, name, "").enabled(folder.is_some_and(|f| self.recent.found(f)))
             }
             Action::ClearRecentFolders => item(icons::TRASH, "Clear recent folders", "").enabled(!self.store.recent_folders.is_empty()),
+            Action::ClearRecentVideos => item(icons::TRASH, "Clear recent videos", "").enabled(!self.store.recent_videos.is_empty()),
             Action::RefreshFolder => item(icons::REFRESH, "Refresh folder", "R").enabled(self.store.folder.is_some()),
             Action::SetIncludeSubfolders(_) => item(icons::FOLDER, "Include subfolders", "").on(self.store.include_subfolders),
             Action::ToggleSidebar => {

@@ -20,7 +20,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     subfolders; changing it rescans the opened folder right away.
     New videos saved into the folder are added to the end of the playlist by themselves;
     *Refresh folder* (R, in the ⋯ menu) also drops videos whose files are gone.
-  - The ⋯ menu lists recently opened folders.
+  - *Open video* (Shift+O) plays one video by itself, like a movie: it replaces the playlist,
+    which then hides.
+  - The ⋯ menu lists recently opened folders, and recently opened videos (the ones opened by
+    themselves).
   - *Add videos* (I) appends them; if nothing is playing, the first one starts.
   - Dropping videos onto the window adds them or replaces the playlist. Afterglow asks
     which, until you tick *Save as default* (changeable in Settings).
@@ -177,6 +180,7 @@ in the app for an overview.
 | W | Mark the playing video watched (and play the next) / unwatched |
 | / | Search playlist: ↑ / ↓ pick a result, Enter plays it, Esc clears |
 | O | Open folder as playlist |
+| Shift+O | Open a video by itself |
 | I | Add videos to the playlist |
 | R | Refresh the playlist's folder |
 | B | Show or hide the playlist (slides it out when unpinned) |

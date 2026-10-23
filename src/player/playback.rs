@@ -119,6 +119,9 @@ impl App {
         if !path.is_file() {
             return self.warn(format!("{name} was not found (moved or deleted?)"));
         }
+        if self.store.is_movie(&path) {
+            self.store.add_recent_video(&path);
+        }
         let start = if resume { self.store.resume_position(&path) } else { None };
         self.apply_folder_settings(&path);
         let Ok(mpv) = &self.mpv else { return };

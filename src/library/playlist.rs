@@ -56,9 +56,9 @@ impl DiskBusy {
     }
 }
 
-/// Whether the recent folders are there, checked in the background: on an
-/// unplugged or offline drive, checking takes long enough to freeze the
-/// window, and the menus showing them are drawn every frame.
+/// Whether the recent folders and videos are there, checked in the
+/// background: on an unplugged or offline drive, checking takes long enough
+/// to freeze the window, and the menus showing them are drawn every frame.
 #[derive(Default)]
 pub(crate) struct RecentFolders {
     found: HashMap<PathBuf, bool>,
@@ -67,24 +67,24 @@ pub(crate) struct RecentFolders {
 }
 
 impl RecentFolders {
-    /// Whether `folder` was there when last checked; not checked yet counts as there.
-    pub(crate) fn found(&self, folder: &Path) -> bool {
-        self.found.get(folder).copied().unwrap_or(true)
+    /// Whether `path` was there when last checked; not checked yet counts as there.
+    pub(crate) fn found(&self, path: &Path) -> bool {
+        self.found.get(path).copied().unwrap_or(true)
     }
 
-    /// Checks `folders` again, unless that is under way or was just done.
-    pub(crate) fn check(&mut self, folders: &[PathBuf], ctx: &egui::Context) {
+    /// Checks `paths` again, unless that is under way or was just done.
+    pub(crate) fn check(&mut self, paths: &[PathBuf], ctx: &egui::Context) {
         self.receive();
         let recent = self.checked_at.is_some_and(|at| at.elapsed() < Duration::from_secs(5));
         if self.checking.is_some() || recent {
             return;
         }
         let (tx, rx) = mpsc::channel();
-        let (folders, ctx) = (folders.to_vec(), ctx.clone());
-        let spawned = std::thread::Builder::new().name("check-folders".into()).spawn(move || {
-            let found = folders.into_iter().map(|f| {
-                let there = f.is_dir();
-                (f, there)
+        let (paths, ctx) = (paths.to_vec(), ctx.clone());
+        let spawned = std::thread::Builder::new().name("check-recent".into()).spawn(move || {
+            let found = paths.into_iter().map(|p| {
+                let there = p.exists();
+                (p, there)
             }).collect();
             if tx.send(found).is_ok() {
                 ctx.request_repaint();
@@ -115,6 +115,12 @@ pub(crate) fn move_item<T>(list: &mut Vec<T>, from: usize, to: usize) {
 }
 
 impl App {
+    /// Checks whether the recent folders and videos are there (see `RecentFolders`).
+    pub(crate) fn check_recent(&mut self, ctx: &egui::Context) {
+        let recent = [self.store.recent_folders.as_slice(), &self.store.recent_videos].concat();
+        self.recent.check(&recent, ctx);
+    }
+
     /// Queues every playlist video whose length or title isn't known yet,
     /// the playing one first (its title is in the window's).
     pub(crate) fn request_durations(&mut self) {

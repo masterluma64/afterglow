@@ -12,6 +12,8 @@ use super::stats::{Stats, Tally};
 
 /// How many recently opened folders are remembered.
 const RECENT_FOLDERS: usize = 10;
+/// How many videos opened by themselves are remembered.
+const RECENT_VIDEOS: usize = 10;
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Entry {
@@ -190,6 +192,8 @@ pub struct Store {
     pub folder: Option<PathBuf>,
     /// Folders opened recently, most recent first.
     pub recent_folders: Vec<PathBuf>,
+    /// Videos opened by themselves recently (see `is_movie`), most recent first.
+    pub recent_videos: Vec<PathBuf>,
     /// Whether opening a folder also includes videos in its subfolders.
     pub include_subfolders: bool,
     pub volume: f64,
@@ -227,6 +231,7 @@ impl Default for Store {
             current: None,
             folder: None,
             recent_folders: Vec::new(),
+            recent_videos: Vec::new(),
             include_subfolders: false,
             volume: 100.0,
             autoplay_next: true,
@@ -683,6 +688,21 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Puts a video opened by itself first among the recent videos.
+    pub fn add_recent_video(&mut self, video: &Path) {
+        if self.recent_videos.first().map(PathBuf::as_path) != Some(video) {
+            self.recent_videos.retain(|v| v != video);
+            self.recent_videos.insert(0, video.to_path_buf());
+            self.recent_videos.truncate(RECENT_VIDEOS);
+            self.dirty = true;
+        }
+    }
+
+    pub fn clear_recent_videos(&mut self) {
+        self.recent_videos.clear();
+        self.dirty = true;
+    }
+
     pub fn set_include_subfolders(&mut self, include: bool) {
         self.include_subfolders = include;
         self.dirty = true;
@@ -977,6 +997,13 @@ mod tests {
         assert_eq!(names.len(), RECENT_FOLDERS);
         assert_eq!(names[..3], ["folder 5", "folder 11", "folder 10"], "most recent first, without duplicates");
         assert!(!names.contains(&"folder 0".to_string()), "the oldest are forgotten");
+
+        for i in 0..12 {
+            store.add_recent_video(Path::new(&format!("video {i}.mkv")));
+        }
+        store.add_recent_video(Path::new("video 3.mkv"));
+        assert_eq!(store.recent_videos.len(), RECENT_VIDEOS);
+        assert_eq!(store.recent_videos[..2], [PathBuf::from("video 3.mkv"), PathBuf::from("video 11.mkv")]);
     }
 
     #[test]

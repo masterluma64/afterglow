@@ -21,6 +21,9 @@ impl App {
             if icon_button(ui, icons::FOLDER_PLUS, "Open folder: replace the playlist with its videos (O)").clicked() {
                 self.actions.push(Action::OpenFolder);
             }
+            if icon_button(ui, icons::FILM_SLATE, "Open video: play it by itself, like a movie (Shift+O)").clicked() {
+                self.actions.push(Action::OpenVideo);
+            }
             if icon_button(ui, icons::FILE_VIDEO, "Add videos to the playlist (I)").clicked() {
                 self.actions.push(Action::OpenVideos);
             }
@@ -28,8 +31,9 @@ impl App {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
                 let (response, _) = ui::menu_button(more).ui(ui, |ui| {
                     let recent = self.store.recent_folders.clone();
+                    let recent_videos = self.store.recent_videos.clone();
                     // Checked in the background while the menu is open.
-                    self.recent.check(&recent, ui.ctx());
+                    self.check_recent(ui.ctx());
                     ui.add_enabled_ui(!recent.is_empty(), |ui| {
                         ui.menu_button(format!("{}  Recent folders", icons::RECENT), |ui| {
                             for folder in &recent {
@@ -39,6 +43,17 @@ impl App {
                             }
                             ui.separator();
                             self.menu_item(ui, Action::ClearRecentFolders);
+                        });
+                    });
+                    ui.add_enabled_ui(!recent_videos.is_empty(), |ui| {
+                        ui.menu_button(format!("{}  Recent videos", icons::RECENT), |ui| {
+                            for video in &recent_videos {
+                                let found = self.recent.found(video);
+                                let tip = if found { video.display().to_string() } else { format!("{} (not found)", video.display()) };
+                                self.menu_item(ui, Action::OpenSingle(video.clone())).on_hover_text(tip);
+                            }
+                            ui.separator();
+                            self.menu_item(ui, Action::ClearRecentVideos);
                         });
                     });
                     self.menu_item(ui, Action::RefreshFolder).on_hover_text(

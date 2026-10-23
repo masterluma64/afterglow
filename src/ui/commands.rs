@@ -97,6 +97,7 @@ impl App {
         self.actions.append(&mut picked);
         ui.separator();
         self.menu_item(ui, Action::OpenFolder);
+        self.menu_item(ui, Action::OpenVideo);
         self.menu_item(ui, Action::OpenVideos);
         ui.separator();
         self.menu_item(ui, Action::ToggleFullscreen);
@@ -193,12 +194,21 @@ impl App {
                 self.command(Action::OpenFolderSettings(self.playlist[index].clone()), "preferences options series show intro opening ending subtitles languages"),
             ]);
         }
-        list.extend([self.command(Action::OpenFolder, "playlist browse"), self.command(Action::OpenVideos, "files browse")]);
+        list.extend([
+            self.command(Action::OpenFolder, "playlist browse"),
+            self.command(Action::OpenVideo, "movie file browse single"),
+            self.command(Action::OpenVideos, "files browse"),
+        ]);
         for folder in &self.store.recent_folders {
             list.push(self.command_named(format!("Open recent: {}", display_name(folder)), Action::Open(vec![folder.clone()]), "folder"));
         }
+        for video in &self.store.recent_videos {
+            let action = Action::OpenSingle(video.clone());
+            list.push(self.command_named(format!("Open recent: {}", self.item(&action).label), action, "video movie"));
+        }
         list.extend([
             self.command(Action::ClearRecentFolders, "forget history"),
+            self.command(Action::ClearRecentVideos, "forget history movies"),
             self.command(Action::RefreshFolder, "rescan reload"),
             self.command(Action::SetIncludeSubfolders(!self.store.include_subfolders), "folders scan recursive"),
             self.command(Action::FocusSearch, "find filter video"),

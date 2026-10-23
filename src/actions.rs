@@ -4,6 +4,10 @@ use super::*;
 
 pub(crate) enum Action {
     OpenFolder,
+    /// Picks a video to play by itself, in place of the playlist.
+    OpenVideo,
+    /// Makes one video the whole playlist, as if opened by itself (a recent video).
+    OpenSingle(PathBuf),
     OpenVideos,
     /// Folders and videos dropped onto the window or passed on the command line.
     Open(Vec<PathBuf>),
@@ -30,6 +34,7 @@ pub(crate) enum Action {
     /// Rescans the playlist's folder now: adds new videos, drops missing ones.
     RefreshFolder,
     ClearRecentFolders,
+    ClearRecentVideos,
     ShowHelp,
     ShowStats,
     /// Docks the playlist beside the video, or lets it slide out over it.
@@ -158,6 +163,7 @@ impl App {
                 (M::CTRL, Key::ArrowLeft, Action::SubStep(-1)),
                 (M::CTRL, Key::ArrowRight, Action::SubStep(1)),
                 (M::ALT, Key::Enter, Action::ToggleFullscreen),
+                (M::SHIFT, Key::O, Action::OpenVideo),
                 (M::NONE, Key::O, Action::OpenFolder),
                 (M::NONE, Key::I, Action::OpenVideos),
                 (M::NONE, Key::Slash, Action::FocusSearch),
@@ -243,6 +249,24 @@ impl App {
                     self.actions.push(Action::Open(vec![folder]));
                 }
             }
+            Action::OpenVideo => {
+                let file = rfd::FileDialog::new()
+                    .set_title("Open video")
+                    .add_filter("Videos", library::VIDEO_EXTENSIONS)
+                    .pick_file();
+                if let Some(file) = file {
+                    self.actions.push(Action::OpenSingle(file));
+                }
+            }
+            Action::OpenSingle(video) => {
+                self.store.set_folder(None);
+                self.sync_watch();
+                self.replace_playlist(vec![video], ctx);
+                // Opened on purpose, so even when it was watched it plays (again).
+                if self.current.is_none() && !self.playlist.is_empty() {
+                    self.play_from_start(0, ctx);
+                }
+            }
             Action::OpenVideos => {
                 let files = rfd::FileDialog::new()
                     .set_title("Add videos to the playlist")
@@ -314,7 +338,7 @@ impl App {
             }
             Action::OpenPalette => {
                 // It offers the recent folders that are there.
-                self.recent.check(&self.store.recent_folders, ctx);
+                self.check_recent(ctx);
                 self.palette = Some(Palette::default());
             }
             Action::ConfirmResetProgress => self.confirm_reset = true,
@@ -392,6 +416,10 @@ impl App {
             }
             Action::ClearRecentFolders => {
                 self.store.clear_recent_folders();
+                self.store.save();
+            }
+            Action::ClearRecentVideos => {
+                self.store.clear_recent_videos();
                 self.store.save();
             }
             Action::FocusSearch => {

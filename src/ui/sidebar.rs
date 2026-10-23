@@ -167,6 +167,7 @@ impl App {
         // The playlist's own actions, matching the buttons in its header.
         ui::context_menu(&background, |ui| {
             self.menu_item(ui, Action::OpenFolder);
+            self.menu_item(ui, Action::OpenVideo);
             self.menu_item(ui, Action::OpenVideos);
             ui.separator();
             self.menu_item(ui, Action::RefreshFolder);
