@@ -330,8 +330,8 @@ impl App {
 }
 
 impl App {
-    /// Watching stats: totals, streaks, the last 30 days and the most watched
-    /// series.
+    /// Watching stats: totals, streaks, the last 30 days, the most watched
+    /// series and the movies watched last.
     pub(crate) fn stats_dialog(&mut self, ctx: &egui::Context) {
         use crate::ui::sidebar::format_total;
         let s = self.store.stats.summary(clock::today());
@@ -339,22 +339,25 @@ impl App {
         let videos = |n: u32| format!("{n} video{}", if n == 1 { "" } else { "s" });
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("stats")).show(ctx, |ui| {
-            ui.set_width(440.0);
+            ui.set_width(560.0);
             ui.label(RichText::new("Stats").bold());
             ui.add_space(10.0);
 
             let gap = 8.0;
-            let tile_width = (ui.available_width() - 2.0 * gap) / 3.0;
+            let tile_width = (ui.available_width() - 3.0 * gap) / 4.0;
             let best = s.best_day.map(|(day, seconds)| (format_total(seconds), stats::format_date(day)));
+            let movie_time = (s.movie_seconds >= 1.0).then(|| format!("Movies: {}", format_total(s.movie_seconds)));
             let tiles = [
-                ("Total watched", format_total(s.total.seconds), None),
-                ("Videos finished", s.total.finished.to_string(), None),
-                ("Current streak", days(s.current_streak), Some(format!("Longest: {}", days(s.longest_streak)))),
+                ("Total watched", format_total(s.total.seconds), movie_time),
+                ("Videos finished", s.videos_finished.to_string(), None),
+                ("Movies watched", s.movies_watched.to_string(), None),
+                ("Best day", best.as_ref().map_or("–".into(), |b| b.0.clone()), best.map(|b| b.1)),
+                ("Current streak", days(s.current_streak), None),
+                ("Longest streak", days(s.longest_streak), None),
                 ("Last 7 days", format_total(s.last_7_days), None),
                 ("Last 30 days", format_total(s.last_30_days), Some(format!("{} a day", format_total(s.last_30_days / 30.0)))),
-                ("Best day", best.as_ref().map_or("–".into(), |b| b.0.clone()), best.map(|b| b.1)),
             ];
-            for row in tiles.chunks(3) {
+            for row in tiles.chunks(4) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = gap;
                     for (label, value, detail) in row {
@@ -383,6 +386,24 @@ impl App {
                     let share = (tally.seconds / top.seconds.max(1.0)) as f32;
                     meter(ui, share);
                     ui.add_space(4.0);
+                }
+            }
+
+            if !s.recent_movies.is_empty() {
+                ui.add_space(14.0);
+                ui.label(RichText::new("Recent movies").bold());
+                ui.add_space(2.0);
+                for (name, movie) in &s.recent_movies {
+                    ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(stats::format_date(movie.last_day)).weak());
+                        ui.label(RichText::new(format_total(movie.seconds)).bold());
+                        if movie.finished > 0 {
+                            ui.label(RichText::new(icons::CHECK).weak()).on_hover_text("Watched");
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(egui::Label::new(name.as_str()).truncate()).on_hover_text(name.as_str());
+                        });
+                    });
                 }
             }
 
@@ -415,7 +436,7 @@ impl App {
             let title = format!("{}  Clear all stats?", icons::WARNING);
             ui.label(RichText::new(title).bold().color(error_color(ui.visuals().dark_mode)));
             ui.add_space(8.0);
-            ui.label("This forgets all time watched, videos finished, streaks and series, and starts counting again from nothing.");
+            ui.label("This forgets all time watched, videos finished, streaks, series and movies, and starts counting again from nothing.");
             ui.add_space(4.0);
             ui.label(RichText::new("Your videos' progress stays. This can't be undone.").weak());
             ui.add_space(14.0);

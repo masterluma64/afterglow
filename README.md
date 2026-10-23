@@ -94,9 +94,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   spot is on a monitor that is no longer connected, it opens on the main screen instead.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight
   into the window through OpenGL, which Afterglow needs.
-- **Stats** (⋯ menu or the palette): total time watched, videos finished, the last 7 and 30
+- **Stats** (⋯ menu or the palette): total time watched, videos finished, movies watched
+  (videos opened by themselves count as movies, apart from series), the last 7 and 30
   days, streaks, your best day, a chart of the last 30 days and the most watched series
-  (by folder). They are kept apart from each video's progress, so deleting watched videos
+  (by folder) and the movies watched last. They are kept apart from each video's progress, so deleting watched videos
   doesn't lower them. Seeking doesn't count, and an hour of video counts as an hour at any
   speed. When stats were first kept, what was watched before was estimated from the saved
   progress. *Clear stats…* at the bottom of the dialog starts them over, after asking.

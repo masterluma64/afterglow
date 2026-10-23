@@ -25,6 +25,15 @@ impl Tally {
     }
 }
 
+/// What was watched of one movie, and when last.
+#[derive(Clone, Copy, Default, PartialEq, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Movie {
+    pub seconds: f64,
+    pub finished: u32,
+    pub last_day: Day,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Stats {
@@ -37,6 +46,8 @@ pub struct Stats {
     pub days: BTreeMap<String, Tally>,
     /// Per series: the name of the folder the videos were in.
     pub series: HashMap<String, Tally>,
+    /// Per movie (a video opened by itself): its title, or else its file name.
+    pub movies: HashMap<String, Movie>,
     /// Whether `before` was estimated (it is, once).
     pub seeded: bool,
 }
@@ -52,6 +63,22 @@ impl Stats {
         self.total.finished += 1;
         self.days.entry(date_key(today)).or_default().finished += 1;
         self.series.entry(series.to_string()).or_default().finished += 1;
+    }
+
+    pub fn add_movie_time(&mut self, movie: &str, seconds: f64, today: Day) {
+        self.total.seconds += seconds;
+        self.days.entry(date_key(today)).or_default().seconds += seconds;
+        let m = self.movies.entry(movie.to_string()).or_default();
+        m.seconds += seconds;
+        m.last_day = today;
+    }
+
+    pub fn add_movie_finished(&mut self, movie: &str, today: Day) {
+        self.total.finished += 1;
+        self.days.entry(date_key(today)).or_default().finished += 1;
+        let m = self.movies.entry(movie.to_string()).or_default();
+        m.finished += 1;
+        m.last_day = today;
     }
 
     /// Counts what was watched before stats were kept: `(series, tally)` for
@@ -102,6 +129,11 @@ impl Stats {
         let mut top_series: Vec<(String, Tally)> = self.series.iter().filter(|(_, t)| t.active()).map(|(k, t)| (k.clone(), *t)).collect();
         top_series.sort_by(|a, b| b.1.seconds.total_cmp(&a.1.seconds));
         top_series.truncate(5);
+        let movie_finishes: u32 = self.movies.values().map(|m| m.finished).sum();
+        let mut recent_movies: Vec<(String, Movie)> =
+            self.movies.iter().filter(|(_, m)| m.seconds >= 60.0 || m.finished > 0).map(|(k, m)| (k.clone(), *m)).collect();
+        recent_movies.sort_by(|a, b| b.1.last_day.cmp(&a.1.last_day).then_with(|| a.0.cmp(&b.0)));
+        recent_movies.truncate(5);
         Summary {
             total: self.total,
             before: self.before,
@@ -111,6 +143,10 @@ impl Stats {
             longest_streak: longest,
             best_day,
             top_series,
+            videos_finished: self.total.finished.saturating_sub(movie_finishes),
+            movies_watched: self.movies.values().filter(|m| m.finished > 0).count() as u32,
+            movie_seconds: self.movies.values().map(|m| m.seconds).sum(),
+            recent_movies,
             daily: (today - 29..=today).map(|d| (d, self.day(d).seconds)).collect(),
         }
     }
@@ -127,6 +163,13 @@ pub struct Summary {
     pub best_day: Option<(Day, f64)>,
     /// The most watched series, most first.
     pub top_series: Vec<(String, Tally)>,
+    /// Videos finished that weren't movies.
+    pub videos_finished: u32,
+    /// Movies finished at least once.
+    pub movies_watched: u32,
+    pub movie_seconds: f64,
+    /// The movies watched last, most recent first.
+    pub recent_movies: Vec<(String, Movie)>,
     /// The last 30 days, oldest first, with the seconds watched on each.
     pub daily: Vec<(Day, f64)>,
 }

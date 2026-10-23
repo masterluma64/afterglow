@@ -580,14 +580,34 @@ impl Store {
 
     /// Adds seconds of a video played to the stats.
     pub fn record_watching(&mut self, path: &Path, seconds: f64) {
-        let series = self.series_of(path);
-        self.stats.add_time(&series, seconds, crate::clock::today());
+        let today = crate::clock::today();
+        if self.is_movie(path) {
+            let movie = self.movie_name(path);
+            self.stats.add_movie_time(&movie, seconds, today);
+        } else {
+            let series = self.series_of(path);
+            self.stats.add_time(&series, seconds, today);
+        }
         self.dirty = true;
     }
 
     fn count_finished(&mut self, path: &Path) {
-        let series = self.series_of(path);
-        self.stats.add_finished(&series, crate::clock::today());
+        let today = crate::clock::today();
+        if self.is_movie(path) {
+            let movie = self.movie_name(path);
+            self.stats.add_movie_finished(&movie, today);
+        } else {
+            let series = self.series_of(path);
+            self.stats.add_finished(&series, today);
+        }
+    }
+
+    /// The name a movie counts under in the stats: its title, or else its file name.
+    fn movie_name(&self, path: &Path) -> String {
+        match self.title(path) {
+            Some(title) => title.to_string(),
+            None => path.file_stem().map_or_else(|| key(path), |s| s.to_string_lossy().into_owned()),
+        }
     }
 
     /// The series a video counts towards in the stats: the opened folder it
@@ -1022,6 +1042,26 @@ mod tests {
         store.set_folder(None);
         store.set_playlist(&[movie.to_path_buf(), other.to_path_buf()]);
         assert!(!store.is_movie(movie), "one of several");
+    }
+
+    #[test]
+    fn counts_movies_apart_from_series() {
+        let mut store = Store { stats: Stats { seeded: true, ..Stats::default() }, ..Store::default() };
+        let (movie, episode) = (Path::new(r"D:\Movies\Up.mkv"), Path::new(r"D:\Shows\Kirby\1.mkv"));
+        store.set_title(movie, Some("Up (2009)".into()));
+        store.set_playlist(&[movie.to_path_buf()]);
+        store.record_watching(movie, 5000.0);
+        store.finish(movie);
+        store.set_playlist(&[episode.to_path_buf()]);
+        store.set_folder(Some(Path::new(r"D:\Shows\Kirby")));
+        store.record_watching(episode, 1200.0);
+        store.finish(episode);
+
+        let s = store.stats.summary(crate::clock::today());
+        assert_eq!(s.total, Tally { seconds: 6200.0, finished: 2 }, "the totals count both");
+        assert_eq!((s.videos_finished, s.movies_watched, s.movie_seconds), (1, 1, 5000.0));
+        assert_eq!(s.top_series.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["Kirby"], "movies aren't a series");
+        assert_eq!(s.recent_movies[0].0, "Up (2009)", "by its title");
     }
 
     #[test]
