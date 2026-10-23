@@ -52,8 +52,6 @@ pub(crate) enum Action {
     SetPortable(bool),
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
-    /// Marks every video before this playlist entry as watched.
-    MarkWatchedBefore(usize),
     /// Marks several videos watched (or unwatched), such as the selected ones.
     SetWatchedMany(Vec<PathBuf>, bool),
     /// Removes several videos from the playlist.
@@ -464,18 +462,6 @@ impl App {
                         self.notify(format!("{name}: marked as watched  ·  this is the last video"));
                     }
                 }
-            }
-            Action::MarkWatchedBefore(index) => {
-                let before: Vec<PathBuf> = self.playlist.iter().take(index).cloned().collect();
-                for path in &before {
-                    self.store.set_watched(path, true);
-                }
-                if self.loaded && self.current.is_some_and(|c| c < index) {
-                    // Keep the live position from overwriting the change.
-                    self.playback.position = self.playback.duration;
-                }
-                self.store.save();
-                self.notify(format!("Marked {} video{} as watched", before.len(), if before.len() == 1 { "" } else { "s" }));
             }
             Action::SetWatchedMany(paths, watched) => {
                 let playing = self.loaded && self.current_path().is_some_and(|current| paths.iter().any(|p| p == current));

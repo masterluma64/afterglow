@@ -105,7 +105,6 @@ impl App {
             }
             Action::SetWatchedMany(_, true) => item(icons::CHECK, "Mark as watched", ""),
             Action::SetWatchedMany(_, false) => item(icons::EYE_SLASH, "Mark as unwatched", ""),
-            Action::MarkWatchedBefore(index) => item(icons::CHECKS, "Mark all above as watched", "").enabled(*index > 0),
             Action::PlayOver(_) => item(icons::REPEAT, "Play from start", ""),
             Action::Play(index) => item(icons::FILE_VIDEO, self.playlist.get(*index).map(|p| self.video_name(p)).unwrap_or_default(), ""),
             Action::Remove(_) => item(icons::X, "Remove from playlist", ""),
@@ -194,7 +193,6 @@ pub(crate) fn offer(ui: &mut egui::Ui, app: &App, action: Action, picked: &mut V
 pub(crate) fn entry_items(ui: &mut egui::Ui, app: &App, index: usize, path: &Path, picked: &mut Vec<Action>) {
     offer(ui, app, Action::PlayOver(index), picked);
     offer(ui, app, Action::SetWatched(path.to_path_buf(), true), picked);
-    offer(ui, app, Action::MarkWatchedBefore(index), picked);
     offer(ui, app, Action::SetWatched(path.to_path_buf(), false), picked);
     ui.separator();
     offer(ui, app, Action::OpenFolderSettings(path.to_path_buf()), picked);

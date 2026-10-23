@@ -196,7 +196,6 @@ impl App {
             list.extend([
                 self.command(Action::PlayOver(index), "restart again beginning unwatched"),
                 self.command(Action::ToggleWatched, "seen progress"),
-                self.command(Action::MarkWatchedBefore(index), "seen progress previous earlier"),
                 self.command(Action::OpenFolderSettings(self.playlist[index].clone()), "preferences options series show intro opening ending subtitles languages"),
             ]);
         }

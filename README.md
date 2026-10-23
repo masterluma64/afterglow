@@ -31,8 +31,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - Each video shows its length, and the header shows how much of the playlist's total
     running time you've watched. Lengths of unplayed videos are read in the background
     by a headless mpv and remembered.
-  - Right-click an entry to play it from the start, mark it (or everything above it)
-    watched, mark it unwatched or remove it; the trash icon clears the playlist. Files on
+  - Right-click an entry to play it from the start, mark it watched or unwatched, or
+    remove it; the trash icon clears the playlist. Files on
     disk are never touched.
   - Ctrl+click entries to select several (Shift+click selects a range), then right-click
     one of them to mark them all watched or unwatched or remove them; Delete also removes
@@ -67,7 +67,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   load are remembered for each video and restored when you open it again.
 - **Right-click the video** for a menu with play/pause, next and previous video, audio and
   subtitle tracks, speed, chapters, the playing video's playlist choices (play from start,
-  mark it or everything above it watched, mark it unwatched, remove it), fullscreen, the
+  mark it watched or unwatched, remove it), fullscreen, the
   playlist and Settings. Each item shows its key, and it also works in fullscreen while the controls are
   hidden.
 - **Command palette** (Ctrl+K, or the ⋯ and right-click menus): type a few letters to find
