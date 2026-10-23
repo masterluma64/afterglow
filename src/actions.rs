@@ -71,19 +71,16 @@ pub(crate) enum Action {
     ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
     ToggleWatched,
-    /// Leaves fullscreen, or else closes the subtitle sync panel.
+    /// Clears the selection, cancels the next video's countdown, hides the
+    /// slid-out playlist or leaves fullscreen, whichever applies first.
     Escape,
     LoadSubtitle,
     AdjustSubDelay(f64),
     SetSubDelay(f64),
     /// Shifts subtitles so the previous (-1) or next (1) line shows right now.
     SubStep(i32),
-    /// Marks the moment a subtitle line appears, or when it is actually
-    /// spoken. Once both are marked, subtitles shift by the difference.
-    MarkLine { spoken: bool },
     /// Stretches subtitle timing, for subtitles made for another frame rate.
     SetSubSpeed(f64),
-    ToggleSyncPanel,
     FrameStep { forward: bool },
     SetSpeed(f64),
     /// Jumps to the next chapter, or back to the start of this or the previous one.
@@ -174,14 +171,11 @@ impl App {
                 (M::NONE, Key::W, Action::ToggleWatched),
                 (M::NONE, Key::S, Action::CycleSubtitles),
                 (M::NONE, Key::A, Action::CycleAudio),
-                (M::NONE, Key::T, Action::ToggleSyncPanel),
                 (M::NONE, Key::B, Action::ToggleSidebar),
                 (M::SHIFT, Key::Z, Action::AdjustSubDelay(-1.0)),
                 (M::SHIFT, Key::X, Action::AdjustSubDelay(1.0)),
                 (M::NONE, Key::Z, Action::AdjustSubDelay(-0.1)),
                 (M::NONE, Key::X, Action::AdjustSubDelay(0.1)),
-                (M::NONE, Key::G, Action::MarkLine { spoken: false }),
-                (M::NONE, Key::H, Action::MarkLine { spoken: true }),
                 (M::NONE, Key::OpenBracket, Action::SetSpeed(step_speed(speed, false))),
                 (M::NONE, Key::CloseBracket, Action::SetSpeed(step_speed(speed, true))),
                 (M::NONE, Key::Backspace, Action::SetSpeed(1.0)),
@@ -287,7 +281,6 @@ impl App {
                 self.store.clear_recent_folders();
                 self.store.save();
             }
-            Action::ToggleSyncPanel => self.sync_panel = !self.sync_panel,
             Action::FocusSearch => {
                 self.show_sidebar = true;
                 self.focus_search = true;
@@ -439,8 +432,6 @@ impl App {
                     self.peek = None;
                 } else if self.fullscreen {
                     self.apply(Action::ExitFullscreen, ctx);
-                } else {
-                    self.sync_panel = false;
                 }
             }
             Action::ToggleWatched => {
@@ -477,7 +468,6 @@ impl App {
                         | Action::AdjustSubDelay(_)
                         | Action::SetSubDelay(_)
                         | Action::SubStep(_)
-                        | Action::MarkLine { .. }
                         | Action::SetSubSpeed(_)
                 );
                 // They are saved once mpv reports them (see `property_changed`).
@@ -566,21 +556,6 @@ impl App {
             Action::SubStep(lines) if self.loaded => {
                 mpv.send_tagged(SUB_STEP_TAG, &["sub-step", &lines.to_string()]);
                 self.announce_sub_step = Some(if lines < 0 { "Previous" } else { "Next" });
-            }
-            Action::MarkLine { spoken } if self.loaded => {
-                self.line_marks[usize::from(spoken)] = Some(self.playback.position);
-                match self.line_marks {
-                    [Some(appeared), Some(spoken_at)] => {
-                        // A line that appears early must be delayed, and vice versa.
-                        let by = spoken_at - appeared;
-                        mpv.send(&["add", "sub-delay", &format!("{by:.3}")]);
-                        self.line_marks = [None, None];
-                        let delay = self.playback.sub_delay + by;
-                        self.notify(format!("Subtitles shifted {by:+.1} s  ·  delay {delay:+.1} s"));
-                    }
-                    _ if spoken => self.notify("Marked when the line was spoken  ·  press G when its subtitle appears"),
-                    _ => self.notify("Marked when the subtitle appeared  ·  press H when the line is spoken"),
-                }
             }
             Action::SetSubSpeed(speed) if self.loaded => {
                 mpv.set("sub-speed", &speed.to_string());

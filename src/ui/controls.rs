@@ -257,17 +257,39 @@ impl App {
             if ui.button(format!("{}  Load subtitle file…", icons::PLUS)).clicked() {
                 self.actions.push(Action::LoadSubtitle);
             }
+            ui.separator();
+            ui.label(RichText::new("Timing").bold());
+            let delay = self.playback.sub_delay;
             ui.horizontal(|ui| {
-                ui.label(format!("Delay {:+.1} s", self.playback.sub_delay));
-                if ui.small_button(icons::MINUS).on_hover_text("Show earlier (Z)").clicked() {
+                ui.label(format!("Delay {delay:+.1} s"));
+                if ui.small_button(icons::MINUS).on_hover_text("Show earlier (Z, Shift: 1 s)").clicked() {
                     self.actions.push(Action::AdjustSubDelay(-0.1));
                 }
-                if ui.small_button(icons::PLUS).on_hover_text("Show later (X)").clicked() {
+                if ui.small_button(icons::PLUS).on_hover_text("Show later (X, Shift: 1 s)").clicked() {
                     self.actions.push(Action::AdjustSubDelay(0.1));
                 }
+                if delay != 0.0 && ui.small_button(icons::RESET).on_hover_text("No delay").clicked() {
+                    self.actions.push(Action::SetSubDelay(0.0));
+                }
             });
-            if ui.add(egui::Button::new(format!("{}  Sync subtitles…", icons::TIMER)).shortcut_text("T")).clicked() {
-                self.actions.push(Action::ToggleSyncPanel);
+            // Syncing by ear: when a line is heard, its subtitle is shown now.
+            let previous = egui::Button::new(format!("{}  Previous line now", icons::ARROW_LEFT)).shortcut_text("Ctrl+\u{E058}");
+            if ui.add(previous).on_hover_text("For a line whose subtitle already went by").clicked() {
+                self.actions.push(Action::SubStep(-1));
+            }
+            let next = egui::Button::new(format!("{}  Next line now", icons::ARROW_RIGHT)).shortcut_text("Ctrl+\u{E06C}");
+            if ui.add(next).on_hover_text("For a line whose subtitle hasn't shown yet").clicked() {
+                self.actions.push(Action::SubStep(1));
+            }
+            // For subtitles that drift further off as the video goes on.
+            let sub_speed = self.playback.sub_speed;
+            for (speed, label) in SUB_TIMINGS {
+                let text = label[..1].to_uppercase() + &label[1..];
+                let selected = (sub_speed - speed).abs() < 1e-6;
+                let choice = ui.selectable_label(selected, text).on_hover_text("For subtitles that drift further off over time");
+                if choice.clicked() && !selected {
+                    self.actions.push(Action::SetSubSpeed(speed));
+                }
             }
         }
     }

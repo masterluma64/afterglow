@@ -173,8 +173,11 @@ impl App {
             if sub_delay != 0.0 {
                 list.push(command("Reset the subtitle delay", "", "captions sync", Action::SetSubDelay(0.0)));
             }
-            let sync = if self.sync_panel { "Close subtitle sync" } else { "Sync subtitles…" };
-            list.push(command(sync, "T", "captions delay offset timing", Action::ToggleSyncPanel));
+            list.push(command("Show the previous line now", "Ctrl+\u{E058}", "captions sync subtitle step heard", Action::SubStep(-1)));
+            list.push(command("Show the next line now", "Ctrl+\u{E06C}", "captions sync subtitle step heard", Action::SubStep(1)));
+            for (speed, label) in SUB_TIMINGS {
+                list.push(command(format!("Subtitle timing: {label}"), "", "captions sync drift frame rate fps speed", Action::SetSubSpeed(speed)));
+            }
             let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
             list.push(command(if watched { "Mark as unwatched" } else { "Mark as watched" }, "W", "seen progress", Action::ToggleWatched));
         } else if self.current.is_none() && !self.playlist.is_empty() {
@@ -245,7 +248,7 @@ impl App {
             Action::CycleAudio => icons::WAVEFORM,
             Action::SetTrack { kind: "audio", .. } => icons::WAVEFORM,
             Action::SetTrack { .. } | Action::CycleSubtitles | Action::LoadSubtitle => icons::SUBTITLES,
-            Action::AdjustSubDelay(_) | Action::SetSubDelay(_) | Action::ToggleSyncPanel => icons::TIMER,
+            Action::AdjustSubDelay(_) | Action::SetSubDelay(_) | Action::SubStep(_) | Action::SetSubSpeed(_) => icons::TIMER,
             Action::ToggleLevelVolume => icons::MOON,
             Action::ConfirmResetProgress => icons::RESET,
             Action::ToggleWatched => icons::CHECK,

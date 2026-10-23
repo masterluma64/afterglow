@@ -47,11 +47,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,
   `Movie.en.ass`, …) are picked up automatically, with English preferred. The subtitle
   menu switches tracks, loads a subtitle file, or adjusts the delay.
-- **Subtitle sync**: the *Sync subtitles* panel (T, or the subtitle menu) fixes subtitles that are out
-  of sync. When you hear a line, show the previous or next subtitle line right now
-  (Ctrl+← / Ctrl+→); or mark when a subtitle appears (G) and when the line is actually
-  spoken (H) to shift by the difference; or nudge the delay by 0.1 s or 1 s. Subtitles that
-  drift further off over time (made for 25 fps vs 23.976 fps video) can be retimed.
+- **Subtitle timing** (the subtitle menu's *Timing* section, or the palette): shift
+  subtitles earlier or later with the delay (Z / X, Shift: 1 s), or, when you hear a
+  line, show the previous or next subtitle line right now (Ctrl+← / Ctrl+→). Subtitles
+  that drift further off over time (made for 25 fps vs 23.976 fps video) can be retimed.
 - **Per-video choices**: the audio track, subtitle track, subtitle delay and subtitle files you
   load are remembered for each video and restored when you open it again.
 - **Right-click the video** for a menu with play/pause, next and previous video, audio and
@@ -151,10 +150,8 @@ in the app for an overview.
 | M | Mute |
 | A | Cycle audio tracks |
 | S | Cycle subtitles |
-| T | Subtitle sync panel |
 | Z / X | Subtitle delay −/+ 0.1 s (Shift: 1 s) |
 | Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
-| G / H | Mark when a subtitle appears / when its line is spoken |
 | N / P | Next / previous video |
 | W | Mark the playing video watched (and play the next) / unwatched |
 | / | Search the playlist: ↑ / ↓ pick a result, Enter plays it, Esc clears |
@@ -163,7 +160,7 @@ in the app for an overview.
 | R | Refresh the playlist's folder |
 | B | Show or hide the playlist (slides it out when unpinned) |
 | F / double-click video | Fullscreen |
-| Esc | Leave fullscreen, or close the subtitle sync panel |
+| Esc | Clear the selection, cancel the next video's countdown, or leave fullscreen |
 | E | Settings |
 | ? | Keyboard shortcut overview (also in the ⋯ menu) |
 | Ctrl+K | Command palette: find any command by typing |

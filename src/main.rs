@@ -230,10 +230,6 @@ struct App {
     /// When the playlist summary was added up: total and watched seconds, and
     /// how many lengths are unknown.
     summary: Option<(Instant, f64, f64, usize)>,
-    /// Whether the subtitle sync panel is open.
-    sync_panel: bool,
-    /// When a subtitle line appeared and when it was spoken, for syncing.
-    line_marks: [Option<f64>; 2],
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
     /// The startup search for remembered videos whose files are gone.
@@ -334,8 +330,6 @@ impl App {
             scroll_to_pick: None,
             names: Vec::new(),
             summary: None,
-            sync_panel: false,
-            line_marks: [None, None],
             confirm_reset: false,
             gone_scan: None,
             show_help: false,
@@ -560,10 +554,6 @@ impl eframe::App for App {
         if idle && (self.fullscreen || hover.is_some_and(|p| video.contains(p))) {
             ctx.set_cursor_icon(egui::CursorIcon::None);
         }
-        // Hidden, but kept open, while switching videos.
-        if self.sync_panel && self.loaded {
-            self.sync_panel(&ctx, video);
-        }
         self.drop_overlay(&ctx, window);
         if self.confirm_reset {
             self.reset_dialog(&ctx);
@@ -672,10 +662,8 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("Subtitles", &[
         ("S", "Cycle subtitles"),
-        ("T", "Sync subtitles panel"),
         ("Z / X", "Delay −/+ 0.1 s (Shift: 1 s)"),
         ("Ctrl+\u{E058} / \u{E06C}", "Show previous / next line now"),
-        ("G / H", "Mark subtitle shown / line spoken"),
     ]),
     ("Playlist", &[
         ("N / P", "Next / previous video"),

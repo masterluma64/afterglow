@@ -166,7 +166,6 @@ impl App {
         let prefs = self.current_path().and_then(|p| self.store.tracks(p)).cloned().unwrap_or_default();
         mpv.set("sub-delay", &prefs.sub_delay.to_string());
         mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
-        self.line_marks = [None, None];
         // Subtitle files load in the background when sent without waiting, so
         // the saved tracks are selected once they have all been added.
         let files: Vec<PathBuf> = prefs.sub_files.iter().filter(|f| f.is_file()).cloned().collect();

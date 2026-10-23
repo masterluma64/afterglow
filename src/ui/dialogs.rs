@@ -1,4 +1,4 @@
-//! Settings, the shortcut overview, confirmations and the subtitle sync panel.
+//! Settings, stats, the shortcut overview and confirmations.
 
 use crate::*;
 
@@ -32,113 +32,6 @@ pub(crate) fn error_color(dark: bool) -> Color32 {
 pub(crate) const DANGER_FILL: Color32 = Color32::from_rgb(178, 62, 54);
 
 impl App {
-    /// Tools for subtitles that are out of sync, in a panel over the video.
-    pub(crate) fn sync_panel(&mut self, ctx: &egui::Context, video: egui::Rect) {
-        let mut open = self.sync_panel;
-        let Playback { sub_delay, sub_speed, .. } = self.playback;
-        let subtitles_on = self.tracks.iter().any(|t| t.kind == "sub" && t.selected);
-        egui::Window::new("Sync subtitles")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_pos(video.left_bottom() + vec2(16.0, -16.0))
-            .pivot(egui::Align2::LEFT_BOTTOM)
-            .show(ctx, |ui| {
-                ui.set_width(360.0);
-                // Roomier buttons, like the menus.
-                ui.spacing_mut().button_padding = vec2(12.0, 6.0);
-                let hint = |ui: &mut egui::Ui, text: &str| ui.label(RichText::new(text).weak());
-                if !subtitles_on {
-                    let warning = format!("{}  Subtitles are off: turn them on first (S).", icons::WARNING);
-                    ui.label(RichText::new(warning).color(ui.visuals().warn_fg_color));
-                    ui.add_space(6.0);
-                }
-
-                card(ui, "1  ·  Shift all subtitles", |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{sub_delay:+.1} s")).bold());
-                        let state = match sub_delay {
-                            d if d > 0.0 => "shown later than in the file",
-                            d if d < 0.0 => "shown earlier than in the file",
-                            _ => "as timed in the file",
-                        };
-                        ui.weak(state);
-                        if sub_delay != 0.0 {
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                if ui.button(format!("{}  Reset", icons::RESET)).on_hover_text("Back to the file's timing").clicked() {
-                                    self.actions.push(Action::SetSubDelay(0.0));
-                                }
-                            });
-                        }
-                    });
-                    ui.add_space(2.0);
-                    ui.horizontal(|ui| {
-                        for (by, label, tip) in [
-                            (-1.0, "−1 s", "Shift+Z"),
-                            (-0.1, "−0.1 s", "Z"),
-                            (0.1, "+0.1 s", "X"),
-                            (1.0, "+1 s", "Shift+X"),
-                        ] {
-                            if ui.button(label).on_hover_text(tip).clicked() {
-                                self.actions.push(Action::AdjustSubDelay(by));
-                            }
-                        }
-                    });
-                    hint(ui, "Subtitles too late? Press −. Too early? Press +.");
-                });
-                ui.add_space(6.0);
-
-                card(ui, "2  ·  Or match the line you just heard", |ui| {
-                    ui.horizontal(|ui| {
-                        let previous = format!("{}  Previous line", icons::ARROW_LEFT);
-                        if ui.button(previous).on_hover_text("Its subtitle already went by (Ctrl+\u{E058})").clicked() {
-                            self.actions.push(Action::SubStep(-1));
-                        }
-                        let next = format!("Next line  {}", icons::ARROW_RIGHT);
-                        if ui.button(next).on_hover_text("Its subtitle hasn't shown yet (Ctrl+\u{E06C})").clicked() {
-                            self.actions.push(Action::SubStep(1));
-                        }
-                    });
-                    hint(ui, "Shifts the subtitles so that line shows right now.");
-                });
-                ui.add_space(6.0);
-
-                card(ui, "3  ·  Or measure one line", |ui| {
-                    let [appeared, spoken] = self.line_marks;
-                    let mark = |marked: Option<f64>, label: &str, key: &str| match marked {
-                        Some(at) => format!("{}  {label} at {}", icons::CHECK, format_time(at)),
-                        None => format!("{label}  ({key})"),
-                    };
-                    ui.horizontal(|ui| {
-                        if ui.button(mark(appeared, "Subtitle appears", "G")).clicked() {
-                            self.actions.push(Action::MarkLine { spoken: false });
-                        }
-                        if ui.button(mark(spoken, "Line is spoken", "H")).clicked() {
-                            self.actions.push(Action::MarkLine { spoken: true });
-                        }
-                    });
-                    hint(ui, "Press each as it happens, in either order; the subtitles then shift by the difference.");
-                });
-                ui.add_space(6.0);
-
-                card(ui, "Drifting further off over time?", |ui| {
-                    ui.horizontal(|ui| {
-                        for (speed, label) in SUB_TIMINGS {
-                            let selected = (sub_speed - speed).abs() < 1e-6;
-                            let text = label[..1].to_uppercase() + &label[1..];
-                            if ui.selectable_label(selected, text).clicked() && !selected {
-                                self.actions.push(Action::SetSubSpeed(speed));
-                            }
-                        }
-                    });
-                    hint(ui, "For subtitles made for a video with another frame rate.");
-                });
-                ui.add_space(6.0);
-                hint(ui, "Changes are remembered for this video.");
-            });
-        self.sync_panel = open;
-    }
-
     /// Applies the settings to the UI and to mpv.
     pub(crate) fn apply_settings(&self, ctx: &egui::Context) {
         let settings = &self.store.settings;
