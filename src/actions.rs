@@ -52,6 +52,9 @@ pub(crate) enum Action {
     RemoveSelected,
     ClearSelection,
     ResetAllProgress,
+    /// Asks before clearing all stats.
+    ConfirmClearStats,
+    ClearStats,
     SetAutoplayNext(bool),
     CancelUpNext,
     TogglePause,
@@ -112,7 +115,7 @@ impl App {
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.settings_open || self.stats_open || self.pending_drop.is_some() || self.palette.is_some() {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.confirm_clear_stats || self.settings_open || self.stats_open || self.pending_drop.is_some() || self.palette.is_some() {
             return;
         }
         if self.show_help {
@@ -275,6 +278,12 @@ impl App {
                 self.palette = Some(Palette::default());
             }
             Action::ConfirmResetProgress => self.confirm_reset = true,
+            Action::ConfirmClearStats => self.confirm_clear_stats = true,
+            Action::ClearStats => {
+                self.store.clear_stats();
+                self.store.save();
+                self.notify("Stats cleared");
+            }
             Action::SetSettings(settings) => {
                 self.store.set_settings(settings);
                 self.apply_settings(ctx);

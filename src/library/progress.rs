@@ -442,6 +442,13 @@ impl Store {
 
     /// Forgets the position and watched state of every video, returning how
     /// many had any. Known lengths are kept, since they describe the files.
+    /// Clears every stat. The estimate from saved progress isn't made again,
+    /// so they start from nothing.
+    pub fn clear_stats(&mut self) {
+        self.stats = Stats { seeded: true, ..Stats::default() };
+        self.dirty = true;
+    }
+
     pub fn reset_progress(&mut self) -> usize {
         let mut reset = 0;
         for entry in self.entries.values_mut() {
@@ -732,6 +739,12 @@ mod tests {
         store.forget(&[key(a), key(b)]);
         assert_eq!(store.stats.total, Tally { seconds: 1150.0, finished: 1 }, "forgetting deleted videos keeps their stats");
         assert_eq!(store.stats.series["Kirby"].seconds, 1150.0);
+
+        store.update_position(a, 600.0, 1200.0);
+        store.clear_stats();
+        store.seed_stats();
+        assert_eq!(store.stats.total, Tally::default(), "cleared stats aren't estimated again from saved progress");
+        assert!(store.stats.series.is_empty() && store.stats.days.is_empty());
     }
 
     #[test]

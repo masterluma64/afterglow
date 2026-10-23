@@ -235,6 +235,8 @@ struct App {
     summary: Option<(Instant, f64, f64, usize)>,
     /// Whether the "reset all progress" confirmation is open.
     confirm_reset: bool,
+    /// Whether the "clear stats" confirmation is open.
+    confirm_clear_stats: bool,
     /// The startup search for remembered videos whose files are gone.
     gone_scan: Option<Receiver<Vec<String>>>,
     /// Whether the keyboard shortcut overview is open.
@@ -335,6 +337,7 @@ impl App {
             names: Vec::new(),
             summary: None,
             confirm_reset: false,
+            confirm_clear_stats: false,
             gone_scan: None,
             show_help: false,
             settings_open: false,
@@ -570,6 +573,10 @@ impl eframe::App for App {
         }
         if self.stats_open {
             self.stats_dialog(&ctx);
+        }
+        // After the stats, so it shows on top of them.
+        if self.confirm_clear_stats {
+            self.clear_stats_dialog(&ctx);
         }
         if self.palette.is_some() {
             self.command_palette(&ctx);

@@ -205,6 +205,7 @@ impl App {
             self.command(Action::OpenSettings, "preferences options"),
             self.command(Action::ShowHelp, "help keys"),
             self.command(Action::ConfirmResetProgress, "forget clear watched"),
+            self.command(Action::ConfirmClearStats, "statistics reset forget history"),
         ]);
         list.retain(|c| c.enabled);
         // Every video in the playlist, to play by name.

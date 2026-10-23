@@ -347,10 +347,41 @@ impl App {
             }
             ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
                 close = ui.button("Close").clicked();
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| self.menu_item(ui, Action::ConfirmClearStats));
             });
         });
-        if close || modal.should_close() {
+        // While the confirmation to clear them is open on top, clicks and Esc
+        // are meant for that.
+        if close || (modal.should_close() && !self.confirm_clear_stats) {
             self.stats_open = false;
+        }
+    }
+
+    /// Confirmation before clearing all stats.
+    pub(crate) fn clear_stats_dialog(&mut self, ctx: &egui::Context) {
+        let modal = egui::Modal::new(egui::Id::unique("clear-stats")).show(ctx, |ui| {
+            ui.set_width(400.0);
+            let title = format!("{}  Clear all stats?", icons::WARNING);
+            ui.label(RichText::new(title).bold().color(error_color(ui.visuals().dark_mode)));
+            ui.add_space(8.0);
+            ui.label("This forgets all time watched, videos finished, streaks and series, and starts counting again from nothing.");
+            ui.add_space(4.0);
+            ui.label(RichText::new("Your videos' progress stays. This can't be undone.").weak());
+            ui.add_space(14.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let clear = egui::Button::new(RichText::new("Clear stats").color(Color32::WHITE)).fill(DANGER_FILL);
+                if ui.add(clear).clicked() {
+                    self.actions.push(Action::ClearStats);
+                    self.confirm_clear_stats = false;
+                }
+                if ui.button("Cancel").clicked() {
+                    self.confirm_clear_stats = false;
+                }
+            });
+        });
+        // Esc or a click outside cancels.
+        if modal.should_close() {
+            self.confirm_clear_stats = false;
         }
     }
 }

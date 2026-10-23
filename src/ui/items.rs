@@ -136,6 +136,10 @@ impl App {
             Action::OpenSettings => item(icons::GEAR, "Settings…", "E"),
             Action::ShowHelp => item(icons::KEYBOARD, "Keyboard shortcuts…", "?"),
             Action::ConfirmResetProgress => item(icons::BROOM, "Reset all progress…", ""),
+            Action::ConfirmClearStats => {
+                let total = self.store.stats.total;
+                item(icons::TRASH, "Clear stats…", "").enabled(total.seconds >= 1.0 || total.finished > 0)
+            }
             _ => item(icons::COMMAND, "", ""),
         }
     }
