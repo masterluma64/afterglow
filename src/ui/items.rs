@@ -103,14 +103,10 @@ impl App {
                 let key = if is_current(path) && entry.watched { "W" } else { "" };
                 item(icons::EYE_SLASH, "Mark as unwatched", key).enabled(entry.watched || entry.position > 0.0)
             }
-            Action::SetWatchedMany(_, true) => item(icons::CHECK, "Mark as watched", ""),
-            Action::SetWatchedMany(_, false) => item(icons::EYE_SLASH, "Mark as unwatched", ""),
             Action::MarkWatchedBefore(index) => item(icons::CHECKS, "Mark all above as watched", "").enabled(*index > 0),
             Action::PlayOver(_) => item(icons::REPEAT, "Play from start", ""),
             Action::Play(index) => item(icons::FILE_VIDEO, self.playlist.get(*index).map(|p| self.video_name(p)).unwrap_or_default(), ""),
             Action::Remove(_) => item(icons::X, "Remove from playlist", ""),
-            Action::RemoveMany(_) | Action::RemoveSelected => item(icons::X, "Remove from playlist", "Delete").enabled(!self.selected.is_empty() || matches!(action, Action::RemoveMany(_))),
-            Action::ClearSelection => item(icons::SELECTION_SLASH, "Clear selection", "Esc").enabled(!self.selected.is_empty()),
             Action::ClearPlaylist => item(icons::TRASH, "Clear playlist", "").enabled(has_videos),
             Action::OpenFolder => item(icons::FOLDER_PLUS, "Open folder…", "O"),
             Action::OpenVideo => item(icons::FILM_SLATE, "Open video…", "Shift+O"),

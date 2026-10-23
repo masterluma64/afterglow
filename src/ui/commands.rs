@@ -218,8 +218,6 @@ impl App {
             self.command(Action::RefreshFolder, "rescan reload"),
             self.command(Action::SetIncludeSubfolders(!self.store.include_subfolders), "folders scan recursive"),
             self.command(Action::FocusSearch, "find filter video"),
-            self.command(Action::RemoveSelected, "selection delete"),
-            self.command(Action::ClearSelection, "deselect"),
             self.command(Action::ClearPlaylist, "empty remove all"),
             self.command(Action::SetAutoplayNext(!self.autoplay_next()), "autoplay up next countdown"),
             self.command(Action::ToggleFullscreen, "full screen window maximize"),
