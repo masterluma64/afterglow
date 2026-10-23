@@ -155,15 +155,70 @@ impl App {
                     });
                 });
                 ui.add_space(8.0);
+                card(ui, "Data", |ui| {
+                    grid("settings-data").show(ui, |ui| {
+                        let folder = self.store.folder();
+                        let fixed = progress::data_dir_fixed();
+                        let portable = folder.is_some() && folder == progress::data_dir_for(true);
+                        ui.label("Save progress");
+                        ui.horizontal(|ui| {
+                            for (choice, label) in [(true, "Next to afterglow.exe"), (false, "In AppData")] {
+                                let option = ui.add_enabled(!fixed, egui::Button::selectable(!fixed && portable == choice, label));
+                                if option.on_disabled_hover_text("Chosen with AFTERGLOW_DATA_DIR").clicked() && portable != choice {
+                                    self.actions.push(Action::SetPortable(choice));
+                                }
+                            }
+                        });
+                        ui.end_row();
+                        if let Some(folder) = folder {
+                            ui.label("");
+                            let open = ui.add_enabled(folder.is_dir(), egui::Button::new("Open folder"));
+                            if open.on_hover_text(folder.display().to_string()).clicked() {
+                                let _ = std::process::Command::new("explorer").arg(&folder).spawn();
+                            }
+                            ui.end_row();
+                        }
+                    });
+                });
+                ui.add_space(8.0);
                 // Changes Windows rather than the settings, so it takes effect right away.
                 card(ui, "Windows", |ui| {
                     grid("settings-windows").show(ui, |ui| {
+                        use platform::Part;
+                        let integration = &self.integration;
+                        let actions = &mut self.actions;
                         ui.label("Desktop");
-                        let mut shortcut = self.desktop_shortcut;
-                        if ui.checkbox(&mut shortcut, "Shortcut to Afterglow").changed() {
-                            self.actions.push(Action::SetDesktopShortcut(shortcut));
-                        }
+                        integration_toggle(ui, actions, Part::DesktopShortcut, integration.shortcut.as_deref(), "Shortcut to Afterglow");
                         ui.end_row();
+                        ui.label("Folders");
+                        integration_toggle(ui, actions, Part::FolderMenu, integration.folder_menu.as_deref(), "\"Open in Afterglow\" in right-click menu");
+                        ui.end_row();
+                        ui.label("Video files");
+                        integration_toggle(ui, actions, Part::OpenWith, integration.open_with.as_deref(), "Listed in \"Open with\"");
+                        ui.end_row();
+                        ui.label("");
+                        ui.horizontal(|ui| {
+                            let mut on = integration.default;
+                            if ui.checkbox(&mut on, "Associate with video files")
+                                .on_hover_text("Registers Afterglow as a video player, and opens videos with it unless you picked another app")
+                                .changed()
+                            {
+                                actions.push(Action::SetIntegration(Part::Default, on));
+                            }
+                            let button = ui.add_enabled(on, egui::Button::new("Default apps…"));
+                            if button.on_hover_text("Choose Afterglow for all videos in Windows' settings").clicked() {
+                                actions.push(Action::OpenDefaultApps);
+                            }
+                        });
+                        ui.end_row();
+                        if integration.default {
+                            ui.label("");
+                            ui.weak(match &integration.elsewhere[..] {
+                                [] => "Windows opens all videos with Afterglow".to_string(),
+                                types => format!("Windows opens {} with another app", type_list(types)),
+                            });
+                            ui.end_row();
+                        }
                     });
                 });
             });
@@ -530,4 +585,31 @@ fn choice_card(ui: &mut egui::Ui, width: f32, icon: &str, title: &str, detail: &
         ui.painter().rect_stroke(inner.response.rect, 8.0, (1.5, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A checkbox for a part of Afterglow in Windows. Another copy of Afterglow
+/// may have set it up; then it offers to switch it to this one.
+fn integration_toggle(ui: &mut egui::Ui, actions: &mut Vec<Action>, part: platform::Part, target: Option<&Path>, label: &str) {
+    ui.horizontal(|ui| {
+        let mut on = target.is_some();
+        if ui.checkbox(&mut on, label).changed() {
+            actions.push(Action::SetIntegration(part, on));
+        }
+        if let Some(exe) = target
+            && !platform::is_this_exe(exe)
+            && ui.button("Use this copy").on_hover_text(format!("It opens {}", exe.display())).clicked()
+        {
+            actions.push(Action::SetIntegration(part, true));
+        }
+    });
+}
+
+/// File types for a sentence: ".mkv, .mp4 and .avi", or the first few and a count.
+fn type_list(types: &[&str]) -> String {
+    let dotted: Vec<String> = types.iter().map(|t| format!(".{t}")).collect();
+    match &dotted[..] {
+        [one] => one.clone(),
+        [first @ .., last] if dotted.len() <= 4 => format!("{} and {last}", first.join(", ")),
+        _ => format!("{} and {} more", dotted[..3].join(", "), dotted.len() - 3),
+    }
 }

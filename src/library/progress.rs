@@ -265,20 +265,44 @@ fn key(path: &Path) -> String {
 }
 
 /// Where the app keeps its data: a `data` folder next to the executable, so
-/// the app is portable (or `AFTERGLOW_DATA_DIR`, e.g. for testing).
+/// the app is portable, or Afterglow's folder in the local AppData. Whichever
+/// holds the progress file wins; the first start is portable.
+/// `AFTERGLOW_DATA_DIR` overrides both, e.g. for testing.
 pub fn data_dir() -> Option<PathBuf> {
     static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
             return Some(PathBuf::from(dir));
         }
-        Some(std::env::current_exe().ok()?.parent()?.join("data"))
+        let portable = data_dir_for(true);
+        let has_progress = |dir: &Option<PathBuf>| dir.as_ref().is_some_and(|dir| dir.join(FILE_NAME).is_file());
+        match data_dir_for(false) {
+            appdata if !has_progress(&portable) && has_progress(&appdata) => appdata,
+            _ => portable,
+        }
     })
     .clone()
 }
 
+/// The data folder when portable, or when not.
+pub fn data_dir_for(portable: bool) -> Option<PathBuf> {
+    if portable {
+        Some(std::env::current_exe().ok()?.parent()?.join("data"))
+    } else {
+        Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("afterglow"))
+    }
+}
+
+/// Whether the data folder is chosen with `AFTERGLOW_DATA_DIR`, so it can't
+/// be moved.
+pub fn data_dir_fixed() -> bool {
+    std::env::var_os("AFTERGLOW_DATA_DIR").is_some()
+}
+
+const FILE_NAME: &str = "progress.json";
+
 fn file_path() -> Option<PathBuf> {
-    Some(data_dir()?.join("progress.json"))
+    Some(data_dir()?.join(FILE_NAME))
 }
 
 impl Store {
@@ -358,6 +382,40 @@ impl Store {
         }
         let folder = saver.path.parent().unwrap_or(&saver.path).display();
         problem.map(|e| format!("Progress can't be saved in {folder} ({e}). Afterglow needs a folder it can write to."))
+    }
+
+    /// The folder progress is saved in.
+    pub fn folder(&self) -> Option<PathBuf> {
+        match &self.saver {
+            Some(saver) => saver.path.parent().map(Path::to_path_buf),
+            None => data_dir(),
+        }
+    }
+
+    /// Saves progress in `dir` from now on, and removes the progress file
+    /// from the folder it was in. One already in `dir` is kept as
+    /// `progress.bak.json`.
+    pub fn move_to(&mut self, dir: &Path) -> Result<(), String> {
+        if self.read_failed {
+            return Err("the progress file couldn't be read, so it stays where it is".into());
+        }
+        let old = self.folder().map(|folder| folder.join(FILE_NAME));
+        let new = dir.join(FILE_NAME);
+        if old.as_ref() == Some(&new) {
+            return Ok(());
+        }
+        let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+        if new.is_file() {
+            std::fs::rename(&new, dir.join("progress.bak.json")).map_err(|e| e.to_string())?;
+        }
+        write_atomically(&new, &bytes).map_err(|e| e.to_string())?;
+        // Replacing the saver waits for writes still on their way to the old file.
+        self.saver = Some(Saver::new(new));
+        self.dirty = false;
+        if let Some(old) = old {
+            let _ = std::fs::remove_file(old);
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -989,5 +1047,25 @@ mod tests {
     fn loads_files_saved_before_folder_settings() {
         let store: Store = serde_json::from_slice(br#"{"volume": 80.0, "playlist": []}"#).unwrap();
         assert!(store.folders.is_empty());
+    }
+
+    #[test]
+    fn moves_the_progress_file() {
+        let root = std::env::temp_dir().join(format!("afterglow-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (from, to) = (root.join("from"), root.join("to"));
+        let mut store = Store { volume: 42.0, saver: Some(Saver::new(from.join(FILE_NAME))), ..Store::default() };
+        store.dirty = true;
+        store.save();
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::write(to.join(FILE_NAME), b"older").unwrap();
+        store.move_to(&to).unwrap();
+        assert_eq!(store.folder().as_deref(), Some(to.as_path()));
+        assert!(!from.join(FILE_NAME).exists(), "gone from where it was");
+        assert_eq!(std::fs::read(to.join("progress.bak.json")).unwrap(), b"older");
+        let (moved, _) = Store::load_from(&to.join(FILE_NAME));
+        assert_eq!(moved.volume, 42.0);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

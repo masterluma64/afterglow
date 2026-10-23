@@ -27,6 +27,7 @@ fn unpack() -> Option<Result<PathBuf, String>> {
     let Some(dir) = crate::progress::data_dir() else {
         return Some(Err("there is no folder to unpack libmpv into".into()));
     };
+    tidy_other_data_dir(&dir);
     let name = format!("libmpv-{HASH}.dll");
     let path = dir.join(&name);
     if path.is_file() {
@@ -48,13 +49,33 @@ fn unpack() -> Option<Result<PathBuf, String>> {
     }
     // Earlier builds' copies are no longer needed (one still loaded by a
     // running afterglow can't be deleted, and stays until next time).
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let other = entry.file_name().to_string_lossy().into_owned();
-            if other != name && other != super::mpv::DLL_NAME && other.starts_with("libmpv-") && (other.ends_with(".dll") || other.ends_with(".dll.tmp")) {
-                let _ = std::fs::remove_file(entry.path());
-            }
+    remove_unpacked(&dir, Some(&name));
+    Some(Ok(path))
+}
+
+/// Removes the copies of libmpv in `dir`, except the one called `keep`.
+#[cfg(packed_mpv)]
+fn remove_unpacked(dir: &std::path::Path, keep: Option<&str>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let other = entry.file_name().to_string_lossy().into_owned();
+        if Some(other.as_str()) != keep && other != super::mpv::DLL_NAME && other.starts_with("libmpv-") && (other.ends_with(".dll") || other.ends_with(".dll.tmp")) {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
-    Some(Ok(path))
+}
+
+/// After the data folder moved (portable or not), the copy of libmpv left in
+/// the old one is removed, and the folder too if nothing else is in it.
+#[cfg(packed_mpv)]
+fn tidy_other_data_dir(dir: &std::path::Path) {
+    if crate::progress::data_dir_fixed() {
+        return;
+    }
+    for other in [true, false].into_iter().filter_map(crate::progress::data_dir_for) {
+        if other != dir {
+            remove_unpacked(&other, None);
+            let _ = std::fs::remove_dir(&other);
+        }
+    }
 }

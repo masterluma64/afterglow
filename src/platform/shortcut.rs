@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
-    IPersistFile,
+    IPersistFile, STGM_READ,
 };
 use windows::Win32::UI::Shell::{FOLDERID_Desktop, IShellLinkW, KF_FLAG_DEFAULT, SHGetKnownFolderPath, ShellLink};
 use windows::core::{HSTRING, Interface};
@@ -22,22 +22,43 @@ fn path() -> Option<PathBuf> {
     }
 }
 
-pub fn exists() -> bool {
-    path().is_some_and(|path| path.exists())
+/// The executable the desktop shortcut starts, if there is one.
+pub fn target() -> Option<PathBuf> {
+    let link = path()?;
+    if !link.exists() {
+        return None;
+    }
+    // A shortcut that can't be read still counts, so it can be replaced.
+    Some(with_com(|| unsafe { load(&link) }).unwrap_or_default())
 }
 
 /// Puts a shortcut to this executable on the desktop, replacing an older one.
 pub fn create() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let link = path().ok_or("The desktop folder wasn't found")?;
+    with_com(|| unsafe { save(&exe, &link) }).map_err(|e| e.message())
+}
+
+fn with_com<T>(f: impl FnOnce() -> T) -> T {
     unsafe {
         // The UI thread has COM already; this only balances the count.
         let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
-        let saved = save(&exe, &link);
+        let result = f();
         if com {
             CoUninitialize();
         }
-        saved.map_err(|e| e.message())
+        result
+    }
+}
+
+unsafe fn load(link: &Path) -> windows::core::Result<PathBuf> {
+    unsafe {
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+        shell_link.cast::<IPersistFile>()?.Load(&HSTRING::from(link), STGM_READ)?;
+        let mut buffer = [0u16; 1024];
+        shell_link.GetPath(&mut buffer, std::ptr::null_mut(), 0)?;
+        let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+        Ok(PathBuf::from(OsString::from_wide(&buffer[..len])))
     }
 }
 
@@ -70,13 +91,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let link = dir.join("test.lnk");
         let exe = std::env::current_exe().unwrap();
-        unsafe {
-            let com = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
-            save(&exe, &link).unwrap();
-            if com {
-                CoUninitialize();
-            }
-        }
+        with_com(|| unsafe { save(&exe, &link) }).unwrap();
+        assert_eq!(with_com(|| unsafe { load(&link) }).unwrap(), exe);
         let bytes = std::fs::read(&link).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         // Every shell link starts with its header size, 0x4C.

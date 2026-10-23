@@ -7,7 +7,7 @@ mod player;
 mod ui;
 
 use library::{disk, playlist, progress, stats, watch};
-use platform::{clock, instance, media_keys, power, screen, shortcut};
+use platform::{clock, instance, media_keys, power, screen};
 use player::{dll_search, mpv, playback, thumbnails};
 use ui::{app_icon, commands, controls, dialogs, icons, items, video};
 use ui::icons::Bold;
@@ -243,8 +243,8 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
-    /// Whether Afterglow has a shortcut on the desktop, as of opening Settings.
-    desktop_shortcut: bool,
+    /// How Afterglow is set up in Windows, as of opening Settings.
+    integration: platform::Integration,
     /// The video whose folder settings are open.
     folder_dialog: Option<PathBuf>,
     /// The speed the playing video's folder set, if it set one.
@@ -259,8 +259,9 @@ struct App {
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
-    /// Files from later starts of Afterglow (see `instance`).
-    other_starts: Option<Receiver<Vec<PathBuf>>>,
+    /// Files from later starts of Afterglow (see `instance`): one pipe per
+    /// data folder it used since starting.
+    other_starts: Vec<Receiver<Vec<PathBuf>>>,
 }
 
 impl App {
@@ -347,7 +348,7 @@ impl App {
             gone_scan: None,
             show_help: false,
             settings_open: false,
-            desktop_shortcut: false,
+            integration: platform::Integration::default(),
             folder_dialog: None,
             folder_speed: None,
             stats_open: false,
@@ -356,7 +357,7 @@ impl App {
             drop_remember: false,
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
-            other_starts,
+            other_starts: other_starts.into_iter().collect(),
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
@@ -419,8 +420,8 @@ impl App {
     /// Opens the files later starts of Afterglow were given (such as a video
     /// opened from Explorer), and comes to the front for them.
     fn receive_other_starts(&mut self, ctx: &egui::Context) {
-        let Some(starts) = &self.other_starts else { return };
-        for paths in starts.try_iter().collect::<Vec<_>>() {
+        let starts: Vec<_> = self.other_starts.iter().flat_map(Receiver::try_iter).collect();
+        for paths in starts {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             if !paths.is_empty() {
