@@ -20,9 +20,9 @@ liblzma = "0.4.9"
 sha2 = "0.11.1"
 
 [profile.release]
-# Smaller and a bit faster.
-lto = true
-codegen-units = 1
+# Thin LTO over the default 16 code units: a release rebuild takes about a
+# quarter of the time full LTO on one unit did, for a slightly larger exe.
+lto = "thin"
 
 [profile.release.build-override]
 # The build script packs libmpv with xz, which is slow unoptimized.

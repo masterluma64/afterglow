@@ -115,7 +115,7 @@ cargo run --release
 cargo run --release -- "D:\Shows\Foo"    # play a folder
 ```
 
-The release build, `target\release\afterglow.exe` (just under 50 MB), runs on its own: on
+The release build, `target\release\afterglow.exe` (about 45 MB, 36 MB in a 7-Zip archive), runs on its own: on
 the first start it unpacks libmpv into its `data` folder (about 120 MB, taking a second or
 two), and uses that from then on. A `libmpv-2.dll` next to the exe is used instead if there
 is one. Put the exe in a folder the user can write to, since the `data` folder is created
