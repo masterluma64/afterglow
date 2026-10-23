@@ -91,7 +91,7 @@ impl App {
             if let Some((index, path)) = self.current.zip(self.current_path().map(Path::to_path_buf)) {
                 ui.separator();
                 let entry = self.store.get(&path);
-                if item(ui, icons::PLAY, "Play from the start", "") {
+                if item(ui, icons::PLAY, "Play from start", "") {
                     // Unwatched again, as when picked from the playlist this way.
                     self.actions.push(Action::SetWatched(path.clone(), false));
                     self.actions.push(Action::SetPaused(false));

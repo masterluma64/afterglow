@@ -54,7 +54,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Per-video choices**: the audio track, subtitle track, subtitle delay and subtitle files you
   load are remembered for each video and restored when you open it again.
 - **Right-click the video** for a menu with play/pause, next and previous video, audio and
-  subtitle tracks, speed, chapters, the playing video's playlist choices (play from the start,
+  subtitle tracks, speed, chapters, the playing video's playlist choices (play from start,
   mark it or everything above it watched, mark it unwatched, remove it), fullscreen, the
   playlist and Settings. Each item shows its key, and it also works in fullscreen while the controls are
   hidden.
