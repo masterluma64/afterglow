@@ -4,17 +4,19 @@ use crate::*;
 
 /// A playlist entry with its watch progress. `selection` is every selected
 /// video, in playlist order, when this one is among them.
+/// What is picked from its right-click menu is added to `picked`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn playlist_row(
     ui: &mut egui::Ui,
-    store: &Store,
-    actions: &mut Vec<Action>,
+    app: &App,
+    picked: &mut Vec<Action>,
     index: usize,
     path: &Path,
     name: &str,
     playing: bool,
     selection: Option<&[PathBuf]>,
 ) -> egui::Response {
+    let store = &app.store;
     let entry = store.get(path);
     // Painted under the row once its size is known.
     let background = ui.painter().add(egui::Shape::Noop);
@@ -45,60 +47,26 @@ pub(crate) fn playlist_row(
     let resp = resp.on_hover_text(format!("{}\n{}", path.display(), hover_text(&entry)));
     ui::context_menu(&resp, |ui| {
         if let Some(selection) = selection.filter(|s| s.len() > 1) {
-            let videos = format!("{} videos", selection.len());
-            ui.label(RichText::new(format!("{videos} selected")).weak());
-            if ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
-                actions.push(Action::SetWatchedMany(selection.to_vec(), true));
-            }
-            if ui.button(format!("{}  Mark as unwatched", icons::RESET)).on_hover_text("Reset their progress to the start").clicked() {
-                actions.push(Action::SetWatchedMany(selection.to_vec(), false));
-            }
+            ui.label(RichText::new(format!("{} videos selected", selection.len())).bold());
+            items::offer(ui, app, Action::SetWatchedMany(selection.to_vec(), true), picked);
+            items::offer(ui, app, Action::SetWatchedMany(selection.to_vec(), false), picked);
             ui.separator();
-            let remove = egui::Button::new(format!("{}  Remove from playlist", icons::X)).shortcut_text("Delete");
-            if ui.add(remove).on_hover_text("The files are not touched").clicked() {
-                actions.push(Action::RemoveMany(selection.to_vec()));
-            }
+            items::offer(ui, app, Action::RemoveMany(selection.to_vec()), picked).on_hover_text("The files are not touched");
             ui.separator();
-            if ui.add(egui::Button::new("Clear the selection").shortcut_text("Esc")).clicked() {
-                actions.push(Action::ClearSelection);
-            }
+            items::offer(ui, app, Action::ClearSelection, picked);
             return;
         }
-        if ui.button(format!("{}  Play from start", icons::PLAY)).clicked() {
-            actions.push(Action::SetWatched(path.to_path_buf(), false));
-            actions.push(Action::PlayFromStart(index));
-        }
-        if !entry.watched && ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
-            actions.push(Action::SetWatched(path.to_path_buf(), true));
-        }
-        if index > 0 && ui.button(format!("{}  Mark all above as watched", icons::CHECKS)).clicked() {
-            actions.push(Action::MarkWatchedBefore(index));
-        }
-        // Also offered for half-watched videos: resets progress without playing.
-        if entry.watched || entry.position > 0.0 {
-            let reset = ui.button(format!("{}  Mark as unwatched", icons::RESET)).on_hover_text("Reset its progress to the start");
-            if reset.clicked() {
-                actions.push(Action::SetWatched(path.to_path_buf(), false));
-            }
-        }
+        items::entry_items(ui, app, index, path, picked);
         ui.separator();
-        if ui.button(format!("{}  Remove from playlist", icons::X)).on_hover_text("The file is not touched").clicked() {
-            actions.push(Action::Remove(index));
-        }
-        ui.separator();
-        subfolder_option(ui, store.include_subfolders, actions);
+        subfolder_option(ui, app, picked);
     });
     resp
 }
 
 /// The "Include subfolders" switch in the playlist's right-click menus.
-pub(crate) fn subfolder_option(ui: &mut egui::Ui, include: bool, actions: &mut Vec<Action>) {
-    let mut include = include;
+pub(crate) fn subfolder_option(ui: &mut egui::Ui, app: &App, picked: &mut Vec<Action>) {
     let tip = "Also play videos in subfolders when opening a folder (rescans the opened folder now)";
-    if ui.checkbox(&mut include, "Include subfolders").on_hover_text(tip).changed() {
-        actions.push(Action::SetIncludeSubfolders(include));
-        ui.close();
-    }
+    items::offer(ui, app, Action::SetIncludeSubfolders(!app.store.include_subfolders), picked).on_hover_text(tip);
 }
 
 pub(crate) fn hover_text(entry: &progress::Entry) -> String {
@@ -195,8 +163,20 @@ impl App {
         let background = ui.interact(ui.max_rect(), egui::Id::unique("playlist-area"), Sense::click());
         // The same scope docked or slid out, so the list keeps its scroll position.
         ui.scope_builder(egui::UiBuilder::new().scope_id(egui::Id::unique("playlist")), |ui| self.sidebar_contents(ui));
-        let include = self.store.include_subfolders;
-        ui::context_menu(&background, |ui| subfolder_option(ui, include, &mut self.actions));
+        // The playlist's own actions, matching the buttons in its header.
+        ui::context_menu(&background, |ui| {
+            self.menu_item(ui, Action::OpenFolder);
+            self.menu_item(ui, Action::OpenVideos);
+            ui.separator();
+            self.menu_item(ui, Action::RefreshFolder);
+            self.menu_item(ui, Action::FocusSearch);
+            self.menu_item(ui, Action::ClearPlaylist);
+            ui.separator();
+            let mut picked = Vec::new();
+            subfolder_option(ui, self, &mut picked);
+            self.actions.append(&mut picked);
+            self.menu_item(ui, Action::TogglePin);
+        });
     }
 
     pub(crate) fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
@@ -219,7 +199,7 @@ impl App {
                 }
                 if count > 0 {
                     let clear = egui::Button::new(RichText::new(icons::TRASH).size(14.0)).frame_when_inactive(false);
-                    if ui.add(clear).on_hover_text("Clear the playlist (files are not touched)").clicked() {
+                    if ui.add(clear).on_hover_text("Clear playlist (files are not touched)").clicked() {
                         self.actions.push(Action::ClearPlaylist);
                     }
                 }
@@ -268,7 +248,9 @@ impl App {
                 let path = &self.playlist[index];
                 let name = &self.names[index].0;
                 let selected = self.selected.contains(path).then_some(selection.as_slice());
-                let resp = playlist_row(ui, &self.store, &mut self.actions, index, path, name, self.current == Some(index), selected);
+                let mut chosen = Vec::new();
+                let resp = playlist_row(ui, self, &mut chosen, index, path, name, self.current == Some(index), selected);
+                self.actions.append(&mut chosen);
                 if resp.clicked() {
                     let modifiers = ui.input(|i| i.modifiers);
                     self.click_row(&visible, index, modifiers);
@@ -369,7 +351,7 @@ impl App {
             let edit = egui::TextEdit::singleline(&mut self.search)
                 .margin(TEXT_MARGIN)
                 .id(id)
-                .hint_text(format!("{}  Search the playlist (/)", icons::SEARCH))
+                .hint_text(format!("{}  Search playlist (/)", icons::SEARCH))
                 .desired_width(width);
             let resp = ui.add(edit);
             if resp.changed() {

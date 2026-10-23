@@ -1,4 +1,5 @@
-//! The right-click menu on the video and the command palette (Ctrl+K).
+//! The right-click menu on the video and the command palette (Ctrl+K). Both
+//! show actions as `App::item` describes them (see `items.rs`).
 
 use std::borrow::Cow;
 
@@ -14,20 +15,22 @@ pub(crate) struct Palette {
 /// An entry in the command palette: a command, or a playlist video to play.
 pub(crate) struct Command {
     pub(crate) label: String,
-    /// Its key (or a video's length), shown beside it.
+    /// Its key, "On" / "Off" for a switch, or a video's length, shown beside it.
     pub(crate) key: Cow<'static, str>,
     /// Other words it can be found by.
     pub(crate) keywords: &'static str,
     pub(crate) action: Action,
     /// Videos are only listed once something is typed, after the commands.
     pub(crate) video: bool,
-    /// Shown in front of the label; set from the action (see `App::command_icon`)
-    /// unless given.
     pub(crate) icon: &'static str,
+    /// Commands that can't be done right now are left out of the palette.
+    pub(crate) enabled: bool,
 }
 
-pub(crate) fn command(label: impl Into<String>, key: &'static str, keywords: &'static str, action: Action) -> Command {
-    Command { label: label.into(), key: key.into(), keywords, action, video: false, icon: "" }
+impl Command {
+    fn key(self, key: &'static str) -> Self {
+        Self { key: key.into(), ..self }
+    }
 }
 
 /// Whether every word typed into the command palette appears in a command's
@@ -53,242 +56,164 @@ pub(crate) fn command_rank(query: &str, label: &str) -> u8 {
 
 impl App {
     /// The right-click menu on the video: what the controls and keys do,
-    /// gathered in one place (also in fullscreen, where the controls hide),
-    /// with each item's key beside it.
+    /// gathered in one place (also in fullscreen, where the controls hide).
+    /// Its groups come in the same order as in the other menus: playback;
+    /// tracks, speed and chapters; the playing video; opening videos; view;
+    /// and the app.
     pub(crate) fn video_menu(&mut self, ui: &mut egui::Ui) {
-        let item = |ui: &mut egui::Ui, icon: &str, text: &str, key: &str| {
-            ui.add(egui::Button::new(format!("{icon}  {text}")).shortcut_text(RichText::new(key).weak())).clicked()
-        };
-        if self.loaded {
-            let paused = self.playback.paused;
-            let (icon, text) = if paused { (icons::PLAY, "Play") } else { (icons::PAUSE, "Pause") };
-            if item(ui, icon, text, "Space") {
-                self.actions.push(Action::TogglePause);
-            }
-            if self.current.is_some_and(|i| i + 1 < self.playlist.len()) && item(ui, icons::SKIP_FORWARD, "Next video", "N") {
-                self.actions.push(Action::Next);
-            }
-            if self.current.is_some_and(|i| i > 0) && item(ui, icons::SKIP_BACK, "Previous video", "P") {
-                self.actions.push(Action::Prev);
-            }
-            ui.separator();
+        self.menu_item(ui, Action::TogglePause);
+        self.menu_item(ui, Action::Next);
+        self.menu_item(ui, Action::Prev);
+        ui.separator();
+        let loaded = self.loaded;
+        ui.add_enabled_ui(loaded, |ui| {
             ui.menu_button(format!("{}  Audio track", icons::WAVEFORM), |ui| self.track_items(ui, "audio"));
             ui.menu_button(format!("{}  Subtitles", icons::SUBTITLES), |ui| self.track_items(ui, "sub"));
             ui.menu_button(format!("{}  Speed  {}", icons::GAUGE, format_speed(self.playback.speed)), |ui| self.speed_items(ui));
-            if !self.chapters.is_empty() {
-                ui.menu_button(format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
-                    let now = chapter_at(&self.chapters, self.playback.position);
-                    for (i, chapter) in self.chapters.iter().enumerate() {
-                        let label = egui::Button::selectable(now == Some(i), &chapter.title)
-                            .shortcut_text(ui::secondary(ui, now == Some(i), format_time(chapter.time)));
-                        if ui.add(label).clicked() {
-                            self.actions.push(Action::Seek { to: chapter.time, exact: true });
-                        }
-                    }
-                });
-            }
-            // The same choices as the playing video's playlist entry.
-            if let Some((index, path)) = self.current.zip(self.current_path().map(Path::to_path_buf)) {
-                ui.separator();
-                let entry = self.store.get(&path);
-                if item(ui, icons::PLAY, "Play from start", "") {
-                    // Unwatched again, and opened again at its start.
-                    self.actions.push(Action::SetWatched(path.clone(), false));
-                    self.actions.push(Action::PlayFromStart(index));
-                }
-                if !entry.watched && item(ui, icons::CHECK, "Mark as watched", "W") {
-                    self.actions.push(Action::SetWatched(path.clone(), true));
-                }
-                if index > 0 && item(ui, icons::CHECKS, "Mark all above as watched", "") {
-                    self.actions.push(Action::MarkWatchedBefore(index));
-                }
-                if entry.watched || entry.position > 0.0 {
-                    let key = if entry.watched { "W" } else { "" };
-                    if item(ui, icons::RESET, "Mark as unwatched", key) {
-                        self.actions.push(Action::SetWatched(path.clone(), false));
+        });
+        ui.add_enabled_ui(loaded && !self.chapters.is_empty(), |ui| {
+            ui.menu_button(format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
+                let now = chapter_at(&self.chapters, self.playback.position);
+                for (i, chapter) in self.chapters.iter().enumerate() {
+                    let label = egui::Button::selectable(now == Some(i), &chapter.title)
+                        .shortcut_text(ui::secondary(ui, now == Some(i), format_time(chapter.time)));
+                    if ui.add(label).clicked() {
+                        self.actions.push(Action::Seek { to: chapter.time, exact: true });
                     }
                 }
-                if item(ui, icons::X, "Remove from playlist", "") {
-                    self.actions.push(Action::Remove(index));
-                }
-            }
-        } else {
-            if item(ui, icons::FOLDER_PLUS, "Open folder…", "O") {
-                self.actions.push(Action::OpenFolder);
-            }
-            if item(ui, icons::FILE_VIDEO, "Add videos…", "I") {
-                self.actions.push(Action::OpenVideos);
-            }
-        }
+            });
+        });
         ui.separator();
-        let (icon, text) = if self.fullscreen { (icons::CORNERS_IN, "Exit fullscreen") } else { (icons::CORNERS_OUT, "Fullscreen") };
-        if item(ui, icon, text, "F") {
-            self.actions.push(Action::ToggleFullscreen);
+        // The playing video's choices, as in its playlist menu.
+        let current = self.current.zip(self.current_path().map(Path::to_path_buf));
+        let mut picked = Vec::new();
+        match &current {
+            Some((index, path)) => items::entry_items(ui, self, *index, path, &mut picked),
+            None => ui.add_enabled_ui(false, |ui| items::entry_items(ui, self, 0, Path::new(""), &mut Vec::new())).inner,
         }
-        let shown = if self.sidebar_docked() { self.show_sidebar } else { self.peek.is_some() };
-        if item(ui, icons::SIDEBAR, if shown { "Hide the playlist" } else { "Show the playlist" }, "B") {
-            self.actions.push(Action::ToggleSidebar);
-        }
+        self.actions.append(&mut picked);
         ui.separator();
-        if item(ui, icons::COMMAND, "Find a command…", "Ctrl+K") {
-            self.actions.push(Action::OpenPalette);
-        }
-        if item(ui, icons::KEYBOARD, "Keyboard shortcuts", "?") {
-            self.actions.push(Action::ShowHelp);
-        }
-        if item(ui, icons::GEAR, "Settings…", "E") {
-            self.actions.push(Action::OpenSettings);
-        }
+        self.menu_item(ui, Action::OpenFolder);
+        self.menu_item(ui, Action::OpenVideos);
+        ui.separator();
+        self.menu_item(ui, Action::ToggleFullscreen);
+        self.menu_item(ui, Action::ToggleSidebar);
+        ui.separator();
+        self.app_items(ui);
     }
 
-    /// Everything the command palette offers right now. Choices that don't
-    /// apply (subtitles with no video loaded, clearing an empty playlist) are
-    /// left out, and toggles are named for what they will do.
+    /// The last group of the video menu and the ⋯ menu.
+    pub(crate) fn app_items(&mut self, ui: &mut egui::Ui) {
+        self.menu_item(ui, Action::OpenPalette);
+        self.menu_item(ui, Action::ShowStats);
+        self.menu_item(ui, Action::OpenSettings);
+        self.menu_item(ui, Action::ShowHelp);
+    }
+
+    /// A palette entry for `action`, named and drawn as everywhere else.
+    fn command(&self, action: Action, keywords: &'static str) -> Command {
+        let item = self.item(&action);
+        let key = match item.on {
+            Some(on) => if on { "On" } else { "Off" }.into(),
+            None => item.key.into(),
+        };
+        Command { label: item.label, key, keywords, action, video: false, icon: item.icon, enabled: item.enabled }
+    }
+
+    /// A palette entry for one of several choices of an action (a track, a
+    /// chapter, a speed), which names it itself.
+    fn command_named(&self, label: impl Into<String>, action: Action, keywords: &'static str) -> Command {
+        Command { label: label.into(), ..self.command(action, keywords) }
+    }
+
+    /// Everything the command palette offers right now, in the menus' order.
+    /// Commands that can't be done right now are left out, and switches show
+    /// whether they are on.
     pub(crate) fn commands(&self) -> Vec<Command> {
-        let mut list = Vec::new();
-        let Playback { paused, muted, speed, sub_delay, .. } = self.playback;
-        if self.loaded {
-            list.push(command(if paused { "Play" } else { "Pause" }, "Space", "resume stop", Action::TogglePause));
-            if self.current.is_some_and(|i| i + 1 < self.playlist.len()) {
-                list.push(command("Next video", "N", "skip", Action::Next));
-            }
-            if self.current.is_some_and(|i| i > 0) {
-                list.push(command("Previous video", "P", "back", Action::Prev));
-            }
-            let start = command("Back to the start", "Home", "restart beginning rewind", Action::Seek { to: 0.0, exact: true });
-            list.push(Command { icon: icons::RESET, ..start });
-            if !self.chapters.is_empty() {
-                list.push(command("Next chapter", "PgDn", "skip", Action::Chapter { forward: true }));
-                list.push(command("Previous chapter", "PgUp", "back", Action::Chapter { forward: false }));
-                for chapter in &self.chapters {
-                    list.push(command(format!("Chapter: {}", chapter.title), "", "go to jump", Action::Seek { to: chapter.time, exact: true }));
-                }
-            }
-            list.push(command("Next frame", ".", "step", Action::FrameStep { forward: true }));
-            list.push(command("Previous frame", ",", "step back", Action::FrameStep { forward: false }));
-            list.push(command("Faster", "]", "speed up", Action::SetSpeed(step_speed(speed, true))));
-            list.push(command("Slower", "[", "speed down", Action::SetSpeed(step_speed(speed, false))));
-            if speed != 1.0 {
-                list.push(command("Normal speed", "Backspace", "reset 1×", Action::SetSpeed(1.0)));
-            }
-            for preset in SPEEDS {
-                list.push(command(format!("Speed: {}", format_speed(preset)), "", "playback rate", Action::SetSpeed(preset)));
-            }
-            list.push(command(if muted { "Unmute" } else { "Mute" }, "M", "sound volume quiet", Action::ToggleMute));
-            list.push(command("Next audio track", "A", "language cycle", Action::CycleAudio));
-            for t in self.tracks("audio") {
-                list.push(command(format!("Audio: {}", t.label), "", "track language", Action::SetTrack { kind: "audio", id: Some(t.id) }));
-            }
-            let label = if self.store.settings.level_volume { "Stop evening out the volume" } else { "Even out the volume (night mode)" };
-            list.push(command(label, "", "level normalize loudness night quiet loud dialogue compress", Action::ToggleLevelVolume));
-            list.push(command("Next subtitle track", "S", "captions cycle", Action::CycleSubtitles));
-            list.push(command("Subtitles: Off", "", "captions hide", Action::SetTrack { kind: "sub", id: None }));
-            for t in self.tracks("sub") {
-                list.push(command(format!("Subtitles: {}", t.label), "", "captions track language", Action::SetTrack { kind: "sub", id: Some(t.id) }));
-            }
-            list.push(command("Load subtitle file…", "", "captions srt ass", Action::LoadSubtitle));
-            list.push(command("Show subtitles earlier", "Z", "captions delay sync", Action::AdjustSubDelay(-0.1)));
-            list.push(command("Show subtitles later", "X", "captions delay sync", Action::AdjustSubDelay(0.1)));
-            if sub_delay != 0.0 {
-                list.push(command("Reset the subtitle delay", "", "captions sync", Action::SetSubDelay(0.0)));
-            }
-            list.push(command("Show the previous line now", "Ctrl+\u{E058}", "captions sync subtitle step heard", Action::SubStep(-1)));
-            list.push(command("Show the next line now", "Ctrl+\u{E06C}", "captions sync subtitle step heard", Action::SubStep(1)));
-            for (speed, label) in SUB_TIMINGS {
-                list.push(command(format!("Subtitle timing: {label}"), "", "captions sync drift frame rate fps speed", Action::SetSubSpeed(speed)));
-            }
-            let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
-            list.push(command(if watched { "Mark as unwatched" } else { "Mark as watched" }, "W", "seen progress", Action::ToggleWatched));
-        } else if self.current.is_none() && !self.playlist.is_empty() {
-            list.push(command("Play", "Space", "resume continue start", Action::TogglePause));
+        let speed = self.playback.speed;
+        let mut list = vec![
+            self.command(Action::TogglePause, "resume stop continue start"),
+            self.command(Action::Next, "skip"),
+            self.command(Action::Prev, "back"),
+            self.command(Action::Seek { to: 0.0, exact: true }, "restart beginning"),
+            self.command(Action::Chapter { forward: true }, "skip"),
+            self.command(Action::Chapter { forward: false }, "back"),
+        ];
+        for chapter in &self.chapters {
+            list.push(self.command_named(format!("Chapter: {}", chapter.title), Action::Seek { to: chapter.time, exact: true }, "go to jump"));
         }
-
-        list.push(command("Open folder…", "O", "playlist browse", Action::OpenFolder));
-        list.push(command("Add videos…", "I", "files browse", Action::OpenVideos));
-        for folder in self.store.recent_folders.iter().filter(|f| self.recent.found(f)) {
-            list.push(command(format!("Open recent: {}", display_name(folder)), "", "folder", Action::Open(vec![folder.clone()])));
+        list.extend([
+            self.command(Action::FrameStep { forward: true }, "step"),
+            self.command(Action::FrameStep { forward: false }, "step back"),
+            self.command_named("Faster", Action::SetSpeed(step_speed(speed, true)), "speed up").key("]"),
+            self.command_named("Slower", Action::SetSpeed(step_speed(speed, false)), "speed down").key("["),
+        ]);
+        if speed != 1.0 {
+            list.push(self.command(Action::SetSpeed(1.0), "reset 1×"));
         }
-        if !self.store.recent_folders.is_empty() {
-            list.push(command("Clear recent folders", "", "forget history", Action::ClearRecentFolders));
+        for preset in SPEEDS {
+            list.push(self.command_named(format!("Speed: {}", format_speed(preset)), Action::SetSpeed(preset), "playback rate"));
         }
-        if self.store.folder.is_some() {
-            list.push(command("Refresh the folder", "R", "rescan reload", Action::RefreshFolder));
-            let (label, include) = if self.store.include_subfolders {
-                ("Stop including subfolders", false)
-            } else {
-                ("Include subfolders", true)
-            };
-            list.push(command(label, "", "folders scan recursive", Action::SetIncludeSubfolders(include)));
+        list.extend([self.command(Action::ToggleMute, "sound volume quiet"), self.command(Action::CycleAudio, "language cycle")]);
+        for t in self.tracks("audio") {
+            list.push(self.command_named(format!("Audio: {}", t.label), Action::SetTrack { kind: "audio", id: Some(t.id) }, "track language"));
         }
-        let shown = if self.sidebar_docked() { self.show_sidebar } else { self.peek.is_some() };
-        list.push(command(if shown { "Hide the playlist" } else { "Show the playlist" }, "B", "sidebar", Action::ToggleSidebar));
-        let pin = if self.store.sidebar_pinned { "Unpin the playlist" } else { "Pin the playlist" };
-        list.push(command(pin, "", "sidebar dock", Action::TogglePin));
-        if !self.playlist.is_empty() {
-            list.push(command("Search the playlist", "/", "find filter video", Action::FocusSearch));
-            list.push(command("Clear the playlist", "", "empty remove all", Action::ClearPlaylist));
+        list.extend([
+            self.command(Action::ToggleLevelVolume, "level normalize loudness night mode quiet loud dialogue compress"),
+            self.command(Action::CycleSubtitles, "captions cycle"),
+            self.command_named("Subtitles: Off", Action::SetTrack { kind: "sub", id: None }, "captions hide"),
+        ]);
+        for t in self.tracks("sub") {
+            list.push(self.command_named(format!("Subtitles: {}", t.label), Action::SetTrack { kind: "sub", id: Some(t.id) }, "captions track language"));
         }
-        let autoplay = self.store.autoplay_next;
-        let label = if autoplay { "Stop playing the next video automatically" } else { "Play the next video automatically" };
-        list.push(command(label, "", "autoplay up next countdown", Action::SetAutoplayNext(!autoplay)));
-
-        list.push(command(if self.fullscreen { "Exit fullscreen" } else { "Fullscreen" }, "F", "full screen window maximize", Action::ToggleFullscreen));
-        list.push(command("Settings…", "E", "preferences options", Action::OpenSettings));
-        list.push(command("Stats", "", "statistics hours watched time streak history", Action::ShowStats));
-        list.push(command("Keyboard shortcuts", "?", "help keys", Action::ShowHelp));
-        list.push(command("Reset all progress…", "", "forget clear watched", Action::ConfirmResetProgress));
+        list.extend([
+            self.command(Action::LoadSubtitle, "captions srt ass"),
+            self.command(Action::AdjustSubDelay(-0.1), "captions delay sync"),
+            self.command(Action::AdjustSubDelay(0.1), "captions delay sync"),
+            self.command(Action::SetSubDelay(0.0), "captions delay sync"),
+            self.command(Action::SubStep(-1), "captions sync subtitle step heard"),
+            self.command(Action::SubStep(1), "captions sync subtitle step heard"),
+        ]);
+        for (speed, _) in SUB_TIMINGS {
+            list.push(self.command(Action::SetSubSpeed(speed), "captions sync drift frame rate fps speed"));
+        }
+        // The playing video, as in its playlist menu.
+        if let Some(index) = self.current {
+            list.extend([
+                self.command(Action::PlayOver(index), "restart again beginning unwatched"),
+                self.command(Action::ToggleWatched, "seen progress"),
+                self.command(Action::MarkWatchedBefore(index), "seen progress previous earlier"),
+            ]);
+        }
+        list.extend([self.command(Action::OpenFolder, "playlist browse"), self.command(Action::OpenVideos, "files browse")]);
+        for folder in &self.store.recent_folders {
+            list.push(self.command_named(format!("Open recent: {}", display_name(folder)), Action::Open(vec![folder.clone()]), "folder"));
+        }
+        list.extend([
+            self.command(Action::ClearRecentFolders, "forget history"),
+            self.command(Action::RefreshFolder, "rescan reload"),
+            self.command(Action::SetIncludeSubfolders(!self.store.include_subfolders), "folders scan recursive"),
+            self.command(Action::FocusSearch, "find filter video"),
+            self.command(Action::RemoveSelected, "selection delete"),
+            self.command(Action::ClearSelection, "deselect"),
+            self.command(Action::ClearPlaylist, "empty remove all"),
+            self.command(Action::SetAutoplayNext(!self.store.autoplay_next), "autoplay up next countdown"),
+            self.command(Action::ToggleFullscreen, "full screen window maximize"),
+            self.command(Action::ToggleSidebar, "sidebar"),
+            self.command(Action::TogglePin, "sidebar dock"),
+            self.command(Action::ShowStats, "statistics hours watched time streak history"),
+            self.command(Action::OpenSettings, "preferences options"),
+            self.command(Action::ShowHelp, "help keys"),
+            self.command(Action::ConfirmResetProgress, "forget clear watched"),
+        ]);
+        list.retain(|c| c.enabled);
         // Every video in the playlist, to play by name.
         for (index, path) in self.playlist.iter().enumerate() {
             let entry = self.store.get(path);
             let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
-            let label = display_name(path);
-            list.push(Command { label, key: length.into(), keywords: "play video", action: Action::Play(index), video: true, icon: "" });
-        }
-        for c in list.iter_mut().filter(|c| c.icon.is_empty()) {
-            c.icon = self.command_icon(&c.action);
+            list.push(Command { key: length.into(), video: true, ..self.command(Action::Play(index), "play video") });
         }
         list
-    }
-
-    /// The icon for a palette entry, matching the menus where they overlap.
-    /// Toggles show what they will do, like their labels.
-    fn command_icon(&self, action: &Action) -> &'static str {
-        match action {
-            Action::TogglePause if self.loaded && !self.playback.paused => icons::PAUSE,
-            Action::TogglePause => icons::PLAY,
-            Action::Next => icons::SKIP_FORWARD,
-            Action::Prev => icons::SKIP_BACK,
-            Action::Play(_) => icons::FILE_VIDEO,
-            Action::Seek { .. } | Action::Chapter { .. } => icons::LIST_NUMBERS,
-            Action::FrameStep { .. } => icons::FILM_STRIP,
-            Action::SetSpeed(_) => icons::GAUGE,
-            Action::ToggleMute if self.playback.muted => icons::SPEAKER_HIGH,
-            Action::ToggleMute => icons::SPEAKER_X,
-            Action::CycleAudio => icons::WAVEFORM,
-            Action::SetTrack { kind: "audio", .. } => icons::WAVEFORM,
-            Action::SetTrack { .. } | Action::CycleSubtitles | Action::LoadSubtitle => icons::SUBTITLES,
-            Action::AdjustSubDelay(_) | Action::SetSubDelay(_) | Action::SubStep(_) | Action::SetSubSpeed(_) => icons::TIMER,
-            Action::ToggleLevelVolume => icons::MOON,
-            Action::ConfirmResetProgress => icons::RESET,
-            Action::ToggleWatched => icons::CHECK,
-            Action::OpenFolder => icons::FOLDER_PLUS,
-            Action::OpenVideos => icons::FILE_VIDEO,
-            Action::Open(_) => icons::FOLDER,
-            Action::ClearRecentFolders => icons::RECENT,
-            Action::RefreshFolder => icons::REFRESH,
-            Action::SetIncludeSubfolders(_) => icons::FOLDER,
-            Action::ToggleSidebar => icons::SIDEBAR,
-            Action::TogglePin => icons::PIN,
-            Action::FocusSearch => icons::SEARCH,
-            Action::ClearPlaylist => icons::TRASH,
-            Action::SetAutoplayNext(_) => icons::SKIP_FORWARD,
-            Action::ToggleFullscreen if self.fullscreen => icons::CORNERS_IN,
-            Action::ToggleFullscreen => icons::CORNERS_OUT,
-            Action::OpenSettings => icons::GEAR,
-            Action::ShowHelp => icons::KEYBOARD,
-            Action::ShowStats => icons::CHART,
-            _ => icons::COMMAND,
-        }
     }
 
     /// Ctrl+K: type to find any command, including ones without a key or a
@@ -370,7 +295,15 @@ mod tests {
 
     #[test]
     fn finds_commands_by_any_word() {
-        let mute = command("Mute", "M", "sound volume quiet", Action::ToggleMute);
+        let mute = Command {
+            label: "Mute".into(),
+            key: "M".into(),
+            keywords: "sound volume quiet",
+            action: Action::ToggleMute,
+            video: false,
+            icon: icons::SPEAKER_X,
+            enabled: true,
+        };
         assert!(command_matches("", &mute));
         assert!(command_matches("mu", &mute));
         assert!(command_matches("vol", &mute), "keywords count");

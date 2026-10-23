@@ -72,7 +72,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   (remembered), fullscreen with controls that float over the video and hide while playing
   (they stay up while paused or while the pointer rests on them). The cursor also hides over
   the video when the mouse is still.
-- **Even out the volume** (night mode, in the audio menu, the palette or Settings): quiet
+- **Even out volume** (night mode, in the audio menu, the palette or Settings): quiet
   dialogue gets louder and loud scenes quieter.
 - **Media keys**: play/pause, next, previous and stop work from the keyboard's media keys,
   even when another window has focus, and Windows' media overlay shows what's playing.
@@ -142,26 +142,26 @@ in the app for an overview.
 | --- | --- |
 | Space / K | Play / pause |
 | J / L or ← / → | Seek 5 s (Shift: 30 s; adjustable in Settings) |
-| Home | Back to the start |
+| Home | Rewind to start |
 | 0–9 | Jump to 0%–90% |
 | , / . | Previous / next frame (pauses) |
 | [ / ] | Slower / faster (Backspace: normal speed) |
 | PgUp / PgDn | Previous / next chapter |
 | ↑ / ↓ | Volume |
 | M | Mute |
-| A | Cycle audio tracks |
-| S | Cycle subtitles |
-| Z / X | Subtitle delay −/+ 0.1 s (Shift: 1 s) |
+| A | Next audio track |
+| S | Next subtitle track |
+| Z / X | Show subtitles earlier / later (Shift: 1 s) |
 | Ctrl+← / Ctrl+→ | Show the previous / next subtitle line now |
 | N / P | Next / previous video |
 | W | Mark the playing video watched (and play the next) / unwatched |
-| / | Search the playlist: ↑ / ↓ pick a result, Enter plays it, Esc clears |
+| / | Search playlist: ↑ / ↓ pick a result, Enter plays it, Esc clears |
 | O | Open folder as playlist |
 | I | Add videos to the playlist |
 | R | Refresh the playlist's folder |
 | B | Show or hide the playlist (slides it out when unpinned) |
 | F / double-click video | Fullscreen |
-| Esc | Clear the selection, cancel the next video's countdown, or leave fullscreen |
+| Esc | Clear selection, cancel the next video's countdown, or leave fullscreen |
 | E | Settings |
 | ? | Keyboard shortcut overview (also in the ⋯ menu) |
 | Ctrl+K | Command palette: find any command by typing |

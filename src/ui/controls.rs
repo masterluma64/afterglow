@@ -33,43 +33,21 @@ impl App {
                     ui.add_enabled_ui(!recent.is_empty(), |ui| {
                         ui.menu_button(format!("{}  Recent folders", icons::RECENT), |ui| {
                             for folder in &recent {
-                                let exists = self.recent.found(folder);
-                                let tip = if exists { folder.display().to_string() } else { format!("{} (not found)", folder.display()) };
-                                let label = format!("{}  {}", icons::FOLDER, display_name(folder));
-                                if ui.add_enabled(exists, egui::Button::new(label)).on_hover_text(tip).clicked() {
-                                    self.actions.push(Action::Open(vec![folder.clone()]));
-                                }
+                                let found = self.recent.found(folder);
+                                let tip = if found { folder.display().to_string() } else { format!("{} (not found)", folder.display()) };
+                                self.menu_item(ui, Action::Open(vec![folder.clone()])).on_hover_text(tip);
                             }
                             ui.separator();
-                            if ui.button("Clear this list").clicked() {
-                                self.actions.push(Action::ClearRecentFolders);
-                            }
+                            self.menu_item(ui, Action::ClearRecentFolders);
                         });
                     });
-                    let refresh = egui::Button::new(format!("{}  Refresh folder", icons::REFRESH)).shortcut_text("R");
-                    let tip = "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.";
-                    if ui.add_enabled(self.store.folder.is_some(), refresh).on_hover_text(tip).clicked() {
-                        self.actions.push(Action::RefreshFolder);
-                    }
-                    let palette = egui::Button::new(format!("{}  Find a command…", icons::COMMAND)).shortcut_text("Ctrl+K");
-                    if ui.add(palette).clicked() {
-                        self.actions.push(Action::OpenPalette);
-                    }
+                    self.menu_item(ui, Action::RefreshFolder).on_hover_text(
+                        "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.",
+                    );
                     ui.separator();
-                    if ui.button(format!("{}  Stats", icons::CHART)).clicked() {
-                        self.actions.push(Action::ShowStats);
-                    }
-                    let settings = egui::Button::new(format!("{}  Settings…", icons::GEAR)).shortcut_text("E");
-                    if ui.add(settings).clicked() {
-                        self.actions.push(Action::OpenSettings);
-                    }
-                    let help = egui::Button::new(format!("{}  Keyboard shortcuts", icons::KEYBOARD)).shortcut_text("?");
-                    if ui.add(help).clicked() {
-                        self.actions.push(Action::ShowHelp);
-                    }
-                    if ui.button(format!("{}  Reset all progress…", icons::RESET)).clicked() {
-                        self.actions.push(Action::ConfirmResetProgress);
-                    }
+                    self.app_items(ui);
+                    ui.separator();
+                    self.menu_item(ui, Action::ConfirmResetProgress);
                 });
                 response.on_hover_text("More");
                 // The title takes the space left between the buttons.
@@ -247,40 +225,27 @@ impl App {
         }
         if kind == "audio" {
             ui.separator();
-            let level = egui::Button::selectable(self.store.settings.level_volume, "Even out the volume");
-            if ui.add(level).on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter").clicked() {
-                self.actions.push(Action::ToggleLevelVolume);
-            }
+            self.menu_item(ui, Action::ToggleLevelVolume).on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter");
         }
         if kind == "sub" {
             ui.separator();
-            if ui.button(format!("{}  Load subtitle file…", icons::PLUS)).clicked() {
-                self.actions.push(Action::LoadSubtitle);
-            }
+            self.menu_item(ui, Action::LoadSubtitle);
             ui.separator();
             ui.label(RichText::new("Timing").bold());
-            let delay = self.playback.sub_delay;
             ui.horizontal(|ui| {
-                ui.label(format!("Delay {delay:+.1} s"));
-                if ui.small_button(icons::MINUS).on_hover_text("Show earlier (Z, Shift: 1 s)").clicked() {
-                    self.actions.push(Action::AdjustSubDelay(-0.1));
-                }
-                if ui.small_button(icons::PLUS).on_hover_text("Show later (X, Shift: 1 s)").clicked() {
-                    self.actions.push(Action::AdjustSubDelay(0.1));
-                }
-                if delay != 0.0 && ui.small_button(icons::RESET).on_hover_text("No delay").clicked() {
-                    self.actions.push(Action::SetSubDelay(0.0));
+                ui.label(format!("Delay {:+.1} s", self.playback.sub_delay));
+                // Small buttons, named on hover as the actions are elsewhere.
+                for (icon, action) in [(icons::MINUS, Action::AdjustSubDelay(-0.1)), (icons::PLUS, Action::AdjustSubDelay(0.1)), (icons::RESET, Action::SetSubDelay(0.0))] {
+                    let item = self.item(&action);
+                    let tip = if item.key.is_empty() { item.label.clone() } else { format!("{} ({})", item.label, item.key) };
+                    if ui.add_enabled(item.enabled, egui::Button::new(icon).small()).on_hover_text(tip).clicked() {
+                        self.actions.push(action);
+                    }
                 }
             });
             // Syncing by ear: when a line is heard, its subtitle is shown now.
-            let previous = egui::Button::new(format!("{}  Previous line now", icons::ARROW_LEFT)).shortcut_text("Ctrl+\u{E058}");
-            if ui.add(previous).on_hover_text("For a line whose subtitle already went by").clicked() {
-                self.actions.push(Action::SubStep(-1));
-            }
-            let next = egui::Button::new(format!("{}  Next line now", icons::ARROW_RIGHT)).shortcut_text("Ctrl+\u{E06C}");
-            if ui.add(next).on_hover_text("For a line whose subtitle hasn't shown yet").clicked() {
-                self.actions.push(Action::SubStep(1));
-            }
+            self.menu_item(ui, Action::SubStep(-1)).on_hover_text("For a line whose subtitle already went by");
+            self.menu_item(ui, Action::SubStep(1)).on_hover_text("For a line whose subtitle hasn't shown yet");
             // For subtitles that drift further off as the video goes on.
             let sub_speed = self.playback.sub_speed;
             for (speed, label) in SUB_TIMINGS {

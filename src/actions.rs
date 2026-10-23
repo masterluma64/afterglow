@@ -18,9 +18,10 @@ pub(crate) enum Action {
     /// default and isn't asked again.
     ChooseDropBehavior { behavior: progress::DroppedVideos, remember: bool },
     Play(usize),
-    /// Plays a video from its start (the next one after a video finishes, or
-    /// Play from start in the menus).
+    /// Plays a video from its start (the next one after a video finishes).
     PlayFromStart(usize),
+    /// Plays a video again from its start, unwatched (Play from start).
+    PlayOver(usize),
     Remove(usize),
     ClearPlaylist,
     /// Moves a playlist entry so it lands before the entry at `to` (or at the end).
@@ -255,6 +256,12 @@ impl App {
             }
             Action::Play(index) => self.play(index, ctx),
             Action::PlayFromStart(index) => self.play_from_start(index, ctx),
+            Action::PlayOver(index) => {
+                if let Some(path) = self.playlist.get(index).cloned() {
+                    self.apply(Action::SetWatched(path, false), ctx);
+                    self.play_from_start(index, ctx);
+                }
+            }
             Action::Remove(index) => self.remove(index, ctx),
             Action::ClearPlaylist => self.clear_playlist(ctx),
             Action::Move { from, to } => self.reorder(|list| move_item(list, from, to)),

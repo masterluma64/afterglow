@@ -9,7 +9,7 @@ mod ui;
 use library::{disk, playlist, progress, stats, watch};
 use platform::{clock, instance, media_keys, power, screen};
 use player::{dll_search, mpv, playback, thumbnails};
-use ui::{app_icon, commands, controls, dialogs, icons, video};
+use ui::{app_icon, commands, controls, dialogs, icons, items, video};
 use ui::icons::Bold;
 
 use std::collections::HashSet;
@@ -652,7 +652,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("Space / K", "Play / pause"),
         ("J / L", "Seek back / forward (Shift: further)"),
         ("\u{E058} / \u{E06C}", "Seek back / forward (Shift: further)"),
-        ("Home", "Back to the start"),
+        ("Home", "Rewind to start"),
         ("0–9", "Jump to 0%–90%"),
         (", / .", "Previous / next frame"),
         ("[ / ]", "Slower / faster"),
@@ -662,27 +662,27 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ("Sound", &[
         ("\u{E08E} / \u{E03E}", "Volume"),
         ("M", "Mute"),
-        ("A", "Cycle audio tracks"),
+        ("A", "Next audio track"),
     ]),
     ("Subtitles", &[
-        ("S", "Cycle subtitles"),
-        ("Z / X", "Delay −/+ 0.1 s (Shift: 1 s)"),
+        ("S", "Next subtitle track"),
+        ("Z / X", "Show subtitles earlier / later (Shift: 1 s)"),
         ("Ctrl+\u{E058} / \u{E06C}", "Show previous / next line now"),
     ]),
     ("Playlist", &[
         ("N / P", "Next / previous video"),
-        ("W", "Mark watched / unwatched"),
-        ("/", "Search (\u{E08E} \u{E03E} pick, Enter plays)"),
+        ("W", "Mark as watched / unwatched"),
+        ("/", "Search playlist (\u{E08E} \u{E03E} pick, Enter plays)"),
         ("O", "Open folder"),
         ("I", "Add videos"),
-        ("R", "Refresh the folder"),
-        ("B", "Show or hide the playlist"),
+        ("R", "Refresh folder"),
+        ("B", "Show or hide playlist"),
         ("Ctrl+click", "Select several videos (Shift: a range)"),
-        ("Delete", "Remove the selected videos"),
+        ("Delete", "Remove selected videos"),
     ]),
     ("Window", &[
         ("F", "Fullscreen"),
-        ("Esc", "Clear the selection, leave fullscreen"),
+        ("Esc", "Clear selection, leave fullscreen"),
         ("E", "Settings"),
         ("Ctrl+K", "Find a command"),
         ("?", "This overview"),
@@ -748,7 +748,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

@@ -76,11 +76,11 @@ impl App {
                         ui.label("Count as watched at");
                         ui.add(egui::Slider::new(&mut settings.watched_percent, 50.0..=100.0).suffix("%").integer());
                         ui.end_row();
-                        ui.label("Next video");
-                        ui.checkbox(&mut autoplay, "Play it automatically");
+                        ui.label("Auto-play");
+                        ui.checkbox(&mut autoplay, "Play next video automatically");
                         ui.end_row();
                         ui.label("Volume");
-                        ui.checkbox(&mut settings.level_volume, "Even it out (night mode)")
+                        ui.checkbox(&mut settings.level_volume, "Even out volume")
                             .on_hover_text("Quiet dialogue gets louder and loud scenes quieter");
                         ui.end_row();
                         ui.label("Dropped videos")
