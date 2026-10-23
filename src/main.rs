@@ -58,7 +58,9 @@ const SUB_RESTORE_TAG: u64 = 2;
 const LOAD_TAG: u64 = 4;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
-const MIN_WINDOW_SIZE: [f32; 2] = [480.0, 300.0];
+/// The smallest the window can be made: room for the docked playlist beside
+/// the video, and for most of a menu.
+const MIN_WINDOW_SIZE: [f32; 2] = [800.0, 500.0];
 
 /// The icon in the title bar and taskbar (the executable's own icon is built
 /// in by build.rs).
