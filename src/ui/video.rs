@@ -173,7 +173,10 @@ impl App {
             child.ctx().request_repaint_after(Duration::from_millis(200).min(left));
             return;
         }
-        if let Some(index) = self.ended.filter(|&i| i < self.playlist.len()) {
+        // A watched video opened by itself (restored on startup, say) has
+        // nothing in the hidden playlist to pick, so it gets the end screen too.
+        let watched_single = (self.single_video() && self.continue_target().is_none()).then_some(0);
+        if let Some(index) = self.ended.filter(|&i| i < self.playlist.len()).or(watched_single) {
             self.end_screen(&mut child, index);
             return;
         }
