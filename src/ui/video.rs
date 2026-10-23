@@ -84,6 +84,8 @@ impl App {
             .show(ui.ctx(), |ui| {
                 ui.style_mut().visuals = video_visuals(accent);
                 ui.spacing_mut().button_padding = vec2(16.0, 9.0);
+                // Near the window's edge the area is narrow; keep it on one line.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 let button = dialogs::primary_button(ui, format!("{}  {label}", icons::FAST_FORWARD));
                 if ui.add(button).on_hover_text("Enter").clicked() {
                     self.actions.push(Action::Skip);
