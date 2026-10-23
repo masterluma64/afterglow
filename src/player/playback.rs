@@ -86,7 +86,12 @@ impl App {
             return;
         }
         if let Some(path) = self.current_path().map(Path::to_path_buf) {
-            self.store.update_position(&path, self.playback.position, self.playback.duration);
+            let (position, duration) = (self.playback.position, self.playback.duration);
+            if self.held_unwatched {
+                self.store.update_position_unwatched(&path, position, duration);
+            } else {
+                self.store.update_position(&path, position, duration);
+            }
         }
     }
 
@@ -127,6 +132,7 @@ impl App {
         self.restoring = None;
         self.tracks_changed_by_user = false;
         self.watch_mark = None;
+        self.held_unwatched = false;
         self.current = Some(index);
         self.loaded = false;
         self.store.set_current(Some(&path));

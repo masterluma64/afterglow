@@ -18,7 +18,8 @@ pub(crate) enum Action {
     /// default and isn't asked again.
     ChooseDropBehavior { behavior: progress::DroppedVideos, remember: bool },
     Play(usize),
-    /// Plays a video from its start (the next one after a video finishes).
+    /// Plays a video from its start (the next one after a video finishes, or
+    /// Play from start in the menus).
     PlayFromStart(usize),
     Remove(usize),
     ClearPlaylist,
@@ -298,20 +299,18 @@ impl App {
             }
             Action::SetIncludeSubfolders(include) => self.set_include_subfolders(include),
             Action::SetWatched(path, watched) => {
-                if self.loaded && self.current_path() == Some(path.as_path()) {
-                    // Keep the live position from overwriting the change; a reset
-                    // video that is loaded also jumps back to its start.
-                    self.playback.position = if watched { self.playback.duration } else { 0.0 };
-                    if !watched
-                        && let Ok(mpv) = &self.mpv
-                    {
-                        mpv.send(&["seek", "0", "absolute+exact"]);
-                    }
-                }
+                let playing = self.loaded && self.current_path() == Some(path.as_path());
                 self.store.set_watched(&path, watched);
+                if playing {
+                    self.keep_watched_mark(watched);
+                }
                 self.store.save();
                 let name = display_name(&path);
-                self.notify(if watched { format!("{name}: marked as watched") } else { format!("{name}: progress reset") });
+                self.notify(match (watched, playing) {
+                    (true, _) => format!("{name}: marked as watched"),
+                    (false, true) => format!("{name}: marked as unwatched"),
+                    (false, false) => format!("{name}: progress reset"),
+                });
                 // Done with the playing video, so move on to the next one, as N does.
                 if let Some(index) = self.current.filter(|_| watched && self.current_path() == Some(path.as_path())) {
                     if index + 1 < self.playlist.len() {
@@ -337,20 +336,13 @@ impl App {
                 self.notify(format!("Marked {} video{} as watched", before.len(), if before.len() == 1 { "" } else { "s" }));
             }
             Action::SetWatchedMany(paths, watched) => {
-                if self.loaded
-                    && let Some(current) = self.current_path()
-                    && paths.iter().any(|p| p == current)
-                {
-                    // As for one video (see `SetWatched`), but without moving on.
-                    self.playback.position = if watched { self.playback.duration } else { 0.0 };
-                    if !watched
-                        && let Ok(mpv) = &self.mpv
-                    {
-                        mpv.send(&["seek", "0", "absolute+exact"]);
-                    }
-                }
+                let playing = self.loaded && self.current_path().is_some_and(|current| paths.iter().any(|p| p == current));
                 for path in &paths {
                     self.store.set_watched(path, watched);
+                }
+                // As for one video (see `SetWatched`), but without moving on.
+                if playing {
+                    self.keep_watched_mark(watched);
                 }
                 self.store.save();
                 self.selected.clear();
@@ -589,3 +581,19 @@ impl App {
     // ---------------------------------------------------------------- UI
 }
 
+
+impl App {
+    /// After the playing video was marked watched or unwatched in the store,
+    /// keeps playing on from overwriting that. Marked watched, its saved
+    /// position goes to the end. Marked unwatched, it plays on from where it
+    /// is (Play from start is for starting over), its position is kept, and
+    /// it doesn't count as watched again until it is opened again.
+    fn keep_watched_mark(&mut self, watched: bool) {
+        self.held_unwatched = !watched;
+        if watched {
+            self.playback.position = self.playback.duration;
+        } else {
+            self.save_current_progress();
+        }
+    }
+}

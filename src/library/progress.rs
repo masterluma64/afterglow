@@ -353,6 +353,16 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Records the position without it counting as watched, for a video
+    /// marked unwatched while it plays (it may already be past the point
+    /// where it would count).
+    pub fn update_position_unwatched(&mut self, path: &Path, position: f64, duration: f64) {
+        let entry = self.entries.entry(key(path)).or_default();
+        entry.position = position;
+        entry.duration = duration;
+        self.dirty = true;
+    }
+
     /// Marks a video watched because it played to its end, counting it as
     /// finished in the stats unless it already counted as watched.
     pub fn finish(&mut self, path: &Path) {

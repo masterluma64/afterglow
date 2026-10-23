@@ -66,7 +66,7 @@ pub(crate) fn playlist_row(
         }
         if ui.button(format!("{}  Play from start", icons::PLAY)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), false));
-            actions.push(Action::Play(index));
+            actions.push(Action::PlayFromStart(index));
         }
         if !entry.watched && ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), true));

@@ -92,9 +92,9 @@ impl App {
                 ui.separator();
                 let entry = self.store.get(&path);
                 if item(ui, icons::PLAY, "Play from start", "") {
-                    // Unwatched again, as when picked from the playlist this way.
+                    // Unwatched again, and opened again at its start.
                     self.actions.push(Action::SetWatched(path.clone(), false));
-                    self.actions.push(Action::SetPaused(false));
+                    self.actions.push(Action::PlayFromStart(index));
                 }
                 if !entry.watched && item(ui, icons::CHECK, "Mark as watched", "W") {
                     self.actions.push(Action::SetWatched(path.clone(), true));

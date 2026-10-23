@@ -205,6 +205,9 @@ struct App {
     /// The position and time of the last playback sample, to count the
     /// time watched since then in the stats.
     watch_mark: Option<(f64, Instant)>,
+    /// Set when the playing video is marked unwatched, so playing on doesn't
+    /// count it as watched again (until it is opened again).
+    held_unwatched: bool,
     /// Seek-bar previews, once started in the background (see `thumbnails_ready`).
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
@@ -316,6 +319,7 @@ impl App {
             announce_sub_step: None,
             restoring: None,
             watch_mark: None,
+            held_unwatched: false,
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
             up_next: None,
