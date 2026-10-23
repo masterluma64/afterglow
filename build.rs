@@ -1,17 +1,26 @@
-//! Builds the app icon into the executable and copies the vendored libmpv DLL
-//! next to it. Release builds also pack the DLL into the executable (see
-//! `src/player/packed.rs`), so the exe works on its own.
+//! Builds the app icon and version into the executable and copies the
+//! vendored libmpv DLL next to it. Release builds also pack the DLL into the
+//! executable (see `src/player/packed.rs`), so the exe works on its own.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 fn main() {
-    // The icon Explorer, shortcuts and the taskbar show for afterglow.exe.
-    // Regenerate assets/icon.ico with `cargo run --example make_icon`.
-    println!("cargo:rerun-if-changed=assets/afterglow.rc");
+    // The commit the build came from, shown in Settings, with "-dirty" when
+    // the sources differ from it. Watching src notices edits made since.
+    for path in [".git/HEAD", ".git/index", "src"] {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    println!("cargo:rustc-env=AFTERGLOW_COMMIT={}", commit());
+
+    // The icon Explorer, shortcuts and the taskbar show for afterglow.exe,
+    // and the version its Properties show. Regenerate assets/icon.ico with
+    // `cargo run --example make_icon`.
     println!("cargo:rerun-if-changed=assets/icon.ico");
-    if let Err(e) = embed_resource::compile("assets/afterglow.rc", embed_resource::NONE).manifest_optional() {
-        println!("cargo:warning=could not build the app icon into the executable: {e}");
+    let rc = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("afterglow.rc");
+    std::fs::write(&rc, resources()).expect("failed to write afterglow.rc");
+    if let Err(e) = embed_resource::compile(&rc, embed_resource::NONE).manifest_optional() {
+        println!("cargo:warning=could not build the icon and version into the executable: {e}");
     }
 
     println!("cargo::rustc-check-cfg=cfg(packed_mpv)");
@@ -77,4 +86,52 @@ fn pack(src: &Path, out: &Path, stamp: &str) {
 /// A quick hash, to tell builds of the DLL apart.
 fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &b| (hash ^ u64::from(b)).wrapping_mul(0x100_0000_01b3))
+}
+
+/// The short hash of the checked-out commit, plus "-dirty" when tracked files
+/// have changed since, or "unknown" outside a git checkout.
+fn commit() -> String {
+    let git = |args: &[&str]| std::process::Command::new("git").args(args).output().ok().filter(|o| o.status.success());
+    let Some(head) = git(&["rev-parse", "--short", "HEAD"]) else {
+        return "unknown".into();
+    };
+    let hash = String::from_utf8_lossy(&head.stdout).trim().to_string();
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|o| !o.stdout.is_empty());
+    if dirty { format!("{hash}-dirty") } else { hash }
+}
+
+/// The Windows resources built into afterglow.exe: its icon, and the version
+/// Explorer shows under Properties > Details.
+fn resources() -> String {
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap();
+    let mut parts = version.split(['.', '-']).map(|p| p.parse::<u16>().unwrap_or(0));
+    let numbers: Vec<String> = (0..4).map(|_| parts.next().unwrap_or(0).to_string()).collect();
+    let numbers = numbers.join(",");
+    let icon = std::env::current_dir().unwrap().join("assets/icon.ico").display().to_string().replace('\\', "/");
+    format!(
+        r#"1 ICON "{icon}"
+1 VERSIONINFO
+FILEVERSION {numbers}
+PRODUCTVERSION {numbers}
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "Afterglow"
+      VALUE "ProductName", "Afterglow"
+      VALUE "FileVersion", "{version}"
+      VALUE "ProductVersion", "{version}"
+      VALUE "OriginalFilename", "afterglow.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+"#
+    )
 }

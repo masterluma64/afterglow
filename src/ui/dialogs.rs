@@ -163,6 +163,8 @@ impl App {
                     if ui.add(primary_button(ui, "Done")).clicked() {
                         close = true;
                     }
+                    ui.add_space(8.0);
+                    ui.weak(concat!("Afterglow ", env!("CARGO_PKG_VERSION"), " (", env!("AFTERGLOW_COMMIT"), ")"));
                 });
             });
         });
