@@ -72,6 +72,14 @@ pub(crate) enum Action {
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
     CycleAudio,
+    /// Opens the settings of a video's folder.
+    OpenFolderSettings(PathBuf),
+    /// Saves the settings of a video's folder (see `Store::set_folder_settings`).
+    SetFolderSettings(PathBuf, progress::FolderSettings),
+    /// Makes the playing video's subtitle delay and timing its folder's.
+    UseSubTimingForFolder,
+    /// Skips the opening or ending playing now.
+    Skip,
     /// Turns evening out the volume ("night mode") on or off.
     ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
@@ -115,7 +123,7 @@ impl App {
         }
 
         // No shortcuts while typing or while a dialog is open (Esc closes it).
-        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.confirm_clear_stats || self.settings_open || self.stats_open || self.pending_drop.is_some() || self.palette.is_some() {
+        if ctx.egui_wants_keyboard_input() || self.confirm_reset || self.confirm_clear_stats || self.settings_open || self.folder_dialog.is_some() || self.stats_open || self.pending_drop.is_some() || self.palette.is_some() {
             return;
         }
         if self.show_help {
@@ -186,6 +194,7 @@ impl App {
                 (M::NONE, Key::Backspace, Action::SetSpeed(1.0)),
                 (M::NONE, Key::PageUp, Action::Chapter { forward: false }),
                 (M::NONE, Key::PageDown, Action::Chapter { forward: true }),
+                (M::NONE, Key::Enter, Action::Skip),
             ];
             // The system media controls handle media keys, even without focus.
             // Without them, the keys still work while the window has focus.
@@ -288,11 +297,48 @@ impl App {
                 self.store.set_settings(settings);
                 self.apply_settings(ctx);
             }
+            Action::OpenFolderSettings(video) => self.folder_dialog = Some(video),
+            Action::SetFolderSettings(video, settings) => {
+                self.store.set_folder_settings(&video, settings);
+                if let Some(current) = self.current_path().map(Path::to_path_buf) {
+                    self.apply_folder_settings(&current);
+                }
+            }
+            Action::UseSubTimingForFolder => {
+                if let Some((video, mut folder)) = self.playing_folder() {
+                    let Playback { sub_delay, sub_speed, .. } = self.playback;
+                    folder.sub_delay = (sub_delay != 0.0).then_some(sub_delay);
+                    folder.sub_speed = ((sub_speed - 1.0).abs() > 1e-6).then_some(sub_speed);
+                    self.apply(Action::SetFolderSettings(video, folder), ctx);
+                    self.store.save();
+                    self.notify("Subtitle timing saved for this folder");
+                }
+            }
+            Action::Skip => {
+                if let (Ok(mpv), Some((skip, _, end))) = (&self.mpv, self.skip_now()) {
+                    // An ending that runs to the end of the video finishes it.
+                    if skip == progress::Skip::Ending && end >= self.playback.duration - 1.0 {
+                        mpv.send(&["seek", "100", "absolute-percent+exact"]);
+                    } else {
+                        mpv.send(&["seek", &format!("{end:.3}"), "absolute+exact"]);
+                    }
+                    self.notify(if skip == progress::Skip::Opening { "Skipped opening" } else { "Skipped ending" });
+                }
+            }
+            // Switches a folder setting, if the playing video's folder has
+            // one, otherwise the global setting.
             Action::ToggleLevelVolume => {
-                let mut settings = self.store.settings.clone();
-                settings.level_volume = !settings.level_volume;
-                self.notify(if settings.level_volume { "Evening out the volume" } else { "Volume as recorded" });
-                self.apply(Action::SetSettings(settings), ctx);
+                let on = !self.store.settings_for(self.current_path()).level_volume;
+                self.notify(if on { "Evening out the volume" } else { "Volume as recorded" });
+                match self.playing_folder().filter(|(_, f)| f.level_volume.is_some()) {
+                    Some((video, folder)) => {
+                        self.apply(Action::SetFolderSettings(video, progress::FolderSettings { level_volume: Some(on), ..folder }), ctx);
+                    }
+                    None => {
+                        let settings = progress::Settings { level_volume: on, ..self.store.settings.clone() };
+                        self.apply(Action::SetSettings(settings), ctx);
+                    }
+                }
             }
             Action::ClearRecentFolders => {
                 self.store.clear_recent_folders();
@@ -395,7 +441,12 @@ impl App {
                 self.notify(format!("Progress reset for {reset} video{}", if reset == 1 { "" } else { "s" }));
             }
             Action::SetAutoplayNext(autoplay) => {
-                self.store.set_autoplay_next(autoplay);
+                match self.playing_folder().filter(|(_, f)| f.autoplay_next.is_some()) {
+                    Some((video, folder)) => {
+                        self.store.set_folder_settings(&video, progress::FolderSettings { autoplay_next: Some(autoplay), ..folder });
+                    }
+                    None => self.store.set_autoplay_next(autoplay),
+                }
                 self.store.save();
                 if !autoplay {
                     self.up_next = None;
@@ -599,6 +650,20 @@ impl App {
 
 
 impl App {
+    /// The playing video, with the settings of its folder (empty if it has
+    /// none), to change them.
+    pub(crate) fn playing_folder(&self) -> Option<(PathBuf, progress::FolderSettings)> {
+        let video = self.current_path()?;
+        let folder = self.store.folder_settings(video).map(|(_, f)| f.clone()).unwrap_or_default();
+        Some((video.to_path_buf(), folder))
+    }
+
+    /// Whether the next video starts by itself after the playing one (or
+    /// after any video, when none is playing).
+    pub(crate) fn autoplay_next(&self) -> bool {
+        self.current_path().map_or(self.store.autoplay_next, |p| self.store.autoplay_after(p))
+    }
+
     /// After the playing video was marked watched or unwatched in the store,
     /// keeps playing on from overwriting that. Marked watched, its saved
     /// position goes to the end. Marked unwatched, it plays on from where it

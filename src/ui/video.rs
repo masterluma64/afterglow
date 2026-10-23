@@ -2,6 +2,9 @@
 
 use crate::*;
 
+/// How long the Skip button stays up while the controls are hidden.
+const SKIP_BUTTON_TIME: f64 = 8.0;
+
 /// The dark look of everything drawn over the video, whatever the theme.
 pub(crate) fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
@@ -16,6 +19,7 @@ impl App {
         let resp = ui.interact(rect, egui::Id::unique("video"), Sense::click());
         if self.loaded {
             self.paint_frame(ui, rect);
+            self.skip_button(ui, rect);
             if resp.double_clicked() {
                 self.actions.push(Action::ToggleFullscreen);
             }
@@ -55,6 +59,36 @@ impl App {
         {
             ui.painter().add(callback);
         }
+    }
+
+    /// The Skip button, in the bottom-right corner of the video while an
+    /// opening or ending plays. While the controls are hidden, it only shows
+    /// for the first seconds of it.
+    fn skip_button(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let Some((skip, start, _)) = self.skip_now() else { return };
+        let idle = !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
+        if idle && self.playback.position - start > SKIP_BUTTON_TIME {
+            return;
+        }
+        // Above the controls, where they float over the video.
+        let bottom = match self.controls_rect {
+            Some(controls) if self.fullscreen => controls.top(),
+            _ => rect.bottom(),
+        };
+        let label = if skip == progress::Skip::Opening { "Skip opening" } else { "Skip ending" };
+        let accent = self.store.settings.accent;
+        egui::Area::new(egui::Id::unique("skip"))
+            .order(egui::Order::Middle)
+            .fixed_pos(egui::pos2(rect.right() - 24.0, bottom - 24.0))
+            .pivot(egui::Align2::RIGHT_BOTTOM)
+            .show(ui.ctx(), |ui| {
+                ui.style_mut().visuals = video_visuals(accent);
+                ui.spacing_mut().button_padding = vec2(16.0, 9.0);
+                let button = dialogs::primary_button(ui, format!("{}  {label}", icons::FAST_FORWARD));
+                if ui.add(button).on_hover_text("Enter").clicked() {
+                    self.actions.push(Action::Skip);
+                }
+            });
     }
 
     /// The current notice, as a pill in the top-left corner of the video.

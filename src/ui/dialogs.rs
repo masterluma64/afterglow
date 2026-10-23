@@ -46,10 +46,12 @@ impl App {
             style.visuals.error_fg_color = error_color(style.visuals.dark_mode);
         });
         if let Ok(mpv) = &self.mpv {
-            mpv.set("slang", &settings.sub_languages);
-            mpv.set("alang", &settings.audio_languages);
+            // With the playing video's folder settings in their place.
+            let playing = self.store.settings_for(self.current_path());
+            mpv.set("slang", &playing.sub_languages);
+            mpv.set("alang", &playing.audio_languages);
             mpv.set("hwdec", if settings.hardware_decoding { "auto-safe" } else { "no" });
-            mpv.set("af", if settings.level_volume { mpv::VOLUME_LEVELER } else { "" });
+            mpv.set("af", if playing.level_volume { mpv::VOLUME_LEVELER } else { "" });
         }
     }
 
@@ -464,7 +466,7 @@ fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
 }
 
 /// A full-width card with a small title, for grouping a dialog's parts.
-fn card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
     let width = ui.available_width();
     egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(width - 24.0);

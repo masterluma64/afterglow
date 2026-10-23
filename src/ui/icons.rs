@@ -50,6 +50,8 @@ pub const LIST_NUMBERS: &str = "\u{E2F6}";
 pub const COMMAND: &str = "\u{E1C4}";
 pub const FILM_STRIP: &str = "\u{E792}";
 pub const MOON: &str = "\u{E330}";
+pub const FAST_FORWARD: &str = "\u{E6A6}";
+pub const SLIDERS: &str = "\u{E434}";
 // The text font has no arrows; shortcut texts use these code points inline.
 pub const ARROW_LEFT: &str = "\u{E058}";
 pub const ARROW_RIGHT: &str = "\u{E06C}";

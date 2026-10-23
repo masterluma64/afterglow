@@ -4,6 +4,7 @@ pub(crate) mod app_icon;
 pub(crate) mod commands;
 pub(crate) mod controls;
 pub(crate) mod dialogs;
+pub(crate) mod folder;
 pub(crate) mod icons;
 pub(crate) mod items;
 pub(crate) mod sidebar;

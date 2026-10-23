@@ -64,6 +64,7 @@ impl App {
         self.menu_item(ui, Action::TogglePause);
         self.menu_item(ui, Action::Next);
         self.menu_item(ui, Action::Prev);
+        self.menu_item(ui, Action::Skip);
         ui.separator();
         let loaded = self.loaded;
         ui.add_enabled_ui(loaded, |ui| {
@@ -135,6 +136,7 @@ impl App {
             self.command(Action::TogglePause, "resume stop continue start"),
             self.command(Action::Next, "skip"),
             self.command(Action::Prev, "back"),
+            self.command(Action::Skip, "intro opening ending credits outro"),
             self.command(Action::Seek { to: 0.0, exact: true }, "restart beginning"),
             self.command(Action::Chapter { forward: true }, "skip"),
             self.command(Action::Chapter { forward: false }, "back"),
@@ -177,12 +179,14 @@ impl App {
         for (speed, _) in SUB_TIMINGS {
             list.push(self.command(Action::SetSubSpeed(speed), "captions sync drift frame rate fps speed"));
         }
+        list.push(self.command(Action::UseSubTimingForFolder, "captions delay sync series show default"));
         // The playing video, as in its playlist menu.
         if let Some(index) = self.current {
             list.extend([
                 self.command(Action::PlayOver(index), "restart again beginning unwatched"),
                 self.command(Action::ToggleWatched, "seen progress"),
                 self.command(Action::MarkWatchedBefore(index), "seen progress previous earlier"),
+                self.command(Action::OpenFolderSettings(self.playlist[index].clone()), "preferences options series show intro opening ending subtitles languages"),
             ]);
         }
         list.extend([self.command(Action::OpenFolder, "playlist browse"), self.command(Action::OpenVideos, "files browse")]);
@@ -197,7 +201,7 @@ impl App {
             self.command(Action::RemoveSelected, "selection delete"),
             self.command(Action::ClearSelection, "deselect"),
             self.command(Action::ClearPlaylist, "empty remove all"),
-            self.command(Action::SetAutoplayNext(!self.store.autoplay_next), "autoplay up next countdown"),
+            self.command(Action::SetAutoplayNext(!self.autoplay_next()), "autoplay up next countdown"),
             self.command(Action::ToggleFullscreen, "full screen window maximize"),
             self.command(Action::ToggleSidebar, "sidebar"),
             self.command(Action::TogglePin, "sidebar dock"),

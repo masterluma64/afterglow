@@ -1495,3 +1495,39 @@ mod prober_tests {
         std::fs::remove_file(wav).unwrap();
     }
 }
+
+#[cfg(test)]
+mod skip_tests {
+    use super::tests::{silent_wav, use_built_dll};
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Skipping an ending that runs to the end seeks to 100%, which must end
+    /// the file (so the next video comes up), even while paused.
+    #[test]
+    fn seeking_to_the_end_ends_the_file() {
+        use_built_dll();
+        let wav = silent_wav("afterglow-skip-end.wav", 30);
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
+        mpv.set("mute", "yes");
+        mpv.set("pause", "yes");
+        mpv.load_file(&wav, 0.0, 0);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (mut loaded, mut ended) = (false, false);
+        while Instant::now() < deadline && !ended {
+            for ev in mpv.poll_events() {
+                match ev {
+                    Event::FileLoaded => {
+                        loaded = true;
+                        mpv.send(&["seek", "100", "absolute-percent+exact"]);
+                    }
+                    Event::EndFile { eof, .. } => ended = eof,
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(loaded && ended, "loaded: {loaded}, ended at its end: {ended}");
+        std::fs::remove_file(wav).unwrap();
+    }
+}

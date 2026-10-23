@@ -89,6 +89,15 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   doesn't lower them. Seeking doesn't count, and an hour of video counts as an hour at any
   speed. When stats were first kept, what was watched before was estimated from the saved
   progress. *Clear stats…* at the bottom of the dialog starts them over, after asking.
+- **Folder settings** (⋯ menu, a video's right-click menu or the palette): settings for the
+  playing video's folder. Mark where the opening is (counted from the start) and where the
+  ending is (counted back from the end), and a *Skip opening* / *Skip ending* button shows in
+  the bottom-right corner while it plays (Enter skips; skipping an ending that runs to the end
+  goes to the next video). Both show as bands on the seek bar. A folder can also have its own
+  subtitle and audio languages, subtitle delay and timing (the starting point for each video;
+  *Use this timing for whole folder* in the subtitle menu sets them), when a video counts as
+  watched, auto-play, evening out the volume and speed. *Also use for other folders in …*
+  shares them with the parent folder's other subfolders, such as a show's seasons.
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
   evening out the volume,
   preferred subtitle and audio languages, hardware decoding, the theme and the accent color
@@ -147,6 +156,7 @@ in the app for an overview.
 | , / . | Previous / next frame (pauses) |
 | [ / ] | Slower / faster (Backspace: normal speed) |
 | PgUp / PgDn | Previous / next chapter |
+| Enter | Skip the opening or ending (see Folder settings) |
 | ↑ / ↓ | Volume |
 | M | Mute |
 | A | Next audio track |

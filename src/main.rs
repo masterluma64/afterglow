@@ -243,6 +243,10 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
+    /// The video whose folder settings are open.
+    folder_dialog: Option<PathBuf>,
+    /// The speed the playing video's folder set, if it set one.
+    folder_speed: Option<f64>,
     stats_open: bool,
     /// The command palette, while it is open.
     palette: Option<Palette>,
@@ -341,6 +345,8 @@ impl App {
             gone_scan: None,
             show_help: false,
             settings_open: false,
+            folder_dialog: None,
+            folder_speed: None,
             stats_open: false,
             palette: None,
             pending_drop: None,
@@ -571,6 +577,9 @@ impl eframe::App for App {
         if self.settings_open {
             self.settings_dialog(&ctx);
         }
+        if self.folder_dialog.is_some() {
+            self.folder_dialog(&ctx);
+        }
         if self.stats_open {
             self.stats_dialog(&ctx);
         }
@@ -665,6 +674,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("[ / ]", "Slower / faster"),
         ("Backspace", "Normal speed"),
         ("PgUp / PgDn", "Previous / next chapter"),
+        ("Enter", "Skip opening / ending"),
     ]),
     ("Sound", &[
         ("\u{E08E} / \u{E03E}", "Volume"),
@@ -755,7 +765,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

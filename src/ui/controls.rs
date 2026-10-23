@@ -44,6 +44,8 @@ impl App {
                     self.menu_item(ui, Action::RefreshFolder).on_hover_text(
                         "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.",
                     );
+                    let video = self.current_path().map(Path::to_path_buf).unwrap_or_default();
+                    self.menu_item(ui, Action::OpenFolderSettings(video)).on_hover_text("Settings for the playing video's folder");
                     ui.separator();
                     self.app_items(ui);
                     ui.separator();
@@ -140,6 +142,14 @@ impl App {
 
         let visuals = ui.visuals();
         let track = egui::Rect::from_center_size(rect.center(), vec2(rect.width(), 4.0));
+        if active {
+            // The opening and ending, as a band around the track.
+            for (_, start, end) in self.skips() {
+                let x = |t: f64| track.left() + track.width() * (t / duration) as f32;
+                let band = egui::Rect::from_x_y_ranges(x(start)..=x(end), track.y_range()).expand2(vec2(0.0, 3.0));
+                ui.painter().rect_filled(band, 3.0, visuals.text_color().gamma_multiply(0.2));
+            }
+        }
         ui.painter().rect_filled(track, 2.0, visuals.widgets.inactive.bg_fill);
         if active {
             let frac = (position / duration).clamp(0.0, 1.0) as f32;
@@ -256,6 +266,8 @@ impl App {
                     self.actions.push(Action::SetSubSpeed(speed));
                 }
             }
+            self.menu_item(ui, Action::UseSubTimingForFolder)
+                .on_hover_text("Videos in this folder start with this delay and timing, unless you set it for one of them");
         }
     }
 

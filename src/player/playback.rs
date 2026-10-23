@@ -111,13 +111,17 @@ impl App {
     pub(crate) fn load(&mut self, index: usize, paused: bool, resume: bool, ctx: &egui::Context) {
         self.up_next = None;
         self.save_current_progress();
-        let Ok(mpv) = &self.mpv else { return };
+        if self.mpv.is_err() {
+            return;
+        }
         let Some(path) = self.playlist.get(index).cloned() else { return };
         let name = display_name(&path);
         if !path.is_file() {
             return self.warn(format!("{name} was not found (moved or deleted?)"));
         }
         let start = if resume { self.store.resume_position(&path) } else { None };
+        self.apply_folder_settings(&path);
+        let Ok(mpv) = &self.mpv else { return };
         mpv.set("pause", if paused { "yes" } else { "no" });
         mpv.load_file(&path, start.unwrap_or(0.0), LOAD_TAG);
         self.loads.asked();
@@ -168,8 +172,12 @@ impl App {
         let Ok(mpv) = &self.mpv else { return };
         self.loaded = true;
         // Restore this video's track choices. The subtitle delay is global in
-        // mpv, so it is always set, back to 0 if nothing was chosen.
-        let prefs = self.current_path().and_then(|p| self.store.tracks(p)).cloned().unwrap_or_default();
+        // mpv, so it is always set: to the folder's if nothing was chosen for
+        // the video, else back to 0.
+        let prefs = match self.current_path() {
+            Some(path) => self.store.tracks(path).cloned().unwrap_or_else(|| self.folder_track_prefs(path)),
+            None => Default::default(),
+        };
         mpv.set("sub-delay", &prefs.sub_delay.to_string());
         mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
         // Subtitle files load in the background when sent without waiting, so
@@ -304,7 +312,7 @@ impl App {
                     self.finish(ctx);
                     if index + 1 >= self.playlist.len() {
                         self.notify("End of the playlist");
-                    } else if self.store.autoplay_next {
+                    } else if self.playlist.get(index).is_some_and(|p| self.store.autoplay_after(p)) {
                         self.up_next = Some(UpNext { index: index + 1, at: Instant::now() + AUTOPLAY_DELAY });
                     }
                     self.store.save();
@@ -349,6 +357,49 @@ impl App {
             }
         }
         self.watch_mark = Some((position, now));
+    }
+
+    /// Sets what a video's folder settings change in mpv, before it opens:
+    /// the languages, evening out the volume and the speed. A folder's speed
+    /// goes back to normal for a video whose folder doesn't set one.
+    pub(crate) fn apply_folder_settings(&mut self, video: &Path) {
+        let Ok(mpv) = &self.mpv else { return };
+        let settings = self.store.settings_for(Some(video));
+        mpv.set("slang", &settings.sub_languages);
+        mpv.set("alang", &settings.audio_languages);
+        mpv.set("af", if settings.level_volume { mpv::VOLUME_LEVELER } else { "" });
+        let speed = self.store.folder_settings(video).and_then(|(_, f)| f.speed);
+        if let Some(speed) = speed.or(self.folder_speed.map(|_| 1.0)) {
+            mpv.set("speed", &speed.to_string());
+        }
+        self.folder_speed = speed;
+    }
+
+    /// The subtitle timing a video starts with when none was chosen for it:
+    /// its folder's.
+    pub(crate) fn folder_track_prefs(&self, video: &Path) -> progress::TrackPrefs {
+        let folder = self.store.folder_settings(video).map(|(_, f)| f);
+        progress::TrackPrefs {
+            sub_delay: folder.and_then(|f| f.sub_delay).unwrap_or(0.0),
+            sub_speed: folder.and_then(|f| f.sub_speed),
+            ..Default::default()
+        }
+    }
+
+    /// The opening and ending of the loaded video, from its folder settings,
+    /// in seconds from its start.
+    pub(crate) fn skips(&self) -> Vec<(progress::Skip, f64, f64)> {
+        let folder = self.current_path().and_then(|p| self.store.folder_settings(p));
+        match folder {
+            Some((_, folder)) if self.loaded => folder.skips(self.playback.duration),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The opening or ending playing now, which the Skip button skips.
+    pub(crate) fn skip_now(&self) -> Option<(progress::Skip, f64, f64)> {
+        let position = self.playback.position;
+        self.skips().into_iter().find(|&(_, start, end)| position >= start && position < end - 0.5)
     }
 }
 

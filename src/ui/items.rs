@@ -65,7 +65,7 @@ impl App {
             Action::SetTrack { .. } => item(icons::SUBTITLES, "Subtitles", "").enabled(loaded),
             Action::CycleSubtitles => item(icons::SUBTITLES, "Next subtitle track", "S").enabled(loaded),
             Action::LoadSubtitle => item(icons::FILE_PLUS, "Load subtitle file…", "").enabled(loaded),
-            Action::ToggleLevelVolume => item(icons::MOON, "Even out volume", "").on(self.store.settings.level_volume),
+            Action::ToggleLevelVolume => item(icons::MOON, "Even out volume", "").on(self.store.settings_for(self.current_path()).level_volume),
             Action::AdjustSubDelay(by) => {
                 let label = if *by < 0.0 { "Show subtitles earlier" } else { "Show subtitles later" };
                 let key = match by {
@@ -128,10 +128,22 @@ impl App {
             }
             Action::TogglePin => item(icons::PIN, "Pin playlist", "").on(self.store.sidebar_pinned),
             Action::FocusSearch => item(icons::SEARCH, "Search playlist", "/").enabled(has_videos),
-            Action::SetAutoplayNext(_) => item(icons::SKIP_FORWARD, "Play next video automatically", "").on(self.store.autoplay_next),
+            Action::SetAutoplayNext(_) => item(icons::SKIP_FORWARD, "Play next video automatically", "").on(self.autoplay_next()),
             Action::ToggleFullscreen if self.fullscreen => item(icons::CORNERS_IN, "Exit fullscreen", "F"),
             Action::ToggleFullscreen => item(icons::CORNERS_OUT, "Fullscreen", "F"),
-            Action::OpenPalette => item(icons::COMMAND, "Find a command…", "Ctrl+K"),
+            Action::Skip => {
+                let label = match self.skip_now() {
+                    Some((progress::Skip::Ending, ..)) => "Skip ending",
+                    _ => "Skip opening",
+                };
+                item(icons::FAST_FORWARD, label, "Enter").enabled(self.skip_now().is_some())
+            }
+            Action::OpenFolderSettings(video) => {
+                let has_folder = video.parent().is_some_and(|f| !f.as_os_str().is_empty());
+                item(icons::SLIDERS, "Folder settings…", "").enabled(has_folder)
+            }
+            Action::UseSubTimingForFolder => item(icons::SLIDERS, "Use this timing for whole folder", "").enabled(loaded),
+            Action::OpenPalette =>item(icons::COMMAND, "Find a command…", "Ctrl+K"),
             Action::ShowStats => item(icons::CHART, "Stats…", ""),
             Action::OpenSettings => item(icons::GEAR, "Settings…", "E"),
             Action::ShowHelp => item(icons::KEYBOARD, "Keyboard shortcuts…", "?"),
@@ -171,6 +183,8 @@ pub(crate) fn entry_items(ui: &mut egui::Ui, app: &App, index: usize, path: &Pat
     offer(ui, app, Action::SetWatched(path.to_path_buf(), true), picked);
     offer(ui, app, Action::MarkWatchedBefore(index), picked);
     offer(ui, app, Action::SetWatched(path.to_path_buf(), false), picked);
+    ui.separator();
+    offer(ui, app, Action::OpenFolderSettings(path.to_path_buf()), picked);
     ui.separator();
     offer(ui, app, Action::Remove(index), picked).on_hover_text("The file is not touched");
 }
