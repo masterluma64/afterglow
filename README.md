@@ -93,7 +93,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   playing video's folder. Set where the opening ends (counted from the start) and where the
   ending starts (counted back from the end), and a *Skip opening* / *Skip ending* button shows
   in the bottom-right corner while it plays (Enter skips; skipping the ending goes to the next
-  video). Both show as bands on the seek bar. A folder can also have its own
+  video). *Mark end of opening here* and *Mark start of ending here* in the video's right-click
+  menu or the palette set them from the current time. Both show as bands on the seek bar. A
+  folder can also have its own
   subtitle and audio languages, subtitle delay and timing (the starting point for each video;
   *Use this timing for whole folder* in the subtitle menu sets them), when a video counts as
   watched, auto-play, evening out the volume and speed. *Also use for other folders in …*

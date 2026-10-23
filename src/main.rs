@@ -765,7 +765,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

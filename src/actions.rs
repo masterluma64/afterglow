@@ -80,6 +80,9 @@ pub(crate) enum Action {
     UseSubTimingForFolder,
     /// Skips the opening or ending playing now.
     Skip,
+    /// Marks the current time as where the opening ends or the ending
+    /// starts, for the playing video's folder.
+    MarkSkip(progress::Skip),
     /// Turns evening out the volume ("night mode") on or off.
     ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
@@ -323,6 +326,25 @@ impl App {
                         mpv.send(&["seek", &format!("{end:.3}"), "absolute+exact"]);
                     }
                     self.notify(if skip == progress::Skip::Opening { "Skipped opening" } else { "Skipped ending" });
+                }
+            }
+            Action::MarkSkip(skip) => {
+                if let Some((video, mut folder)) = self.playing_folder().filter(|_| self.loaded) {
+                    let Playback { position, duration, .. } = self.playback;
+                    let text = match skip {
+                        progress::Skip::Opening => {
+                            folder.opening_end = Some(position.round());
+                            format!("Opening ends at {} in this folder", format_time(position))
+                        }
+                        progress::Skip::Ending => {
+                            let before_end = (duration - position).max(0.0).round();
+                            folder.ending_start = Some(before_end);
+                            format!("Ending starts {} before the end in this folder", format_time(before_end))
+                        }
+                    };
+                    self.apply(Action::SetFolderSettings(video, folder), ctx);
+                    self.store.save();
+                    self.notify(text);
                 }
             }
             // Switches a folder setting, if the playing video's folder has

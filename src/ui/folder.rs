@@ -198,7 +198,7 @@ fn skip_field(ui: &mut egui::Ui, before_end: bool, value: &mut Option<f64>, init
                 Some(now) => format!("Use the current time ({})", format_span_time(now, before_end)),
                 None => "Use the current time, while this folder's video plays".into(),
             };
-            if ui.add_enabled(now.is_some(), egui::Button::new("Now").small()).on_hover_text(tip).clicked() {
+            if ui.add_enabled(now.is_some(), egui::Button::new("Now")).on_hover_text(tip).clicked() {
                 *time = now.unwrap_or_default().round();
             }
         });

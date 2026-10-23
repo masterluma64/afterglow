@@ -138,6 +138,8 @@ impl App {
                 };
                 item(icons::FAST_FORWARD, label, "Enter").enabled(self.skip_now().is_some())
             }
+            Action::MarkSkip(progress::Skip::Opening) => item(icons::FLAG, "Mark end of opening here", "").enabled(loaded),
+            Action::MarkSkip(progress::Skip::Ending) => item(icons::FLAG_CHECKERED, "Mark start of ending here", "").enabled(loaded),
             Action::OpenFolderSettings(video) => {
                 let has_folder = video.parent().is_some_and(|f| !f.as_os_str().is_empty());
                 item(icons::SLIDERS, "Folder settings…", "").enabled(has_folder)
