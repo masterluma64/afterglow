@@ -1,4 +1,4 @@
-<img src="assets/icon.png" width="96" alt="">
+<p align="center"><img src="assets/icon.png" width="96" alt=""></p>
 
 # Afterglow
 
