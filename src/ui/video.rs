@@ -71,7 +71,7 @@ impl App {
         let color = if notice.warning { Color32::from_rgb(255, 196, 92) } else { Color32::WHITE };
         let galley = ui.painter().layout(
             notice.text.clone(),
-            egui::FontId::proportional(16.0),
+            egui::TextStyle::Body.resolve(ui.style()),
             color.gamma_multiply(alpha),
             (rect.width() - 64.0).max(100.0),
         );
@@ -88,7 +88,7 @@ impl App {
         child.style_mut().visuals = video_visuals(self.store.settings.accent);
         child.add_space(rect.height() * 0.36);
         if let Err(e) = &self.mpv {
-            child.label(RichText::new(format!("{}  Afterglow can't play videos", icons::WARNING)).size(18.0));
+            child.label(RichText::new(format!("{}  Afterglow can't play videos", icons::WARNING)).bold());
             child.add_space(6.0);
             child.colored_label(child.visuals().error_fg_color, e);
             child.add_space(6.0);
@@ -114,7 +114,7 @@ impl App {
             let (index, left) = (up_next.index, up_next.at.saturating_duration_since(Instant::now()));
             child.label(RichText::new("Up next").weak());
             child.add_space(4.0);
-            child.label(RichText::new(display_name(&self.playlist[index])).size(20.0).strong());
+            child.label(RichText::new(display_name(&self.playlist[index])).bold());
             child.add_space(4.0);
             child.weak(format!("Starts in {} s", left.as_secs_f32().ceil() as u32));
             child.add_space(6.0);
@@ -141,7 +141,7 @@ impl App {
             let path = &self.playlist[index];
             let resume = self.store.resume_position(path);
             let verb = if resume.is_some() { "Continue" } else { "Play" };
-            let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, display_name(path))).size(18.0);
+            let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, display_name(path)));
             child.spacing_mut().button_padding = vec2(18.0, 9.0);
             if child.add(dialogs::primary_button(&child, text)).on_hover_text("Space").clicked() {
                 self.actions.push(Action::Play(index));
@@ -160,7 +160,7 @@ impl App {
         };
         child.label(RichText::new(icons::FOLDER_PLUS).size(44.0).weak());
         child.add_space(6.0);
-        child.label(RichText::new(title).size(18.0));
+        child.label(RichText::new(title).bold());
         child.weak(hint);
     }
 
@@ -176,7 +176,7 @@ impl App {
             rect.center(),
             egui::Align2::CENTER_CENTER,
             "Drop a folder to play it, or videos to add them to the playlist",
-            egui::FontId::proportional(20.0),
+            egui::TextStyle::Body.resolve(&ctx.global_style()),
             Color32::WHITE,
         );
     }

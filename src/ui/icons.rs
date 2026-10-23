@@ -1,6 +1,7 @@
-//! Phosphor icon font (https://phosphoricons.com), embedded and registered
-//! with egui. Regular icons render inline in normal text; use [`fill`] for
-//! the solid variant.
+//! Fonts embedded and registered with egui: the Phosphor icon font
+//! (<https://phosphoricons.com>), whose regular icons render inline in normal
+//! text (use [`fill`] for the solid variant), and Ubuntu Medium for bold text
+//! (see [`Bold`]).
 
 use std::sync::Arc;
 
@@ -69,8 +70,30 @@ pub fn install(ctx: &egui::Context) {
     proportional.push("phosphor".into());
     let mut fill = vec![FILL_FAMILY.to_string()];
     fill.extend(proportional.iter().cloned());
+    let mut bold = vec![BOLD_FAMILY.to_string()];
+    bold.extend(proportional.iter().cloned());
     fonts.families.insert(FontFamily::Name(FILL_FAMILY.into()), fill);
+    // The same typeface as the text (egui's Ubuntu Light), in a heavier weight.
+    fonts.font_data.insert(
+        BOLD_FAMILY.into(),
+        Arc::new(FontData::from_static(include_bytes!("../../assets/fonts/Ubuntu-Medium.ttf"))),
+    );
+    fonts.families.insert(FontFamily::Name(BOLD_FAMILY.into()), bold);
     ctx.set_fonts(fonts);
+}
+
+const BOLD_FAMILY: &str = "bold";
+
+/// Bold text, for titles and the values that matter; the text size stays the
+/// same everywhere.
+pub trait Bold {
+    fn bold(self) -> RichText;
+}
+
+impl Bold for RichText {
+    fn bold(self) -> RichText {
+        self.family(FontFamily::Name(BOLD_FAMILY.into())).strong()
+    }
 }
 
 /// The solid variant of an icon.

@@ -76,7 +76,7 @@ impl App {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     if let Some(path) = self.current_path() {
                         ui.separator();
-                        ui.add(egui::Label::new(RichText::new(display_name(path)).strong()).truncate());
+                        ui.add(egui::Label::new(RichText::new(display_name(path)).bold()).truncate());
                     }
                 });
             });
@@ -221,7 +221,7 @@ impl App {
         ui.add_enabled_ui(self.loaded, |ui| {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
             let (response, _) = ui::menu_button(button).ui(ui, |ui| {
-                ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).small().weak());
+                ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).bold());
                 self.track_items(ui, kind);
             });
             response.on_hover_text(tip);
@@ -278,7 +278,7 @@ impl App {
         let label = if speed == 1.0 { label.weak() } else { label.strong() };
         let button = egui::Button::new(label).frame_when_inactive(false);
         let (response, _) = ui::menu_button(button).ui(ui, |ui| {
-            ui.label(RichText::new("Speed").small().weak());
+            ui.label(RichText::new("Speed").bold());
             self.speed_items(ui);
         });
         response.on_hover_text("Playback speed ([ and ], Backspace to reset)");

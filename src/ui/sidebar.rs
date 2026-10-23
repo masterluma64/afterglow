@@ -46,7 +46,7 @@ pub(crate) fn playlist_row(
     ui::context_menu(&resp, |ui| {
         if let Some(selection) = selection.filter(|s| s.len() > 1) {
             let videos = format!("{} videos", selection.len());
-            ui.label(RichText::new(format!("{videos} selected")).small().weak());
+            ui.label(RichText::new(format!("{videos} selected")).weak());
             if ui.button(format!("{}  Mark as watched", icons::CHECK)).clicked() {
                 actions.push(Action::SetWatchedMany(selection.to_vec(), true));
             }
@@ -202,10 +202,10 @@ impl App {
     pub(crate) fn sidebar_contents(&mut self, ui: &mut egui::Ui) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("PLAYLIST").small().weak());
+            ui.label(RichText::new("Playlist").bold());
             let count = self.playlist.len();
             if count > 0 {
-                ui.label(RichText::new(format!("{count} video{}", if count == 1 { "" } else { "s" })).small().weak());
+                ui.label(RichText::new(format!("{count} video{}", if count == 1 { "" } else { "s" })).weak());
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let pinned = self.store.sidebar_pinned;

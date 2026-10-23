@@ -14,8 +14,9 @@ pub(crate) enum Action {
     OpenAndPlay(Vec<PathBuf>),
     /// Videos the folder watch found new in the playlist's folder.
     Arrived(Vec<PathBuf>),
-    /// Answers what dropped videos should do, and remembers it.
-    ChooseDropBehavior(progress::DroppedVideos),
+    /// Answers what dropped videos should do; with `remember`, it becomes the
+    /// default and isn't asked again.
+    ChooseDropBehavior { behavior: progress::DroppedVideos, remember: bool },
     Play(usize),
     /// Plays a video from its start (the next one after a video finishes).
     PlayFromStart(usize),
@@ -246,11 +247,13 @@ impl App {
                 let job = disk::Job::Arrived(videos);
                 self.start_disk(job, "new videos".into());
             }
-            Action::ChooseDropBehavior(behavior) => {
-                let mut settings = self.store.settings.clone();
-                settings.dropped_videos = Some(behavior);
-                self.store.set_settings(settings);
-                self.store.save();
+            Action::ChooseDropBehavior { behavior, remember } => {
+                if remember {
+                    let mut settings = self.store.settings.clone();
+                    settings.dropped_videos = Some(behavior);
+                    self.store.set_settings(settings);
+                    self.store.save();
+                }
                 if let Some(videos) = self.pending_drop.take() {
                     self.drop_videos(videos, behavior, ctx);
                 }

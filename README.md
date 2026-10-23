@@ -21,8 +21,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     *Refresh folder* (R, in the ⋯ menu) also drops videos whose files are gone.
   - The ⋯ menu lists recently opened folders.
   - *Add videos* (I) appends them; if nothing is playing, the first one starts.
-  - Dropping videos onto the window adds them or replaces the playlist: the first time,
-    Afterglow asks which, and remembers it (changeable in Settings).
+  - Dropping videos onto the window adds them or replaces the playlist. Afterglow asks
+    which, until you tick *Save as default* (changeable in Settings).
   - Each video shows its length, and the header shows how much of the playlist's total
     running time you've watched. Lengths of unplayed videos are read in the background
     by a headless mpv and remembered.
@@ -128,7 +128,8 @@ distribute it more widely, switch to an LGPL build of libmpv (mpv built with
 `-Dgpl=false`, with an FFmpeg built without `--enable-gpl`), which a closed-source program
 may load as a separate, replaceable DLL.
 
-Icons are [Phosphor](https://phosphoricons.com) (MIT), embedded from `assets/fonts`.
+Icons are [Phosphor](https://phosphoricons.com) (MIT) and bold text is Ubuntu Medium (Ubuntu
+Font Licence, `assets/fonts/UFL.txt`), both embedded from `assets/fonts`.
 The app icon is drawn in code (`src/ui/app_icon.rs`); `cargo run --example make_icon`
 regenerates `assets/icon.ico`, which the build script puts into the executable.
 

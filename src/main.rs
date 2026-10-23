@@ -10,6 +10,7 @@ use library::{disk, playlist, progress, stats, watch};
 use platform::{clock, instance, media_keys, power, screen};
 use player::{dll_search, mpv, playback, thumbnails};
 use ui::{app_icon, commands, controls, dialogs, icons, video};
+use ui::icons::Bold;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -111,7 +112,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| {
             icons::install(&cc.egui_ctx);
-            set_spacing(&cc.egui_ctx);
+            set_style(&cc.egui_ctx);
             let other_starts = other_starts.map(|listener| listener.listen(cc.egui_ctx.clone()));
             Ok(Box::new(App::new(&cc.egui_ctx, (store, load_warning), open, other_starts, cc.get_proc_address.clone())))
         }),
@@ -246,6 +247,8 @@ struct App {
     palette: Option<Palette>,
     /// Dropped videos waiting for the answer to what drops should do.
     pending_drop: Option<Vec<PathBuf>>,
+    /// Whether the answer to the dropped-videos question becomes the default.
+    drop_remember: bool,
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
@@ -340,6 +343,7 @@ impl App {
             stats_open: false,
             palette: None,
             pending_drop: None,
+            drop_remember: false,
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
             other_starts,
@@ -618,9 +622,14 @@ const ACCENTS: [(&str, [u8; 3]); 6] = [
     ("Teal", [22, 145, 150]),
 ];
 
-/// Roomier than egui's defaults, so buttons and fields are easier to hit.
-fn set_spacing(ctx: &egui::Context) {
+/// Roomier than egui's defaults, so buttons and fields are easier to hit,
+/// and one text size everywhere: titles stand out by weight, hints by color.
+fn set_style(ctx: &egui::Context) {
     ctx.all_styles_mut(|style| {
+        let body = style.text_styles[&egui::TextStyle::Body].size;
+        for font in style.text_styles.values_mut() {
+            font.size = body;
+        }
         let spacing = &mut style.spacing;
         spacing.button_padding = vec2(8.0, 4.0);
         spacing.interact_size.y = 24.0;
@@ -645,7 +654,7 @@ fn display_name(path: &Path) -> String {
 /// The keyboard shortcuts, by topic, as shown with `?`.
 /// Arrows are Phosphor icons (see `icons::ARROW_*`); the text font has none.
 const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
-    ("PLAYBACK", &[
+    ("Playback", &[
         ("Space / K", "Play / pause"),
         ("J / L", "Seek back / forward (Shift: further)"),
         ("\u{E058} / \u{E06C}", "Seek back / forward (Shift: further)"),
@@ -656,19 +665,19 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("Backspace", "Normal speed"),
         ("PgUp / PgDn", "Previous / next chapter"),
     ]),
-    ("SOUND", &[
+    ("Sound", &[
         ("\u{E08E} / \u{E03E}", "Volume"),
         ("M", "Mute"),
         ("A", "Cycle audio tracks"),
     ]),
-    ("SUBTITLES", &[
+    ("Subtitles", &[
         ("S", "Cycle subtitles"),
         ("T", "Sync subtitles panel"),
         ("Z / X", "Delay −/+ 0.1 s (Shift: 1 s)"),
         ("Ctrl+\u{E058} / \u{E06C}", "Show previous / next line now"),
         ("G / H", "Mark subtitle shown / line spoken"),
     ]),
-    ("PLAYLIST", &[
+    ("Playlist", &[
         ("N / P", "Next / previous video"),
         ("W", "Mark watched / unwatched"),
         ("/", "Search (\u{E08E} \u{E03E} pick, Enter plays)"),
@@ -679,7 +688,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("Ctrl+click", "Select several videos (Shift: a range)"),
         ("Delete", "Remove the selected videos"),
     ]),
-    ("WINDOW", &[
+    ("Window", &[
         ("F", "Fullscreen"),
         ("Esc", "Clear the selection, leave fullscreen"),
         ("E", "Settings"),

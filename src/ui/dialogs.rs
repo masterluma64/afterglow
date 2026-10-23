@@ -47,16 +47,16 @@ impl App {
                 ui.set_width(360.0);
                 // Roomier buttons, like the menus.
                 ui.spacing_mut().button_padding = vec2(12.0, 6.0);
-                let hint = |ui: &mut egui::Ui, text: &str| ui.label(RichText::new(text).small().weak());
+                let hint = |ui: &mut egui::Ui, text: &str| ui.label(RichText::new(text).weak());
                 if !subtitles_on {
                     let warning = format!("{}  Subtitles are off: turn them on first (S).", icons::WARNING);
                     ui.label(RichText::new(warning).color(ui.visuals().warn_fg_color));
                     ui.add_space(6.0);
                 }
 
-                card(ui, "1  ·  SHIFT ALL SUBTITLES", |ui| {
+                card(ui, "1  ·  Shift all subtitles", |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{sub_delay:+.1} s")).size(20.0).strong());
+                        ui.label(RichText::new(format!("{sub_delay:+.1} s")).bold());
                         let state = match sub_delay {
                             d if d > 0.0 => "shown later than in the file",
                             d if d < 0.0 => "shown earlier than in the file",
@@ -88,7 +88,7 @@ impl App {
                 });
                 ui.add_space(6.0);
 
-                card(ui, "2  ·  OR MATCH THE LINE YOU JUST HEARD", |ui| {
+                card(ui, "2  ·  Or match the line you just heard", |ui| {
                     ui.horizontal(|ui| {
                         let previous = format!("{}  Previous line", icons::ARROW_LEFT);
                         if ui.button(previous).on_hover_text("Its subtitle already went by (Ctrl+\u{E058})").clicked() {
@@ -103,7 +103,7 @@ impl App {
                 });
                 ui.add_space(6.0);
 
-                card(ui, "3  ·  OR MEASURE ONE LINE", |ui| {
+                card(ui, "3  ·  Or measure one line", |ui| {
                     let [appeared, spoken] = self.line_marks;
                     let mark = |marked: Option<f64>, label: &str, key: &str| match marked {
                         Some(at) => format!("{}  {label} at {}", icons::CHECK, format_time(at)),
@@ -121,7 +121,7 @@ impl App {
                 });
                 ui.add_space(6.0);
 
-                card(ui, "DRIFTING FURTHER OFF OVER TIME?", |ui| {
+                card(ui, "Drifting further off over time?", |ui| {
                     ui.horizontal(|ui| {
                         for (speed, label) in SUB_TIMINGS {
                             let selected = (sub_speed - speed).abs() < 1e-6;
@@ -166,13 +166,13 @@ impl App {
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("settings")).show(ctx, |ui| {
             ui.set_width(470.0);
-            ui.label(RichText::new("Settings").size(18.0).strong());
+            ui.label(RichText::new("Settings").bold());
             ui.add_space(10.0);
             // Labels as wide in every card, so the controls line up.
             let grid = |id: &str| egui::Grid::new(id).num_columns(2).spacing([16.0, 10.0]).min_col_width(150.0);
             let max_height = (ui.ctx().content_rect().height() - 180.0).max(200.0);
             egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
-                card(ui, "PLAYBACK", |ui| {
+                card(ui, "Playback", |ui| {
                     grid("settings-playback").show(ui, |ui| {
                         ui.label("Seek step");
                         ui.add(egui::DragValue::new(&mut settings.seek_short).range(1.0..=120.0).suffix(" s").speed(0.2));
@@ -202,7 +202,7 @@ impl App {
                     });
                 });
                 ui.add_space(8.0);
-                card(ui, "LANGUAGES", |ui| {
+                card(ui, "Languages", |ui| {
                     grid("settings-languages").show(ui, |ui| {
                         ui.label("Subtitles");
                         ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).margin(TEXT_MARGIN).hint_text("e.g. en,eng").desired_width(200.0))
@@ -215,7 +215,7 @@ impl App {
                     });
                 });
                 ui.add_space(8.0);
-                card(ui, "VIDEO AND APPEARANCE", |ui| {
+                card(ui, "Video and appearance", |ui| {
                     grid("settings-appearance").show(ui, |ui| {
                         ui.label("Hardware decoding");
                         ui.checkbox(&mut settings.hardware_decoding, "Decode video on the GPU")
@@ -292,7 +292,7 @@ impl App {
         let videos = if count == 1 { "this video".to_string() } else { format!("these {count} videos") };
         let modal = egui::Modal::new(egui::Id::unique("drop-behavior")).show(ctx, |ui| {
             ui.set_width(420.0);
-            ui.label(RichText::new("Dropped videos").size(18.0).strong());
+            ui.label(RichText::new("Dropped videos").bold());
             ui.add_space(6.0);
             ui.label(format!("What should happen with {videos}?"));
             ui.add_space(10.0);
@@ -306,12 +306,13 @@ impl App {
                 let replace = format!("Start a new playlist with {them}.");
                 for (choice, icon, title, detail) in [(D::Add, icons::PLUS, "Add", add), (D::Replace, icons::FILE_VIDEO, "Replace", replace)] {
                     if choice_card(ui, width, icon, title, &detail).clicked() {
-                        self.actions.push(Action::ChooseDropBehavior(choice));
+                        self.actions.push(Action::ChooseDropBehavior { behavior: choice, remember: self.drop_remember });
                     }
                 }
             });
             ui.add_space(10.0);
-            ui.label(RichText::new("Your choice is remembered; you can change it in Settings.").small().weak());
+            ui.checkbox(&mut self.drop_remember, "Save as default")
+                .on_hover_text("Do this every time videos are dropped, without asking. You can change it in Settings.");
         });
         // Esc or a click outside cancels the drop without remembering anything.
         if modal.should_close() {
@@ -324,7 +325,7 @@ impl App {
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("shortcuts")).show(ctx, |ui| {
             ui.set_width(720.0);
-            ui.label(RichText::new("Keyboard shortcuts").size(18.0).strong());
+            ui.label(RichText::new("Keyboard shortcuts").bold());
             ui.add_space(10.0);
             let max_height = (ui.ctx().content_rect().height() - 140.0).max(200.0);
             egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
@@ -346,7 +347,7 @@ impl App {
                 });
             });
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Press ? or Esc to close.").small().weak());
+                ui.label(RichText::new("Press ? or Esc to close.").weak());
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = ui.button("Close").clicked());
             });
         });
@@ -360,11 +361,11 @@ impl App {
         let modal = egui::Modal::new(egui::Id::unique("reset-progress")).show(ctx, |ui| {
             ui.set_width(400.0);
             let title = format!("{}  Reset all progress?", icons::WARNING);
-            ui.label(RichText::new(title).size(18.0).strong().color(error_color(ui.visuals().dark_mode)));
+            ui.label(RichText::new(title).bold().color(error_color(ui.visuals().dark_mode)));
             ui.add_space(8.0);
             ui.label("This forgets the saved position and watched state of every video.");
             ui.add_space(4.0);
-            ui.label(RichText::new("Your playlist, settings and stats stay. This can't be undone.").small().weak());
+            ui.label(RichText::new("Your playlist, settings and stats stay. This can't be undone.").weak());
             ui.add_space(14.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let reset = egui::Button::new(RichText::new("Reset all progress").color(Color32::WHITE)).fill(DANGER_FILL);
@@ -395,7 +396,7 @@ impl App {
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("stats")).show(ctx, |ui| {
             ui.set_width(440.0);
-            ui.label(RichText::new("Stats").size(18.0).strong());
+            ui.label(RichText::new("Stats").bold());
             ui.add_space(10.0);
 
             let gap = 8.0;
@@ -424,12 +425,12 @@ impl App {
 
             if let Some((_, top)) = s.top_series.first() {
                 ui.add_space(14.0);
-                ui.label(RichText::new("MOST WATCHED").small().weak());
+                ui.label(RichText::new("Most watched").bold());
                 ui.add_space(2.0);
                 for (name, tally) in &s.top_series {
                     ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
                         ui.label(RichText::new(videos(tally.finished)).weak());
-                        ui.label(RichText::new(format_total(tally.seconds)).strong());
+                        ui.label(RichText::new(format_total(tally.seconds)).bold());
                         // The name takes the room left, cut off with … when long.
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                             ui.add(egui::Label::new(name.as_str()).truncate()).on_hover_text(name.as_str());
@@ -448,7 +449,7 @@ impl App {
                     format_total(s.before.seconds),
                     videos(s.before.finished)
                 );
-                ui.label(RichText::new(before).small().weak());
+                ui.label(RichText::new(before).weak());
                 ui.add_space(6.0);
             }
             ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
@@ -474,10 +475,10 @@ fn stat_tile(ui: &mut egui::Ui, width: f32, label: &str, value: &str, detail: Op
             // All tiles as tall as one with a detail line.
             ui.set_min_height(58.0);
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(RichText::new(label).small().weak());
-            ui.label(RichText::new(value).size(19.0).strong());
+            ui.label(RichText::new(label).weak());
+            ui.label(RichText::new(value).bold());
             if let Some(detail) = detail {
-                ui.label(RichText::new(detail).small().weak());
+                ui.label(RichText::new(detail).weak());
             }
         });
     });
@@ -498,10 +499,10 @@ fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
     let most = daily.iter().map(|(_, s)| *s).fold(0.0, f64::max);
     egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("LAST 30 DAYS").small().weak());
+            ui.label(RichText::new("Last 30 days").bold());
             if most >= 1.0 {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.label(RichText::new(format!("Most in a day: {}", format_total(most))).small().weak());
+                    ui.label(RichText::new(format!("Most in a day: {}", format_total(most))).weak());
                 });
             }
         });
@@ -530,8 +531,8 @@ fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
         ui.horizontal(|ui| {
             // "Sep 23", without the year.
             let first = daily.first().map(|(d, _)| stats::format_date(*d)).unwrap_or_default();
-            ui.label(RichText::new(first.split(',').next().unwrap_or_default()).small().weak());
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new("Today").small().weak()));
+            ui.label(RichText::new(first.split(',').next().unwrap_or_default()).weak());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui.label(RichText::new("Today").weak()));
         });
     });
 }
@@ -541,7 +542,7 @@ fn card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)
     let width = ui.available_width();
     egui::Frame::new().fill(tile_fill(ui)).corner_radius(8).inner_margin(egui::Margin::symmetric(12, 10)).show(ui, |ui| {
         ui.set_width(width - 24.0);
-        ui.label(RichText::new(title).small().weak());
+        ui.label(RichText::new(title).bold());
         ui.add_space(4.0);
         add_contents(ui);
     });
@@ -580,8 +581,8 @@ fn choice_card(ui: &mut egui::Ui, width: f32, icon: &str, title: &str, detail: &
             ui.set_width(width - 24.0);
             ui.label(RichText::new(icon).size(22.0));
             ui.add_space(4.0);
-            ui.label(RichText::new(title).strong());
-            ui.label(RichText::new(detail).small().weak());
+            ui.label(RichText::new(title).bold());
+            ui.label(RichText::new(detail).weak());
         });
     });
     let resp = ui.interact(inner.response.rect, ui.scope_id().with(title), Sense::click());
