@@ -25,7 +25,15 @@ pub(crate) fn menu_button(button: egui::Button<'_>) -> egui::containers::menu::M
 
 /// A right-click menu in our style.
 pub(crate) fn context_menu(response: &egui::Response, add_contents: impl FnOnce(&mut egui::Ui)) {
-    egui::Popup::context_menu(response).style(menu_style).show(add_contents);
+    egui::Popup::context_menu(response).style(menu_style).show(|ui| fit_to_window(ui, add_contents));
+}
+
+/// A menu's contents, scrolling once they are taller than the window, so
+/// in a small window the last items can still be reached.
+pub(crate) fn fit_to_window(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    // Room for the menu's frame and a gap to the window's edges.
+    let max_height = (ui.ctx().content_rect().height() - 40.0).max(80.0);
+    egui::ScrollArea::vertical().max_height(max_height).show(ui, add_contents);
 }
 
 /// Secondary text, dimmed, except on a selected (accent-colored) background:
@@ -50,4 +58,10 @@ pub(crate) fn text_field(ui: &mut egui::Ui, edit: egui::TextEdit<'_>, id: egui::
         .stroke((1.0, outline))
         .inner_margin(margin - egui::Margin::same(1));
     ui.add(edit.id(id).frame(frame))
+}
+
+/// A submenu whose contents scroll once they are taller than the window
+/// (see `fit_to_window`).
+pub(crate) fn submenu(ui: &mut egui::Ui, label: impl Into<egui::WidgetText>, add_contents: impl FnOnce(&mut egui::Ui)) {
+    ui.menu_button(label, |ui| fit_to_window(ui, add_contents));
 }

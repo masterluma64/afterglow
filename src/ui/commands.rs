@@ -76,12 +76,12 @@ impl App {
         ui.separator();
         let loaded = self.loaded;
         ui.add_enabled_ui(loaded, |ui| {
-            ui.menu_button(format!("{}  Audio track", icons::WAVEFORM), |ui| self.track_items(ui, "audio"));
-            ui.menu_button(format!("{}  Subtitles", icons::SUBTITLES), |ui| self.track_items(ui, "sub"));
-            ui.menu_button(format!("{}  Speed  {}", icons::GAUGE, format_speed(self.playback.speed)), |ui| self.speed_items(ui));
+            ui::submenu(ui, format!("{}  Audio track", icons::WAVEFORM), |ui| self.track_items(ui, "audio"));
+            ui::submenu(ui, format!("{}  Subtitles", icons::SUBTITLES), |ui| self.track_items(ui, "sub"));
+            ui::submenu(ui, format!("{}  Speed  {}", icons::GAUGE, format_speed(self.playback.speed)), |ui| self.speed_items(ui));
         });
         ui.add_enabled_ui(loaded && !self.chapters.is_empty(), |ui| {
-            ui.menu_button(format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
+            ui::submenu(ui, format!("{}  Chapters", icons::LIST_NUMBERS), |ui| {
                 let now = chapter_at(&self.chapters, self.playback.position);
                 for (i, chapter) in self.chapters.iter().enumerate() {
                     let label = egui::Button::selectable(now == Some(i), &chapter.title)

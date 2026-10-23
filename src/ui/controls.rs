@@ -29,13 +29,13 @@ impl App {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
-                let (response, _) = ui::menu_button(more).ui(ui, |ui| {
+                let (response, _) = ui::menu_button(more).ui(ui, |ui| ui::fit_to_window(ui, |ui| {
                     let recent = self.store.recent_folders.clone();
                     let recent_videos = self.store.recent_videos.clone();
                     // Checked in the background while the menu is open.
                     self.check_recent(ui.ctx());
                     ui.add_enabled_ui(!recent.is_empty(), |ui| {
-                        ui.menu_button(format!("{}  Recent folders", icons::RECENT), |ui| {
+                        ui::submenu(ui, format!("{}  Recent folders", icons::RECENT), |ui| {
                             for folder in &recent {
                                 let found = self.recent.found(folder);
                                 let tip = if found { folder.display().to_string() } else { format!("{} (not found)", folder.display()) };
@@ -46,7 +46,7 @@ impl App {
                         });
                     });
                     ui.add_enabled_ui(!recent_videos.is_empty(), |ui| {
-                        ui.menu_button(format!("{}  Recent videos", icons::RECENT), |ui| {
+                        ui::submenu(ui, format!("{}  Recent videos", icons::RECENT), |ui| {
                             for video in &recent_videos {
                                 let found = self.recent.found(video);
                                 let tip = if found { video.display().to_string() } else { format!("{} (not found)", video.display()) };
@@ -66,7 +66,7 @@ impl App {
                     self.app_items(ui);
                     ui.separator();
                     self.menu_item(ui, Action::ConfirmResetProgress);
-                });
+                }));
                 response.on_hover_text("More");
                 // The title takes the space left between the buttons.
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -226,7 +226,7 @@ impl App {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
             let (response, _) = ui::menu_button(button).ui(ui, |ui| {
                 ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).bold());
-                self.track_items(ui, kind);
+                ui::fit_to_window(ui, |ui| self.track_items(ui, kind));
             });
             response.on_hover_text(tip);
         });
