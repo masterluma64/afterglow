@@ -173,6 +173,10 @@ impl App {
             child.ctx().request_repaint_after(Duration::from_millis(200).min(left));
             return;
         }
+        if let Some(index) = self.ended.filter(|&i| i < self.playlist.len()) {
+            self.end_screen(&mut child, index);
+            return;
+        }
         if let Some(index) = self.continue_target() {
             let path = &self.playlist[index];
             let resume = self.store.resume_position(path);
@@ -198,6 +202,53 @@ impl App {
         child.add_space(6.0);
         child.label(RichText::new(title).bold());
         child.weak(hint);
+    }
+
+    /// What shows once a video played to its end and nothing starts after it:
+    /// the next video to play, or for the last one (or a video opened by
+    /// itself), something new to open; and watching it again.
+    fn end_screen(&mut self, ui: &mut egui::Ui, index: usize) {
+        let next = (index + 1 < self.playlist.len()).then_some(index + 1);
+        ui.label(RichText::new(format!("{}  Watched", icons::CHECK)).weak());
+        ui.add_space(4.0);
+        ui.label(RichText::new(self.video_name(&self.playlist[index])).bold());
+        ui.add_space(4.0);
+        match next {
+            Some(next) => ui.weak(format!("Next: {}", self.video_name(&self.playlist[next]))),
+            None if self.single_video() => ui.weak("Open another video, or watch it again."),
+            None => ui.weak("That was the last video in the playlist."),
+        };
+        ui.add_space(12.0);
+        // Centred under the text by the buttons' width on the last frame.
+        let id = egui::Id::unique("end-screen-buttons");
+        let width = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().button_padding = vec2(14.0, 6.0);
+            ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+            let start = ui.cursor().left();
+            if let Some(next) = next {
+                let play = dialogs::primary_button(ui, format!("{}  Play next", icons::PLAY));
+                if ui.add(play).on_hover_text("Space").clicked() {
+                    self.actions.push(Action::PlayFromStart(next));
+                }
+            } else {
+                let open = if self.single_video() { Action::OpenVideo } else { Action::OpenFolder };
+                let item = self.item(&open);
+                let button = dialogs::primary_button(ui, format!("{}  {}", item.icon, item.label));
+                if ui.add(button).on_hover_text(item.key).clicked() {
+                    self.actions.push(open);
+                }
+            }
+            let again = self.item(&Action::PlayOver(index));
+            if ui.button(format!("{}  {}", again.icon, again.label)).clicked() {
+                self.actions.push(Action::PlayOver(index));
+            }
+            let measured = ui.min_rect().right() - start;
+            if (measured - width).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(id, measured));
+                ui.ctx().request_repaint();
+            }
+        });
     }
 
     pub(crate) fn drop_overlay(&self, ctx: &egui::Context, rect: egui::Rect) {

@@ -110,6 +110,7 @@ impl App {
     /// to continue.
     pub(crate) fn load(&mut self, index: usize, paused: bool, resume: bool, ctx: &egui::Context) {
         self.up_next = None;
+        self.ended = None;
         self.save_current_progress();
         if self.mpv.is_err() {
             return;
@@ -335,10 +336,11 @@ impl App {
                         self.store.finish(&path);
                     }
                     self.finish(ctx);
-                    if index + 1 >= self.playlist.len() {
-                        self.notify("End of the playlist");
-                    } else if self.playlist.get(index).is_some_and(|p| self.store.autoplay_after(p)) {
+                    let autoplay = self.playlist.get(index).is_some_and(|p| self.store.autoplay_after(p));
+                    if index + 1 < self.playlist.len() && autoplay {
                         self.up_next = Some(UpNext { index: index + 1, at: Instant::now() + AUTOPLAY_DELAY });
+                    } else {
+                        self.ended = Some(index);
                     }
                     self.store.save();
                 }

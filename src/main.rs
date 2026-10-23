@@ -215,6 +215,9 @@ struct App {
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
     up_next: Option<UpNext>,
+    /// The video that just played to its end, when no next video starts by
+    /// itself: the video area shows what can be done next (see `end_screen`).
+    ended: Option<usize>,
     watch: watch::FolderWatch,
     /// Playlist files found missing at startup.
     missing_files: Option<Receiver<HashSet<PathBuf>>>,
@@ -338,6 +341,7 @@ impl App {
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
             up_next: None,
+            ended: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
             missing_files,
             drag_row: None,

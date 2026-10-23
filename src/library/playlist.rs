@@ -148,6 +148,7 @@ impl App {
     pub(crate) fn save_playlist(&mut self) {
         // Indices may have shifted.
         self.up_next = None;
+        self.ended = None;
         self.names.clear();
         self.summary = None;
         self.request_durations();

@@ -50,6 +50,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
   5-second countdown (this can be turned off in Settings), from its beginning. Marking the playing
   video watched (W) skips straight to the next one.
+  When a video ends and nothing starts after it (it was the last one, auto-play is off or the
+  countdown was cancelled), an end screen offers the next video, or opening something new,
+  and playing it from the start.
   On startup the video you were watching is opened, paused on the exact frame where you
   left off.
 - **Subtitles**: embedded tracks and matching external files (`Movie.srt`,

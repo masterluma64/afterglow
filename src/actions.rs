@@ -528,10 +528,10 @@ impl App {
                 }
                 self.store.save();
                 if !autoplay {
-                    self.up_next = None;
+                    self.cancel_up_next();
                 }
             }
-            Action::CancelUpNext => self.up_next = None,
+            Action::CancelUpNext => self.cancel_up_next(),
             Action::Next | Action::Prev => {
                 let next = matches!(action, Action::Next);
                 if let Some(up_next) = self.up_next.as_ref().filter(|_| next && self.current.is_none()) {
@@ -565,7 +565,7 @@ impl App {
                 if !self.selected.is_empty() {
                     self.selected.clear();
                 } else if self.up_next.is_some() {
-                    self.up_next = None;
+                    self.cancel_up_next();
                 } else if self.peek.is_some() {
                     self.peek = None;
                 } else if self.fullscreen {
@@ -592,6 +592,9 @@ impl App {
                     self.notify(if self.playback.paused { "Playing" } else { "Paused" });
                 } else if let Some(up_next) = self.up_next.as_ref().filter(|_| self.current.is_none()) {
                     self.play_from_start(up_next.index, ctx);
+                } else if let Some(next) = self.ended.map(|i| i + 1).filter(|&i| i < self.playlist.len() && self.current.is_none()) {
+                    // What the end screen offers first.
+                    self.play_from_start(next, ctx);
                 } else if let Some(index) = self.current.or_else(|| self.continue_target()) {
                     self.play(index, ctx);
                 }
@@ -735,6 +738,14 @@ impl App {
         let video = self.current_path()?;
         let folder = self.store.folder_settings(video).map(|(_, f)| f.clone()).unwrap_or_default();
         Some((video.to_path_buf(), folder))
+    }
+
+    /// Stops the countdown to the next video, which leaves the end screen
+    /// for the video that finished.
+    fn cancel_up_next(&mut self) {
+        if let Some(up_next) = self.up_next.take() {
+            self.ended = up_next.index.checked_sub(1);
+        }
     }
 
     /// Whether the next video starts by itself after the playing one (or
