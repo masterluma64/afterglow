@@ -246,8 +246,9 @@ impl App {
         let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 72.0));
         let modal = egui::Modal::new(id).area(area).show(ctx, |ui| {
             ui.set_width(480.0);
+            // Taller than other text fields: it is what the palette is for.
             let edit = egui::TextEdit::singleline(&mut palette.query)
-                .margin(TEXT_MARGIN)
+                .margin(egui::Margin::symmetric(10, 9))
                 .hint_text("Type a command or a video's name")
                 .desired_width(f32::INFINITY);
             let resp = ui.add(edit);
