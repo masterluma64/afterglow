@@ -12,7 +12,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - The pin icon in its header docks it beside the video, or unpins it: then it stays
     hidden and slides out over the video when you point at its edge (or press B), hiding
     again when the pointer leaves. In fullscreen it always works that way. Settings can
-    put it on the left or the right.
+    put it on the left or the right. A single video opened by itself (not from a folder), such as a movie, hides
+    the playlist; B still shows it.
   - *Open folder* (O, or drop a folder) replaces it with the videos in that
     folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
     Turn on *Include subfolders* (right-click the playlist) to also pick up videos in

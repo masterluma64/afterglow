@@ -167,6 +167,9 @@ struct App {
     loads: Loads,
     playback: Playback,
     show_sidebar: bool,
+    /// Whether the playlist was a single video opened by itself, as of the
+    /// last frame: the playlist hides for one (see `single_video`).
+    was_single_video: bool,
     fullscreen: bool,
     /// Seek-bar position while the user drags it.
     scrub: Option<f64>,
@@ -307,6 +310,7 @@ impl App {
             loads: Loads::default(),
             playback: Playback::default(),
             show_sidebar: true,
+            was_single_video: false,
             fullscreen: false,
             scrub: None,
             last_save: Instant::now(),
@@ -386,6 +390,11 @@ impl App {
 
     fn current_path(&self) -> Option<&Path> {
         self.playlist.get(self.current?).map(PathBuf::as_path)
+    }
+
+    /// Whether the playlist is one video opened by itself (not from a folder).
+    fn single_video(&self) -> bool {
+        self.playlist.first().is_some_and(|video| self.store.is_movie(video))
     }
 
     /// Keeps the window's place and size up to date in the store, so it opens
@@ -523,6 +532,14 @@ impl eframe::App for App {
         }
         let idle = self.loaded && !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
 
+        // A video opened by itself has no use for the playlist, so it hides
+        // (B still shows it); it comes back once there is more to list.
+        let single = self.single_video();
+        if single != self.was_single_video {
+            self.was_single_video = single;
+            self.show_sidebar = !single;
+            self.peek = None;
+        }
         if !self.fullscreen {
             egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
             egui::Panel::bottom("controls")

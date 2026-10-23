@@ -306,8 +306,9 @@ impl App {
     pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
         self.stop(ctx);
         self.playlist = list;
-        self.show_sidebar = true;
         self.save_playlist();
+        // Another single video keeps it hidden.
+        self.show_sidebar = !self.single_video();
         match self.continue_target() {
             Some(index) => self.play(index, ctx),
             None => self.notify(format!("{} videos, all watched", self.playlist.len())),

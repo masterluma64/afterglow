@@ -568,6 +568,12 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Whether a video was opened by itself, like a movie: it is the whole
+    /// playlist, which didn't come from a folder.
+    pub fn is_movie(&self, video: &Path) -> bool {
+        self.folder.is_none() && self.playlist.len() == 1 && self.playlist[0] == video
+    }
+
     pub fn set_watched(&mut self, path: &Path, watched: bool) {
         let entry = self.entries.entry(key(path)).or_default();
         entry.watched = watched;
@@ -904,6 +910,19 @@ mod tests {
         store.seed_stats();
         assert_eq!(store.stats.total, Tally::default(), "cleared stats aren't estimated again from saved progress");
         assert!(store.stats.series.is_empty() && store.stats.days.is_empty());
+    }
+
+    #[test]
+    fn tells_movies_from_videos_in_a_folder() {
+        let mut store = Store::default();
+        let (movie, other) = (Path::new(r"D:\Movies\Up.mkv"), Path::new(r"D:\Movies\Cars.mkv"));
+        store.set_playlist(&[movie.to_path_buf()]);
+        assert!(store.is_movie(movie) && !store.is_movie(other));
+        store.set_folder(Some(Path::new(r"D:\Movies")));
+        assert!(!store.is_movie(movie), "opened from a folder");
+        store.set_folder(None);
+        store.set_playlist(&[movie.to_path_buf(), other.to_path_buf()]);
+        assert!(!store.is_movie(movie), "one of several");
     }
 
     #[test]

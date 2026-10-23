@@ -106,7 +106,8 @@ impl App {
         let at_edge = pointer.is_some_and(|p| {
             video.contains(p) && if right { p.x > video.right() - EDGE_WIDTH } else { p.x < video.left() + EDGE_WIDTH }
         });
-        if self.peek.is_none() && at_edge && !ctx.input(|i| i.pointer.any_down()) {
+        // Not for a single video, whose playlist only comes out with B.
+        if self.peek.is_none() && at_edge && !self.single_video() && !ctx.input(|i| i.pointer.any_down()) {
             self.peek = Some(Peek { entered: true, left_at: None });
         }
         if self.peek.is_none() {
