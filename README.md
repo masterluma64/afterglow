@@ -14,8 +14,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     again when the pointer leaves. In fullscreen it always works that way. Settings can
     put it on the left or the right.
   - *Open folder* (O, or drop a folder) replaces it with the videos in that
-    folder, sorted naturally (`Part 2` before `Part 10`), and opens paused where you left off
-    (press Space to play; Settings can make it start playing right away).
+    folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
     Turn on *Include subfolders* (right-click the playlist) to also pick up videos in
     subfolders; changing it rescans the opened folder right away.
     New videos saved into the folder are added to the end of the playlist by themselves;
@@ -100,7 +99,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   watched, auto-play, evening out the volume and speed. *Also use for other folders in …*
   shares them with the parent folder's other subfolders, such as a show's seasons.
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
-  whether opening a folder starts playing right away, evening out the volume,
+  evening out the volume,
   preferred subtitle and audio languages, hardware decoding, the theme and the accent color
   (a few presets or any color).
 

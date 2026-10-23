@@ -54,9 +54,6 @@ pub struct Settings {
     pub hardware_decoding: bool,
     /// Evens out loud and quiet parts of the sound ("night mode").
     pub level_volume: bool,
-    /// Whether opening a folder starts playing right away, rather than
-    /// waiting paused where you left off.
-    pub play_opened_folders: bool,
 }
 
 impl Default for Settings {
@@ -73,7 +70,6 @@ impl Default for Settings {
             audio_languages: String::new(),
             hardware_decoding: true,
             level_volume: false,
-            play_opened_folders: false,
         }
     }
 }

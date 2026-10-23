@@ -209,9 +209,8 @@ impl App {
     }
 
     /// Opens dropped or passed paths. Folders replace the playlist with their
-    /// videos (paused where you left off, or playing if set so). Videos are
-    /// added to the end, unless they were dropped: then the drop setting
-    /// decides, asking the first time.
+    /// videos (and start playing). Videos are added to the end, unless they
+    /// were dropped: then the drop setting decides, asking the first time.
     /// With `play`, that video plays once it's in the playlist.
     pub(crate) fn open(&mut self, paths: Vec<PathBuf>, dropped: bool, play: Option<PathBuf>) {
         let what = match &paths[..] {
@@ -259,8 +258,7 @@ impl App {
         // Remember a single opened folder, so the subfolder setting can rescan it.
         self.store.set_folder((folders.len() == 1).then(|| folders[0].0.as_path()));
         self.sync_watch();
-        let play = self.store.settings.play_opened_folders;
-        self.replace_playlist(list, play, ctx);
+        self.replace_playlist(list, ctx);
     }
 
     /// Adds dropped videos to the playlist, or makes them the playlist.
@@ -271,7 +269,7 @@ impl App {
                 // The playlist no longer comes from a folder.
                 self.store.set_folder(None);
                 self.sync_watch();
-                self.replace_playlist(videos, true, ctx);
+                self.replace_playlist(videos, ctx);
             }
         }
     }
@@ -305,15 +303,13 @@ impl App {
         self.notify(format!("{}: {} videos {what}", display_name(folder), self.playlist.len()));
     }
 
-    /// Makes `list` the playlist and opens where you left off in it: playing
-    /// with `play`, otherwise paused, so nothing plays before you're ready.
-    pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, play: bool, ctx: &egui::Context) {
+    pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
         self.stop(ctx);
         self.playlist = list;
         self.show_sidebar = true;
         self.save_playlist();
         match self.continue_target() {
-            Some(index) => self.load(index, !play, true, ctx),
+            Some(index) => self.play(index, ctx),
             None => self.notify(format!("{} videos, all watched", self.playlist.len())),
         }
     }
