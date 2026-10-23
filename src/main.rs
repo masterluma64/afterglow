@@ -223,6 +223,10 @@ struct App {
     missing_files: Option<Receiver<HashSet<PathBuf>>>,
     /// The playlist entry being dragged to a new place.
     drag_row: Option<usize>,
+    /// Playlist entries selected with Ctrl / Shift+click, to act on together.
+    selected: HashSet<PathBuf>,
+    /// Where a Shift+click selection extends from.
+    select_anchor: Option<PathBuf>,
     /// Only playlist entries whose name contains this are listed.
     search: String,
     focus_search: bool,
@@ -341,6 +345,8 @@ impl App {
             watch: watch::FolderWatch::new(ctx.clone(), None),
             missing_files,
             drag_row: None,
+            selected: HashSet::new(),
+            select_anchor: None,
             search: String::new(),
             focus_search: false,
             search_pick: 0,
@@ -719,10 +725,12 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("I", "Add videos"),
         ("R", "Refresh folder"),
         ("B", "Show or hide playlist"),
+        ("Ctrl+click", "Select several videos (Shift: a range)"),
+        ("Delete", "Remove selected videos"),
     ]),
     ("Window", &[
         ("F", "Fullscreen"),
-        ("Esc", "Cancel countdown, leave fullscreen"),
+        ("Esc", "Clear selection, leave fullscreen"),
         ("E", "Settings"),
         ("Ctrl+K", "Find a command"),
         ("?", "This overview"),
@@ -788,7 +796,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::CHECKS, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

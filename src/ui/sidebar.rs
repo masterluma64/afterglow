@@ -2,8 +2,10 @@
 
 use crate::*;
 
-/// A playlist entry with its watch progress. What is picked from its
-/// right-click menu is added to `picked`.
+/// A playlist entry with its watch progress. `selection` is every selected
+/// video, in playlist order, when this one is among them.
+/// What is picked from its right-click menu is added to `picked`.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn playlist_row(
     ui: &mut egui::Ui,
     app: &App,
@@ -12,9 +14,12 @@ pub(crate) fn playlist_row(
     path: &Path,
     name: &str,
     playing: bool,
+    selection: Option<&[PathBuf]>,
 ) -> egui::Response {
     let store = &app.store;
     let entry = store.get(path);
+    // Painted under the row once its size is known.
+    let background = ui.painter().add(egui::Shape::Noop);
     let dim = |text: RichText| ui::secondary(ui, playing, text);
     let text = if entry.watched { dim(RichText::new(format!("{}  {name}", icons::CHECK))) } else { RichText::new(name) };
     let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
@@ -25,6 +30,15 @@ pub(crate) fn playlist_row(
         .truncate()
         .sense(Sense::click_and_drag());
     let resp = ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button);
+    if selection.is_some() {
+        if playing {
+            // Already accent-colored: an outline shows it is selected too.
+            ui.painter().rect_stroke(resp.rect.shrink(1.0), 4.0, (1.5, ui.visuals().selection.stroke.color), egui::StrokeKind::Inside);
+        } else {
+            let fill = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
+            ui.painter().set(background, egui::Shape::rect_filled(resp.rect, 4.0, fill));
+        }
+    }
     if (!entry.watched && entry.fraction() > 0.0) || store.resume_position(path).is_some() {
         let r = resp.rect.shrink2(vec2(4.0, 1.0));
         let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
@@ -32,6 +46,16 @@ pub(crate) fn playlist_row(
     }
     let resp = resp.on_hover_text(format!("{}\n{}", path.display(), hover_text(&entry)));
     ui::context_menu(&resp, |ui| {
+        if let Some(selection) = selection.filter(|s| s.len() > 1) {
+            ui.label(RichText::new(format!("{} videos selected", selection.len())).bold());
+            items::offer(ui, app, Action::SetWatchedMany(selection.to_vec(), true), picked);
+            items::offer(ui, app, Action::SetWatchedMany(selection.to_vec(), false), picked);
+            ui.separator();
+            items::offer(ui, app, Action::RemoveMany(selection.to_vec()), picked).on_hover_text("The files are not touched");
+            ui.separator();
+            items::offer(ui, app, Action::ClearSelection, picked);
+            return;
+        }
         items::entry_items(ui, app, index, path, picked);
         ui.separator();
         subfolder_option(ui, app, picked);
@@ -214,17 +238,24 @@ impl App {
             let offset = pick as f32 * row - (ui.available_height() - PLAYLIST_ROW_HEIGHT) / 2.0;
             scroll = scroll.vertical_scroll_offset(offset.max(0.0));
         }
+        let selection = self.selected_paths();
+        if selection.len() != self.selected.len() {
+            // Some selected videos left the playlist.
+            self.selected = selection.iter().cloned().collect();
+        }
         // Only the rows in view are laid out.
         scroll.show_rows(ui, PLAYLIST_ROW_HEIGHT, visible.len(), |ui, range| {
             let mut rows = Vec::new();
             for &index in &visible[range] {
                 let path = &self.playlist[index];
                 let name = &self.names[index].0;
+                let selected = self.selected.contains(path).then_some(selection.as_slice());
                 let mut chosen = Vec::new();
-                let resp = playlist_row(ui, self, &mut chosen, index, path, name, self.current == Some(index));
+                let resp = playlist_row(ui, self, &mut chosen, index, path, name, self.current == Some(index), selected);
                 self.actions.append(&mut chosen);
                 if resp.clicked() {
-                    self.actions.push(Action::Play(index));
+                    let modifiers = ui.input(|i| i.modifiers);
+                    self.click_row(&visible, index, modifiers);
                 }
                 if picked == Some(index) {
                     // The search result Enter plays.
@@ -237,6 +268,40 @@ impl App {
             }
             self.drag_rows(ui, &rows);
         });
+    }
+
+    /// A click on a playlist row plays it; with Ctrl it is added to (or taken
+    /// out of) the selection, and Shift selects every row from the last one
+    /// clicked. `visible` is the rows shown, so a search limits the range.
+    pub(crate) fn click_row(&mut self, visible: &[usize], index: usize, modifiers: egui::Modifiers) {
+        let path = self.playlist[index].clone();
+        if modifiers.shift {
+            let at = |p: &PathBuf| visible.iter().position(|&i| self.playlist[i] == *p);
+            let here = at(&path).unwrap_or(0);
+            let from = self.select_anchor.as_ref().and_then(at).unwrap_or(here);
+            let range: Vec<PathBuf> = visible[from.min(here)..=from.max(here)].iter().map(|&i| self.playlist[i].clone()).collect();
+            if !modifiers.command {
+                self.selected.clear();
+            }
+            self.selected.extend(range);
+        } else if modifiers.command {
+            if !self.selected.remove(&path) {
+                self.selected.insert(path.clone());
+            }
+            self.select_anchor = Some(path);
+        } else {
+            self.selected.clear();
+            self.select_anchor = Some(path);
+            self.actions.push(Action::Play(index));
+        }
+    }
+
+    /// The selected videos, in playlist order.
+    pub(crate) fn selected_paths(&self) -> Vec<PathBuf> {
+        if self.selected.is_empty() {
+            return Vec::new();
+        }
+        self.playlist.iter().filter(|p| self.selected.contains(*p)).cloned().collect()
     }
 
     /// Rebuilds the cached display names (and their lowercase forms, for the

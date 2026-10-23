@@ -54,6 +54,13 @@ pub(crate) enum Action {
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
     MarkWatchedBefore(usize),
+    /// Marks several videos watched (or unwatched), such as the selected ones.
+    SetWatchedMany(Vec<PathBuf>, bool),
+    /// Removes several videos from the playlist.
+    RemoveMany(Vec<PathBuf>),
+    /// Removes the selected videos from the playlist (Delete).
+    RemoveSelected,
+    ClearSelection,
     ResetAllProgress,
     /// Asks before clearing all stats.
     ConfirmClearStats,
@@ -90,8 +97,8 @@ pub(crate) enum Action {
     ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
     ToggleWatched,
-    /// Cancels the next video's countdown, hides the slid-out playlist or
-    /// leaves fullscreen, whichever applies first.
+    /// Clears the selection, cancels the next video's countdown, hides the
+    /// slid-out playlist or leaves fullscreen, whichever applies first.
     Escape,
     LoadSubtitle,
     AdjustSubDelay(f64),
@@ -181,6 +188,7 @@ impl App {
                 (M::NONE, Key::F11, Action::ToggleFullscreen),
                 (M::NONE, Key::F, Action::ToggleFullscreen),
                 (M::NONE, Key::Escape, Action::Escape),
+                (M::NONE, Key::Delete, Action::RemoveSelected),
                 (M::NONE, Key::Home, Action::Seek { to: 0.0, exact: true }),
                 (M::NONE, Key::Comma, Action::FrameStep { forward: false }),
                 (M::NONE, Key::Period, Action::FrameStep { forward: true }),
@@ -469,6 +477,36 @@ impl App {
                 self.store.save();
                 self.notify(format!("Marked {} video{} as watched", before.len(), if before.len() == 1 { "" } else { "s" }));
             }
+            Action::SetWatchedMany(paths, watched) => {
+                let playing = self.loaded && self.current_path().is_some_and(|current| paths.iter().any(|p| p == current));
+                for path in &paths {
+                    self.store.set_watched(path, watched);
+                }
+                // As for one video (see `SetWatched`), but without moving on.
+                if playing {
+                    self.keep_watched_mark(watched);
+                }
+                self.store.save();
+                self.selected.clear();
+                let videos = format!("{} video{}", paths.len(), if paths.len() == 1 { "" } else { "s" });
+                self.notify(if watched { format!("Marked {videos} as watched") } else { format!("Progress reset for {videos}") });
+            }
+            Action::RemoveMany(paths) => {
+                // From the end, so the indices of the rest stay put.
+                let indices: Vec<usize> = (0..self.playlist.len()).rev().filter(|&i| paths.contains(&self.playlist[i])).collect();
+                for &index in &indices {
+                    self.remove(index, ctx);
+                }
+                self.selected.clear();
+                self.notify(format!("Removed {} video{} from the playlist", indices.len(), if indices.len() == 1 { "" } else { "s" }));
+            }
+            Action::ClearSelection => self.selected.clear(),
+            Action::RemoveSelected => {
+                let paths = self.selected_paths();
+                if !paths.is_empty() {
+                    self.apply(Action::RemoveMany(paths), ctx);
+                }
+            }
             Action::ResetAllProgress => {
                 if self.loaded {
                     // The loaded video goes back to its start too, so the live
@@ -525,7 +563,9 @@ impl App {
             Action::ToggleSidebar if self.sidebar_docked() => self.show_sidebar = !self.show_sidebar,
             Action::ToggleSidebar => self.peek = if self.peek.is_some() { None } else { Some(Peek::default()) },
             Action::Escape => {
-                if self.up_next.is_some() {
+                if !self.selected.is_empty() {
+                    self.selected.clear();
+                } else if self.up_next.is_some() {
                     self.cancel_up_next();
                 } else if self.peek.is_some() {
                     self.peek = None;

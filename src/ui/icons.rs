@@ -44,6 +44,7 @@ pub const REWIND: &str = "\u{E6A8}";
 pub const REPEAT: &str = "\u{E3F6}";
 pub const EYE_SLASH: &str = "\u{E224}";
 pub const BROOM: &str = "\u{EC54}";
+pub const SELECTION_SLASH: &str = "\u{E69E}";
 pub const FILE_PLUS: &str = "\u{E236}";
 pub const LIST_NUMBERS: &str = "\u{E2F6}";
 pub const COMMAND: &str = "\u{E1C4}";

@@ -34,6 +34,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - Right-click an entry to play it from the start, mark it (or everything above it)
     watched, mark it unwatched or remove it; the trash icon clears the playlist. Files on
     disk are never touched.
+  - Ctrl+click entries to select several (Shift+click selects a range), then right-click
+    one of them to mark them all watched or unwatched or remove them; Delete also removes
+    them, and Esc clears the selection.
   - Drag entries to reorder them.
   - The search box (/) filters the playlist by name; ↑ / ↓ pick a result and Enter plays
     it. Esc clears it.
@@ -189,7 +192,7 @@ in the app for an overview.
 | R | Refresh the playlist's folder |
 | B | Show or hide the playlist (slides it out when unpinned) |
 | F / double-click video | Fullscreen |
-| Esc | Cancel the next video's countdown, or leave fullscreen |
+| Esc | Clear selection, cancel the next video's countdown, or leave fullscreen |
 | E | Settings |
 | ? | Keyboard shortcut overview (also in the ⋯ menu) |
 | Ctrl+K | Command palette: find any command by typing |
