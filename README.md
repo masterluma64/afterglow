@@ -103,7 +103,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
   evening out the volume,
   preferred subtitle and audio languages, hardware decoding, the theme and the accent color
-  (a few presets or any color).
+  (a few presets or any color), and a shortcut to Afterglow on the desktop. Moving the folder
+  leaves that shortcut pointing at the old place; turn it off and on again to fix it.
 
 Afterglow is portable: its state is stored in `data\progress.json` next to `afterglow.exe`,
 so the whole folder can be moved or carried on a USB stick. Set `AFTERGLOW_DATA_DIR` to use

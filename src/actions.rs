@@ -40,6 +40,8 @@ pub(crate) enum Action {
     /// Asks before resetting every video's progress.
     ConfirmResetProgress,
     SetSettings(progress::Settings),
+    /// Puts a shortcut to Afterglow on the desktop, or removes it.
+    SetDesktopShortcut(bool),
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     /// Marks every video before this playlist entry as watched.
@@ -283,7 +285,17 @@ impl App {
             Action::RefreshFolder => self.refresh_folder(),
             Action::ShowHelp => self.show_help = true,
             Action::ShowStats => self.stats_open = true,
-            Action::OpenSettings => self.settings_open = true,
+            Action::OpenSettings => {
+                self.settings_open = true;
+                self.desktop_shortcut = shortcut::exists();
+            }
+            Action::SetDesktopShortcut(on) => {
+                match if on { shortcut::create() } else { shortcut::remove() } {
+                    Ok(()) => self.notify(if on { "Shortcut added to desktop" } else { "Shortcut removed from desktop" }),
+                    Err(e) => self.warn(format!("Couldn't change desktop shortcut: {e}")),
+                }
+                self.desktop_shortcut = shortcut::exists();
+            }
             Action::OpenPalette => {
                 // It offers the recent folders that are there.
                 self.recent.check(&self.store.recent_folders, ctx);

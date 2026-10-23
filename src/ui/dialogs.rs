@@ -154,6 +154,18 @@ impl App {
                         ui.end_row();
                     });
                 });
+                ui.add_space(8.0);
+                // Changes Windows rather than the settings, so it takes effect right away.
+                card(ui, "Windows", |ui| {
+                    grid("settings-windows").show(ui, |ui| {
+                        ui.label("Desktop");
+                        let mut shortcut = self.desktop_shortcut;
+                        if ui.checkbox(&mut shortcut, "Shortcut to Afterglow").changed() {
+                            self.actions.push(Action::SetDesktopShortcut(shortcut));
+                        }
+                        ui.end_row();
+                    });
+                });
             });
             ui.add_space(12.0);
             ui.horizontal(|ui| {
