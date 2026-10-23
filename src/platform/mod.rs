@@ -19,10 +19,6 @@ pub struct Integration {
     pub shortcut: Option<PathBuf>,
     pub folder_menu: Option<PathBuf>,
     pub open_with: Option<PathBuf>,
-    /// Registered as an app that can be the default for videos.
-    pub default: bool,
-    /// The video types Windows opens with another app.
-    pub elsewhere: Vec<&'static str>,
 }
 
 impl Integration {
@@ -31,8 +27,6 @@ impl Integration {
             shortcut: shortcut::target(),
             folder_menu: explorer::folder_menu(),
             open_with: explorer::open_with(),
-            default: explorer::default(),
-            elsewhere: explorer::opened_elsewhere(),
         }
     }
 }
@@ -42,7 +36,6 @@ pub enum Part {
     DesktopShortcut,
     FolderMenu,
     OpenWith,
-    Default,
 }
 
 pub fn set(part: Part, on: bool) -> Result<(), String> {
@@ -51,7 +44,6 @@ pub fn set(part: Part, on: bool) -> Result<(), String> {
         (Part::DesktopShortcut, false) => shortcut::remove(),
         (Part::FolderMenu, on) => explorer::set_folder_menu(on),
         (Part::OpenWith, on) => explorer::set_open_with(on),
-        (Part::Default, on) => explorer::set_default(on),
     }
 }
 

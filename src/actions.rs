@@ -42,8 +42,6 @@ pub(crate) enum Action {
     SetSettings(progress::Settings),
     /// Sets up part of Afterglow in Windows, or removes it.
     SetIntegration(platform::Part, bool),
-    /// Opens Windows' default apps settings at Afterglow.
-    OpenDefaultApps,
     /// Moves the progress file next to afterglow.exe, or into AppData.
     SetPortable(bool),
     SetIncludeSubfolders(bool),
@@ -297,11 +295,10 @@ impl App {
                 let result = platform::set(part, on);
                 self.integration = platform::Integration::read();
                 match result {
-                    Ok(()) => self.notify(integration_notice(part, on, &self.integration)),
+                    Ok(()) => self.notify(integration_notice(part, on)),
                     Err(e) => self.warn(format!("Couldn't change that in Windows: {e}")),
                 }
             }
-            Action::OpenDefaultApps => platform::explorer::open_default_apps(),
             Action::SetPortable(portable) => {
                 let Some(dir) = progress::data_dir_for(portable) else { return };
                 match self.store.move_to(&dir) {
@@ -733,18 +730,14 @@ impl App {
 }
 
 /// What changed in Windows, after setting `part` up or removing it.
-fn integration_notice(part: platform::Part, on: bool, now: &platform::Integration) -> String {
+fn integration_notice(part: platform::Part, on: bool) -> &'static str {
     use platform::Part;
-    let text = match (part, on) {
+    match (part, on) {
         (Part::DesktopShortcut, true) => "Shortcut added to desktop",
         (Part::DesktopShortcut, false) => "Shortcut removed from desktop",
         (Part::FolderMenu, true) => "Folders' right-click menu has \"Open in Afterglow\"",
         (Part::FolderMenu, false) => "\"Open in Afterglow\" removed from folders' right-click menu",
         (Part::OpenWith, true) => "Videos' \"Open with\" menu lists Afterglow",
         (Part::OpenWith, false) => "Afterglow removed from \"Open with\"",
-        (Part::Default, true) if now.elsewhere.is_empty() => "Videos open with Afterglow",
-        (Part::Default, true) => "Registered for videos; choose Afterglow in Default apps to use it for all of them",
-        (Part::Default, false) => "No longer associated with video files",
-    };
-    text.to_string()
+    }
 }

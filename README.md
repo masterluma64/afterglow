@@ -105,11 +105,9 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   preferred subtitle and audio languages, hardware decoding, the theme and the accent color
   (a few presets or any color), and where progress is saved.
 - **Windows** (in Settings): a shortcut on the desktop, "Open in Afterglow" in folders'
-  right-click menu (on Windows 11 under *Show more options*), Afterglow in videos' *Open with*
-  menu, and associating it with video files. Windows doesn't let apps take over a type you
-  already picked an app for, so Settings says which types still open elsewhere and opens
-  Windows' *Default apps* page for Afterglow. It's all set up for your user only, needs no
-  admin rights and is removed again when turned off. If another copy of Afterglow (or the same
+  right-click menu (on Windows 11 under *Show more options*) and Afterglow in videos' *Open with*
+  menu. It's all set up for your user only, needs no admin rights and is removed again when
+  turned off. If another copy of Afterglow (or the same
   one, moved or renamed) set something up, *Use this copy* points it here.
 
 Afterglow is portable by default: its state is stored in `data\progress.json` next to

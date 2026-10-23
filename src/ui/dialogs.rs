@@ -196,29 +196,6 @@ impl App {
                         ui.label("Video files");
                         integration_toggle(ui, actions, Part::OpenWith, integration.open_with.as_deref(), "Listed in \"Open with\"");
                         ui.end_row();
-                        ui.label("");
-                        ui.horizontal(|ui| {
-                            let mut on = integration.default;
-                            if ui.checkbox(&mut on, "Associate with video files")
-                                .on_hover_text("Registers Afterglow as a video player, and opens videos with it unless you picked another app")
-                                .changed()
-                            {
-                                actions.push(Action::SetIntegration(Part::Default, on));
-                            }
-                            let button = ui.add_enabled(on, egui::Button::new("Default apps…"));
-                            if button.on_hover_text("Choose Afterglow for all videos in Windows' settings").clicked() {
-                                actions.push(Action::OpenDefaultApps);
-                            }
-                        });
-                        ui.end_row();
-                        if integration.default {
-                            ui.label("");
-                            ui.weak(match &integration.elsewhere[..] {
-                                [] => "Windows opens all videos with Afterglow".to_string(),
-                                types => format!("Windows opens {} with another app", type_list(types)),
-                            });
-                            ui.end_row();
-                        }
                     });
                 });
             });
@@ -602,14 +579,4 @@ fn integration_toggle(ui: &mut egui::Ui, actions: &mut Vec<Action>, part: platfo
             actions.push(Action::SetIntegration(part, true));
         }
     });
-}
-
-/// File types for a sentence: ".mkv, .mp4 and .avi", or the first few and a count.
-fn type_list(types: &[&str]) -> String {
-    let dotted: Vec<String> = types.iter().map(|t| format!(".{t}")).collect();
-    match &dotted[..] {
-        [one] => one.clone(),
-        [first @ .., last] if dotted.len() <= 4 => format!("{} and {last}", first.join(", ")),
-        _ => format!("{} and {} more", dotted[..3].join(", "), dotted.len() - 3),
-    }
 }

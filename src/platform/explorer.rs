@@ -1,13 +1,12 @@
-//! Afterglow in Explorer: "Open in Afterglow" on folders, in "Open with" for
-//! videos, and as their default app. All of it is registered for the current
-//! user only, so it needs no admin rights, and turning a part off removes its
-//! keys again.
+//! Afterglow in Explorer: "Open in Afterglow" on folders, and in "Open with"
+//! for videos. All of it is registered for the current user only, so it needs
+//! no admin rights, and turning a part off removes its keys again.
 
 use std::path::{Path, PathBuf};
 
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_NONE, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegDeleteTreeW,
+    HKEY, HKEY_CURRENT_USER, REG_NONE, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegDeleteTreeW,
     RegGetValueW, RegSetKeyValueW,
 };
 use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
@@ -17,8 +16,7 @@ use crate::library::VIDEO_EXTENSIONS;
 
 /// The file type Afterglow registers videos as.
 const PROG_ID: &str = "afterglow.video";
-/// The name of the folder menu entry's key, and of Afterglow in the list of
-/// apps Windows can make the default.
+/// The name of the folder menu entry's key.
 const NAME: &str = "afterglow";
 /// Where it all goes: `Software` of the current user, or elsewhere for tests.
 const BASE: &str = "Software";
@@ -39,43 +37,10 @@ pub fn open_with() -> Option<PathBuf> {
     command_exe(&format!(r"{BASE}\Classes\{PROG_ID}\shell\open\command"))
 }
 
-/// Turning it off also stops Afterglow being the default app.
 pub fn set_open_with(on: bool) -> Result<(), String> {
-    let exe = exe()?;
-    if !on {
-        set_default_in(BASE, false)?;
-    }
-    set_open_with_in(BASE, on, &exe)?;
+    set_open_with_in(BASE, on, &exe()?)?;
     changed();
     Ok(())
-}
-
-/// Whether Afterglow is registered as a default app for videos.
-pub fn default() -> bool {
-    get(HKEY_CURRENT_USER, &format!(r"{BASE}\RegisteredApplications"), NAME).is_some()
-}
-
-/// Making Afterglow the default also puts it in "Open with".
-pub fn set_default(on: bool) -> Result<(), String> {
-    let exe = exe()?;
-    if on {
-        set_open_with_in(BASE, true, &exe)?;
-    }
-    set_default_in(BASE, on)?;
-    changed();
-    Ok(())
-}
-
-/// The video types Windows opens with another app. Windows guards the choice
-/// the user made with "Always", so only its own settings can change that.
-pub fn opened_elsewhere() -> Vec<&'static str> {
-    VIDEO_EXTENSIONS.iter().copied().filter(|ext| !opens_with_afterglow(BASE, ext)).collect()
-}
-
-/// Windows' default apps settings, at Afterglow's page.
-pub fn open_default_apps() {
-    let page = format!("ms-settings:defaultapps?registeredAppUser={NAME}");
-    let _ = std::process::Command::new("explorer").arg(page).spawn();
 }
 
 fn exe() -> Result<PathBuf, String> {
@@ -129,47 +94,6 @@ fn set_open_with_in(base: &str, on: bool, exe: &Path) -> Result<(), String> {
         set_empty(&format!(r"{classes}\.{ext}\OpenWithProgids"), PROG_ID)?;
     }
     Ok(())
-}
-
-/// Registers Afterglow with Windows as an app that can be the default for
-/// videos, and makes it the default for the types nobody chose an app for.
-fn set_default_in(base: &str, on: bool) -> Result<(), String> {
-    let capabilities = format!(r"{base}\{NAME}\Capabilities");
-    let registered = format!(r"{base}\RegisteredApplications");
-    for ext in VIDEO_EXTENSIONS {
-        let class = format!(r"{base}\Classes\.{ext}");
-        if on {
-            if get(HKEY_CURRENT_USER, &class, "").is_none() {
-                set(&class, "", PROG_ID)?;
-            }
-        } else if get(HKEY_CURRENT_USER, &class, "").as_deref() == Some(PROG_ID) {
-            delete_value(&class, "")?;
-        }
-    }
-    if !on {
-        delete_value(&registered, NAME)?;
-        return delete_tree(&format!(r"{base}\{NAME}"));
-    }
-    set(&capabilities, "ApplicationName", crate::APP_NAME)?;
-    set(&capabilities, "ApplicationDescription", "Plays videos and keeps track of what you've watched")?;
-    for ext in VIDEO_EXTENSIONS {
-        set(&format!(r"{capabilities}\FileAssociations"), &format!(".{ext}"), PROG_ID)?;
-    }
-    set(&registered, NAME, &capabilities)
-}
-
-/// Whether Windows opens files with this extension in Afterglow: the user's
-/// choice if they made one, otherwise the extension's file type.
-fn opens_with_afterglow(base: &str, ext: &str) -> bool {
-    let choices = format!(r"{base}\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.{ext}");
-    // Newer Windows keeps the choice in UserChoiceLatest.
-    let chosen = get(HKEY_CURRENT_USER, &format!(r"{choices}\UserChoiceLatest\ProgId"), "ProgId")
-        .or_else(|| get(HKEY_CURRENT_USER, &format!(r"{choices}\UserChoice"), "ProgId"))
-        .or_else(|| get(HKEY_CURRENT_USER, &format!(r"{base}\Classes\.{ext}"), ""))
-        .or_else(|| get(HKEY_LOCAL_MACHINE, &format!(r"Software\Classes\.{ext}"), ""));
-    chosen.is_some_and(|id| {
-        id.eq_ignore_ascii_case(PROG_ID) || id.to_ascii_lowercase().starts_with(r"applications\afterglow")
-    })
 }
 
 fn exe_name(exe: &Path) -> String {
@@ -256,20 +180,16 @@ mod tests {
         let exe = Path::new(r"C:\Some Folder\afterglow.exe");
         set_folder_menu_in(&base, true, exe).unwrap();
         set_open_with_in(&base, true, exe).unwrap();
-        set_default_in(&base, true).unwrap();
         let menu = format!(r"{base}\Classes\Directory\Background\shell\{NAME}\command");
         assert_eq!(command_exe(&menu).as_deref(), Some(exe));
         assert_eq!(get(HKEY_CURRENT_USER, &menu, "").unwrap(), r#""C:\Some Folder\afterglow.exe" "%V""#);
         assert_eq!(command_exe(&format!(r"{base}\Classes\{PROG_ID}\shell\open\command")).as_deref(), Some(exe));
-        assert!(get(HKEY_CURRENT_USER, &format!(r"{base}\RegisteredApplications"), NAME).is_some());
-        assert!(opens_with_afterglow(&base, "mkv"), "nobody chose an app, so Afterglow it is");
+        assert!(get(HKEY_CURRENT_USER, &format!(r"{base}\Classes\Applications\afterglow.exe"), "FriendlyAppName").is_some());
 
-        set_default_in(&base, false).unwrap();
         set_open_with_in(&base, false, exe).unwrap();
         set_folder_menu_in(&base, false, exe).unwrap();
         assert_eq!(command_exe(&menu), None);
-        assert_eq!(get(HKEY_CURRENT_USER, &format!(r"{base}\Classes\.mkv"), ""), None);
-        assert!(!opens_with_afterglow(&base, "mkv"));
+        assert_eq!(get(HKEY_CURRENT_USER, &format!(r"{base}\Classes\Applications\afterglow.exe"), "FriendlyAppName"), None);
         // Removing what isn't there is fine.
         set_folder_menu_in(&base, false, exe).unwrap();
         delete_tree(&base).unwrap();
