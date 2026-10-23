@@ -34,8 +34,11 @@ pub fn render(size: u32) -> Vec<u8> {
 
 /// The colour at a point, with `u`, `v` from 0 to 1 (top left to bottom right).
 fn shade(u: f32, v: f32) -> [f32; 4] {
-    // Rounded square with a little margin, as Windows icons have.
+    // The design is laid out on a rounded square inset by `margin`; stretch
+    // it so the square fills the icon edge to edge.
     let margin = 0.04;
+    let scale = |t: f32| margin + t * (1.0 - 2.0 * margin);
+    let (u, v) = (scale(u), scale(v));
     let outside = rounded_square(u, v, margin, 0.22);
     if outside > 0.0 {
         return [0.0; 4];
