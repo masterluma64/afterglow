@@ -14,8 +14,9 @@ pub(crate) enum Action {
     /// Folders and videos dropped onto the window.
     Drop(Vec<PathBuf>),
     /// Files a later start of Afterglow was given (e.g. a video opened from
-    /// Explorer): opened like `Open`, and the first video plays right away.
-    OpenAndPlay(Vec<PathBuf>),
+    /// Explorer): opened like `Open`, and the first video is opened right
+    /// away, paused.
+    OpenAndShow(Vec<PathBuf>),
     /// Videos the folder watch found new in the playlist's folder.
     Arrived(Vec<PathBuf>),
     /// Answers what dropped videos should do; with `remember`, it becomes the
@@ -119,7 +120,7 @@ impl Action {
             self,
             Action::Open(_)
                 | Action::Drop(_)
-                | Action::OpenAndPlay(_)
+                | Action::OpenAndShow(_)
                 | Action::Arrived(_)
                 | Action::RefreshFolder
                 | Action::SetIncludeSubfolders(_)
@@ -262,9 +263,9 @@ impl App {
                 self.store.set_folder(None);
                 self.sync_watch();
                 self.replace_playlist(vec![video], ctx);
-                // Opened on purpose, so even when it was watched it plays (again).
+                // Opened on purpose, so even a watched one opens, from its start.
                 if self.current.is_none() && !self.playlist.is_empty() {
-                    self.play_from_start(0, ctx);
+                    self.open_paused(0, false, ctx);
                 }
             }
             Action::OpenVideos => {
@@ -278,7 +279,7 @@ impl App {
             }
             Action::Open(paths) => self.open(paths, false, None),
             Action::Drop(paths) => self.open(paths, true, None),
-            Action::OpenAndPlay(paths) => {
+            Action::OpenAndShow(paths) => {
                 let video = paths.iter().find(|p| library::is_video(p)).cloned();
                 self.open(paths, false, video);
             }

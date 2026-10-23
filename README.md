@@ -15,7 +15,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     put it on the left or the right. A single video opened by itself (not from a folder), such as a movie, hides
     the playlist; B still shows it.
   - *Open folder* (O, or drop a folder) replaces it with the videos in that
-    folder, sorted naturally (`Part 2` before `Part 10`), and starts where you left off.
+    folder, sorted naturally (`Part 2` before `Part 10`), and opens where you left off, paused: whatever you switch to
+    (a folder, a recent folder or video, *Open video*) waits for you to start it.
     Turn on *Include subfolders* (right-click the playlist) to also pick up videos in
     subfolders; changing it rescans the opened folder right away.
     New videos saved into the folder are added to the end of the playlist by themselves;
@@ -24,7 +25,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
     which then hides.
   - The ⋯ menu lists recently opened folders, and recently opened videos (the ones opened by
     themselves).
-  - *Add videos* (I) appends them; if nothing is playing, the first one starts.
+  - *Add videos* (I) appends them; if nothing is playing, the first one opens, paused.
   - Dropping videos onto the window adds them or replaces the playlist. Afterglow asks
     which, until you tick *Save as default* (changeable in Settings).
   - Each video shows its length, and the header shows how much of the playlist's total
@@ -89,7 +90,7 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   even when another window has focus, and Windows' media overlay shows what's playing.
 - The PC and display stay awake while a video plays (not while paused).
 - **One window**: opening a video or folder (from Explorer, say) while Afterglow is already
-  running plays it in the open window instead of starting a second one.
+  running opens it, paused, in the open window instead of starting a second one.
 - The window opens where you left it, at the same size (and maximized if it was). If that
   spot is on a monitor that is no longer connected, it opens on the main screen instead.
 - **GPU playback**: video is decoded on the GPU where supported and drawn by mpv straight

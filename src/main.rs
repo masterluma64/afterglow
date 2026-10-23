@@ -441,7 +441,7 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             if !paths.is_empty() {
-                self.actions.push(Action::OpenAndPlay(paths));
+                self.actions.push(Action::OpenAndShow(paths));
             }
         }
     }

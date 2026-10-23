@@ -184,7 +184,7 @@ impl App {
                     if let Some(index) = play.and_then(|v| self.playlist.iter().position(|p| *p == v))
                         && self.current != Some(index)
                     {
-                        self.play(index, ctx);
+                        self.open_paused(index, true, ctx);
                     }
                 }
                 disk::Done::Rescanned { folder, include_subfolders, why, found, missing } => {
@@ -316,6 +316,13 @@ impl App {
         self.notify(format!("{}: {} videos {what}", display_name(folder), self.playlist.len()));
     }
 
+    /// Opens a video that was switched to, paused (at its saved position with
+    /// `resume`), so it starts only once the user starts it.
+    pub(crate) fn open_paused(&mut self, index: usize, resume: bool, ctx: &egui::Context) {
+        self.load(index, true, resume, ctx);
+    }
+
+    /// Makes `list` the playlist and opens where it was left off, paused.
     pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
         self.stop(ctx);
         self.playlist = list;
@@ -323,13 +330,13 @@ impl App {
         // Another single video keeps it hidden.
         self.show_sidebar = !self.single_video();
         match self.continue_target() {
-            Some(index) => self.play(index, ctx),
+            Some(index) => self.open_paused(index, true, ctx),
             None => self.notify(format!("{} videos, all watched", self.playlist.len())),
         }
     }
 
-    /// Appends videos (skipping ones already listed). Starts the first of them
-    /// when nothing is playing.
+    /// Appends videos (skipping ones already listed). Opens the first of them,
+    /// paused, when nothing is playing.
     pub(crate) fn add_videos(&mut self, videos: Vec<PathBuf>, ctx: &egui::Context) {
         if videos.is_empty() {
             return;
@@ -349,7 +356,7 @@ impl App {
         }
         self.save_playlist();
         match first {
-            Some(index) if self.current.is_none() => self.play(index, ctx),
+            Some(index) if self.current.is_none() => self.open_paused(index, true, ctx),
             _ if added > 0 => self.notify(format!("Added {added} video{} to the playlist", if added == 1 { "" } else { "s" })),
             _ => self.notify("Already in the playlist"),
         }
