@@ -87,11 +87,30 @@ impl App {
                     }
                 });
             }
-            ui.separator();
-            let watched = self.current_path().is_some_and(|p| self.store.get(p).watched);
-            let (icon, text) = if watched { (icons::RESET, "Mark as unwatched") } else { (icons::CHECK, "Mark as watched") };
-            if item(ui, icon, text, "W") {
-                self.actions.push(Action::ToggleWatched);
+            // The same choices as the playing video's playlist entry.
+            if let Some((index, path)) = self.current.zip(self.current_path().map(Path::to_path_buf)) {
+                ui.separator();
+                let entry = self.store.get(&path);
+                if item(ui, icons::PLAY, "Play from the start", "") {
+                    // Unwatched again, as when picked from the playlist this way.
+                    self.actions.push(Action::SetWatched(path.clone(), false));
+                    self.actions.push(Action::SetPaused(false));
+                }
+                if !entry.watched && item(ui, icons::CHECK, "Mark as watched", "W") {
+                    self.actions.push(Action::SetWatched(path.clone(), true));
+                }
+                if index > 0 && item(ui, icons::CHECKS, "Mark all above as watched", "") {
+                    self.actions.push(Action::MarkWatchedBefore(index));
+                }
+                if entry.watched || entry.position > 0.0 {
+                    let key = if entry.watched { "W" } else { "" };
+                    if item(ui, icons::RESET, "Mark as unwatched", key) {
+                        self.actions.push(Action::SetWatched(path.clone(), false));
+                    }
+                }
+                if item(ui, icons::X, "Remove from playlist", "") {
+                    self.actions.push(Action::Remove(index));
+                }
             }
         } else {
             if item(ui, icons::FOLDER_PLUS, "Open folder…", "O") {

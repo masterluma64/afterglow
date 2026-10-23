@@ -64,7 +64,7 @@ pub(crate) fn playlist_row(
             }
             return;
         }
-        if ui.button(format!("{}  Play from start", icons::PLAY)).clicked() {
+        if ui.button(format!("{}  Play from the start", icons::PLAY)).clicked() {
             actions.push(Action::SetWatched(path.to_path_buf(), false));
             actions.push(Action::Play(index));
         }
