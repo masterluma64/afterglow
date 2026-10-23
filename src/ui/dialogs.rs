@@ -184,17 +184,20 @@ impl App {
                 // Changes Windows rather than the settings, so it takes effect right away.
                 card(ui, "Windows", |ui| {
                     grid("settings-windows").show(ui, |ui| {
-                        use platform::Part;
-                        let integration = &self.integration;
-                        let actions = &mut self.actions;
                         ui.label("Desktop");
-                        integration_toggle(ui, actions, Part::DesktopShortcut, integration.shortcut.as_deref(), "Shortcut to Afterglow");
-                        ui.end_row();
-                        ui.label("Folders");
-                        integration_toggle(ui, actions, Part::FolderMenu, integration.folder_menu.as_deref(), "\"Open in Afterglow\" in right-click menu");
-                        ui.end_row();
-                        ui.label("Video files");
-                        integration_toggle(ui, actions, Part::OpenWith, integration.open_with.as_deref(), "Listed in \"Open with\"");
+                        ui.horizontal(|ui| {
+                            let mut on = self.desktop_shortcut.is_some();
+                            if ui.checkbox(&mut on, "Shortcut to Afterglow").changed() {
+                                self.actions.push(Action::SetDesktopShortcut(on));
+                            }
+                            // Another copy of Afterglow (or this one, moved or renamed) made it.
+                            if let Some(exe) = &self.desktop_shortcut
+                                && !platform::is_this_exe(exe)
+                                && ui.button("Use this copy").on_hover_text(format!("It opens {}", exe.display())).clicked()
+                            {
+                                self.actions.push(Action::SetDesktopShortcut(true));
+                            }
+                        });
                         ui.end_row();
                     });
                 });
@@ -562,21 +565,4 @@ fn choice_card(ui: &mut egui::Ui, width: f32, icon: &str, title: &str, detail: &
         ui.painter().rect_stroke(inner.response.rect, 8.0, (1.5, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// A checkbox for a part of Afterglow in Windows. Another copy of Afterglow
-/// may have set it up; then it offers to switch it to this one.
-fn integration_toggle(ui: &mut egui::Ui, actions: &mut Vec<Action>, part: platform::Part, target: Option<&Path>, label: &str) {
-    ui.horizontal(|ui| {
-        let mut on = target.is_some();
-        if ui.checkbox(&mut on, label).changed() {
-            actions.push(Action::SetIntegration(part, on));
-        }
-        if let Some(exe) = target
-            && !platform::is_this_exe(exe)
-            && ui.button("Use this copy").on_hover_text(format!("It opens {}", exe.display())).clicked()
-        {
-            actions.push(Action::SetIntegration(part, true));
-        }
-    });
 }

@@ -40,8 +40,8 @@ pub(crate) enum Action {
     /// Asks before resetting every video's progress.
     ConfirmResetProgress,
     SetSettings(progress::Settings),
-    /// Sets up part of Afterglow in Windows, or removes it.
-    SetIntegration(platform::Part, bool),
+    /// Puts a shortcut to Afterglow on the desktop, or removes it.
+    SetDesktopShortcut(bool),
     /// Moves the progress file next to afterglow.exe, or into AppData.
     SetPortable(bool),
     SetIncludeSubfolders(bool),
@@ -289,14 +289,14 @@ impl App {
             Action::ShowStats => self.stats_open = true,
             Action::OpenSettings => {
                 self.settings_open = true;
-                self.integration = platform::Integration::read();
+                self.desktop_shortcut = shortcut::target();
             }
-            Action::SetIntegration(part, on) => {
-                let result = platform::set(part, on);
-                self.integration = platform::Integration::read();
+            Action::SetDesktopShortcut(on) => {
+                let result = if on { shortcut::create() } else { shortcut::remove() };
+                self.desktop_shortcut = shortcut::target();
                 match result {
-                    Ok(()) => self.notify(integration_notice(part, on)),
-                    Err(e) => self.warn(format!("Couldn't change that in Windows: {e}")),
+                    Ok(()) => self.notify(if on { "Shortcut added to desktop" } else { "Shortcut removed from desktop" }),
+                    Err(e) => self.warn(format!("Couldn't change desktop shortcut: {e}")),
                 }
             }
             Action::SetPortable(portable) => {
@@ -726,18 +726,5 @@ impl App {
         } else {
             self.save_current_progress();
         }
-    }
-}
-
-/// What changed in Windows, after setting `part` up or removing it.
-fn integration_notice(part: platform::Part, on: bool) -> &'static str {
-    use platform::Part;
-    match (part, on) {
-        (Part::DesktopShortcut, true) => "Shortcut added to desktop",
-        (Part::DesktopShortcut, false) => "Shortcut removed from desktop",
-        (Part::FolderMenu, true) => "Folders' right-click menu has \"Open in Afterglow\"",
-        (Part::FolderMenu, false) => "\"Open in Afterglow\" removed from folders' right-click menu",
-        (Part::OpenWith, true) => "Videos' \"Open with\" menu lists Afterglow",
-        (Part::OpenWith, false) => "Afterglow removed from \"Open with\"",
     }
 }

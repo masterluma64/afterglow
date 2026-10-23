@@ -7,7 +7,7 @@ mod player;
 mod ui;
 
 use library::{disk, playlist, progress, stats, watch};
-use platform::{clock, instance, media_keys, power, screen};
+use platform::{clock, instance, media_keys, power, screen, shortcut};
 use player::{dll_search, mpv, playback, thumbnails};
 use ui::{app_icon, commands, controls, dialogs, icons, items, video};
 use ui::icons::Bold;
@@ -243,8 +243,8 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
-    /// How Afterglow is set up in Windows, as of opening Settings.
-    integration: platform::Integration,
+    /// The executable the desktop shortcut starts, as of opening Settings.
+    desktop_shortcut: Option<PathBuf>,
     /// The video whose folder settings are open.
     folder_dialog: Option<PathBuf>,
     /// The speed the playing video's folder set, if it set one.
@@ -348,7 +348,7 @@ impl App {
             gone_scan: None,
             show_help: false,
             settings_open: false,
-            integration: platform::Integration::default(),
+            desktop_shortcut: None,
             folder_dialog: None,
             folder_speed: None,
             stats_open: false,
