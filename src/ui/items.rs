@@ -148,9 +148,14 @@ impl App {
             Action::MarkSkip(progress::Skip::Ending) => item(icons::FLAG_CHECKERED, "Mark start of ending here", "").enabled(loaded),
             Action::OpenFolderSettings(video) => {
                 let has_folder = video.parent().is_some_and(|f| !f.as_os_str().is_empty());
-                item(icons::SLIDERS, "Folder settings…", "").enabled(has_folder)
+                let label = if self.store.is_movie(video) { "Video settings…" } else { "Folder settings…" };
+                item(icons::SLIDERS, label, "").enabled(has_folder)
             }
-            Action::UseSubTimingForFolder => item(icons::SLIDERS, "Use this timing for whole folder", "").enabled(loaded),
+            // A video opened by itself keeps its timing anyway, and has no folder to share it with.
+            Action::UseSubTimingForFolder => {
+                let movie = self.current_path().is_some_and(|p| self.store.is_movie(p));
+                item(icons::SLIDERS, "Use this timing for whole folder", "").enabled(loaded && !movie)
+            }
             Action::OpenPalette =>item(icons::COMMAND, "Find a command…", "Ctrl+K"),
             Action::ShowStats => item(icons::CHART, "Stats…", ""),
             Action::OpenSettings => item(icons::GEAR, "Settings…", "E"),

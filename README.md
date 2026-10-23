@@ -108,6 +108,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   *Use this timing for whole folder* in the subtitle menu sets them), when a video counts as
   watched, auto-play, evening out the volume and speed. *Also use for other folders in …*
   shares them with the parent folder's other subfolders, such as a show's seasons.
+  A video opened by itself, such as a movie, has *Video settings* instead: the same settings
+  for just that video, so a folder of movies doesn't share them like a show would.
 - **Settings** (⋯ menu or E): seek steps, when a video counts as watched, auto-play,
   evening out the volume,
   preferred subtitle and audio languages, hardware decoding, the theme and the accent color

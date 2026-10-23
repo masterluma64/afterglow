@@ -208,6 +208,9 @@ pub struct Store {
     pub stats: Stats,
     /// Settings per folder of videos.
     pub folders: HashMap<String, FolderSettings>,
+    /// Settings per video opened by itself (see `is_movie`), which it uses in
+    /// place of its folder's: a folder of movies isn't a show.
+    pub videos: HashMap<String, FolderSettings>,
     #[serde(skip)]
     dirty: bool,
     /// Set when the saved file exists but couldn't be read: saving would
@@ -239,6 +242,7 @@ impl Default for Store {
             window: None,
             stats: Stats::default(),
             folders: HashMap::new(),
+            videos: HashMap::new(),
             settings: Settings::default(),
             dirty: false,
             read_failed: false,
@@ -469,7 +473,11 @@ impl Store {
 
     /// The settings of the folder a video is in, or else those of the folder
     /// above it when they include subfolders, with the folder they belong to.
+    /// A video opened by itself has its own instead, which belong to it.
     pub fn folder_settings<'v>(&self, video: &'v Path) -> Option<(&'v Path, &FolderSettings)> {
+        if self.is_movie(video) {
+            return self.videos.get(&key(video)).map(|settings| (video, settings));
+        }
         let own = video.parent()?;
         if let Some(settings) = self.folders.get(&key(own)) {
             return Some((own, settings));
@@ -480,8 +488,18 @@ impl Store {
 
     /// Saves the settings for a video's folder: for its own folder, or with
     /// `include_subfolders` for the folder above it (in place of its own).
+    /// For a video opened by itself, they are its own.
     /// Turning `include_subfolders` off moves them back to its own folder.
     pub fn set_folder_settings(&mut self, video: &Path, settings: FolderSettings) {
+        if self.is_movie(video) {
+            if settings == FolderSettings::default() {
+                self.videos.remove(&key(video));
+            } else {
+                self.videos.insert(key(video), FolderSettings { include_subfolders: false, ..settings });
+            }
+            self.dirty = true;
+            return;
+        }
         let Some(own) = video.parent() else { return };
         let parent = own.parent().filter(|_| settings.include_subfolders);
         let target = parent.unwrap_or(own);
@@ -613,21 +631,29 @@ impl Store {
     /// Every video anything is remembered about, to look for ones whose
     /// files are gone (see [`gone`]).
     pub fn remembered_videos(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self.entries.keys().chain(self.tracks.keys()).chain(self.titles.keys()).cloned().collect();
+        let mut keys: Vec<String> = self
+            .entries
+            .keys()
+            .chain(self.tracks.keys())
+            .chain(self.titles.keys())
+            .chain(self.videos.keys())
+            .cloned()
+            .collect();
         keys.sort();
         keys.dedup();
         keys
     }
 
-    /// Forgets everything saved about these videos: progress, length, title
-    /// and track choices. Returns how many there were.
+    /// Forgets everything saved about these videos: progress, length, title,
+    /// track choices and settings. Returns how many there were.
     pub fn forget(&mut self, keys: &[String]) -> usize {
         let mut forgotten = 0;
         for k in keys {
             let entry = self.entries.remove(k).is_some();
             let tracks = self.tracks.remove(k).is_some();
             let title = self.titles.remove(k).is_some();
-            forgotten += usize::from(entry || tracks || title);
+            let settings = self.videos.remove(k).is_some();
+            forgotten += usize::from(entry || tracks || title || settings);
         }
         if forgotten > 0 {
             self.dirty = true;
@@ -983,6 +1009,27 @@ mod tests {
         store.set_folder(None);
         store.set_playlist(&[movie.to_path_buf(), other.to_path_buf()]);
         assert!(!store.is_movie(movie), "one of several");
+    }
+
+    #[test]
+    fn a_movie_has_settings_of_its_own() {
+        let mut store = Store::default();
+        let (movie, other) = (Path::new(r"D:\Movies\Up.mkv"), Path::new(r"D:\Movies\Cars.mkv"));
+        let folder = FolderSettings { speed: Some(1.5), ..FolderSettings::default() };
+        store.set_folder_settings(other, folder.clone());
+        store.set_playlist(&[movie.to_path_buf()]);
+        assert!(store.folder_settings(movie).is_none(), "not its folder's");
+        let own = FolderSettings { opening_end: Some(30.0), include_subfolders: true, ..FolderSettings::default() };
+        store.set_folder_settings(movie, own);
+        let (owner, settings) = store.folder_settings(movie).unwrap();
+        assert_eq!((owner, settings.opening_end, settings.include_subfolders), (movie, Some(30.0), false));
+        assert_eq!(store.folders[r"D:\Movies"], folder, "the folder's are left alone");
+        // Opened with its folder, it goes by the folder's again.
+        store.set_folder(Some(Path::new(r"D:\Movies")));
+        assert_eq!(store.folder_settings(movie).map(|(_, s)| s.speed), Some(Some(1.5)));
+        store.set_folder(None);
+        store.set_folder_settings(movie, FolderSettings::default());
+        assert!(store.videos.is_empty(), "reset: nothing kept");
     }
 
     #[test]

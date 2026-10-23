@@ -60,7 +60,8 @@ impl App {
                         "Add new videos from the playlist's folder and drop missing ones. New videos are also picked up by themselves.",
                     );
                     let video = self.current_path().map(Path::to_path_buf).unwrap_or_default();
-                    self.menu_item(ui, Action::OpenFolderSettings(video)).on_hover_text("Settings for the playing video's folder");
+                    let tip = if self.store.is_movie(&video) { "Settings for the playing video" } else { "Settings for the playing video's folder" };
+                    self.menu_item(ui, Action::OpenFolderSettings(video)).on_hover_text(tip);
                     ui.separator();
                     self.app_items(ui);
                     ui.separator();

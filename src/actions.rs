@@ -383,15 +383,16 @@ impl App {
             Action::MarkSkip(skip) => {
                 if let Some((video, mut folder)) = self.playing_folder().filter(|_| self.loaded) {
                     let Playback { position, duration, .. } = self.playback;
+                    let place = if self.store.is_movie(&video) { "for this video" } else { "in this folder" };
                     let text = match skip {
                         progress::Skip::Opening => {
                             folder.opening_end = Some(position.round());
-                            format!("Opening ends at {} in this folder", format_time(position))
+                            format!("Opening ends at {} {place}", format_time(position))
                         }
                         progress::Skip::Ending => {
                             let before_end = (duration - position).max(0.0).round();
                             folder.ending_start = Some(before_end);
-                            format!("Ending starts {} before the end in this folder", format_time(before_end))
+                            format!("Ending starts {} before the end {place}", format_time(before_end))
                         }
                     };
                     self.apply(Action::SetFolderSettings(video, folder), ctx);
