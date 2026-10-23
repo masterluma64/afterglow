@@ -321,16 +321,11 @@ impl App {
         let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 72.0));
         let modal = egui::Modal::new(id).area(area).show(ctx, |ui| {
             ui.set_width(480.0);
-            let resp = ui
-                .horizontal(|ui| {
-                    ui.label(RichText::new(icons::SEARCH).size(ICON_SIZE).weak());
-                    let edit = egui::TextEdit::singleline(&mut palette.query)
-                        .margin(TEXT_MARGIN)
-                        .hint_text("Type a command or a video's name")
-                        .desired_width(f32::INFINITY);
-                    ui.add(edit)
-                })
-                .inner;
+            let edit = egui::TextEdit::singleline(&mut palette.query)
+                .margin(TEXT_MARGIN)
+                .hint_text("Type a command or a video's name")
+                .desired_width(f32::INFINITY);
+            let resp = ui.add(edit);
             resp.request_focus();
             if resp.changed() {
                 palette.pick = 0;
