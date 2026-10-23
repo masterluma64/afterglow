@@ -2,7 +2,7 @@
 //! and settings that differ from the global ones for that folder.
 
 use crate::*;
-use progress::{FolderSettings, Span};
+use progress::FolderSettings;
 
 impl App {
     /// The settings of the folder of the video in `folder_dialog`.
@@ -41,14 +41,14 @@ impl App {
             egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
                 card(ui, "Skipping", |ui| {
                     grid("folder-skipping").show(ui, |ui| {
-                        ui.label("Opening").on_hover_text("Counted from the start of each video");
-                        span_field(ui, false, &mut folder.opening, Span { start: 0.0, end: 90.0 }, now.map(|(position, _)| position));
+                        ui.label("Opening ends at").on_hover_text("Counted from the start of each video. Until then, the opening can be skipped.");
+                        skip_field(ui, false, &mut folder.opening_end, 90.0, now.map(|(position, _)| position));
                         ui.end_row();
-                        ui.label("Ending").on_hover_text(
-                            "Counted back from the end of each video, so it fits videos of different lengths. An ending that runs to 00:00 skips to the next video.",
+                        ui.label("Ending starts at").on_hover_text(
+                            "Counted back from the end of each video, so it fits videos of different lengths. From then on, skipping goes to the next video.",
                         );
                         let before_end = now.map(|(position, duration)| (duration - position).max(0.0));
-                        span_field(ui, true, &mut folder.ending, Span { start: 90.0, end: 0.0 }, before_end);
+                        skip_field(ui, true, &mut folder.ending_start, 90.0, before_end);
                         ui.end_row();
                     });
                     ui.add_space(2.0);
@@ -177,10 +177,10 @@ fn switch_field(ui: &mut egui::Ui, value: &mut Option<bool>, global: bool) {
     });
 }
 
-/// The opening or ending: off, or from one time to another, each with a
-/// button that fills in `now` (the current time, counted the same way).
-/// Times `before_end` are counted back from the end, shown as "−1:30".
-fn span_field(ui: &mut egui::Ui, before_end: bool, value: &mut Option<Span>, initial: Span, now: Option<f64>) {
+/// Where the opening ends or the ending starts: off, or a time with a button
+/// that fills in `now` (the current time, counted the same way). Times
+/// `before_end` are counted back from the end, shown as "−1:30".
+fn skip_field(ui: &mut egui::Ui, before_end: bool, value: &mut Option<f64>, initial: f64, now: Option<f64>) {
     ui.horizontal(|ui| {
         let mut on = value.is_some();
         ui.selectable_value(&mut on, false, "Off");
@@ -190,21 +190,16 @@ fn span_field(ui: &mut egui::Ui, before_end: bool, value: &mut Option<Span>, ini
             (true, false) => *value = Some(initial),
             _ => {}
         }
-        let Some(span) = value else { return };
+        let Some(time) = value else { return };
         ui.add_space(4.0);
         ui.push_id(before_end, |ui| {
-            for (i, time) in [&mut span.start, &mut span.end].into_iter().enumerate() {
-                if i == 1 {
-                    ui.label("to");
-                }
-                ui.add(time_field(time, before_end));
-                let tip = match now {
-                    Some(now) => format!("Use the current time ({})", format_span_time(now, before_end)),
-                    None => "Use the current time, while this folder's video plays".into(),
-                };
-                if ui.add_enabled(now.is_some(), egui::Button::new("Now").small()).on_hover_text(tip).clicked() {
-                    *time = now.unwrap_or_default().round();
-                }
+            ui.add(time_field(time, before_end));
+            let tip = match now {
+                Some(now) => format!("Use the current time ({})", format_span_time(now, before_end)),
+                None => "Use the current time, while this folder's video plays".into(),
+            };
+            if ui.add_enabled(now.is_some(), egui::Button::new("Now").small()).on_hover_text(tip).clicked() {
+                *time = now.unwrap_or_default().round();
             }
         });
     });

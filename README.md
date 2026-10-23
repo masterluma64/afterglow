@@ -90,10 +90,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   speed. When stats were first kept, what was watched before was estimated from the saved
   progress. *Clear stats…* at the bottom of the dialog starts them over, after asking.
 - **Folder settings** (⋯ menu, a video's right-click menu or the palette): settings for the
-  playing video's folder. Mark where the opening is (counted from the start) and where the
-  ending is (counted back from the end), and a *Skip opening* / *Skip ending* button shows in
-  the bottom-right corner while it plays (Enter skips; skipping an ending that runs to the end
-  goes to the next video). Both show as bands on the seek bar. A folder can also have its own
+  playing video's folder. Set where the opening ends (counted from the start) and where the
+  ending starts (counted back from the end), and a *Skip opening* / *Skip ending* button shows
+  in the bottom-right corner while it plays (Enter skips; skipping the ending goes to the next
+  video). Both show as bands on the seek bar. A folder can also have its own
   subtitle and audio languages, subtitle delay and timing (the starting point for each video;
   *Use this timing for whole folder* in the subtitle menu sets them), when a video counts as
   watched, auto-play, evening out the volume and speed. *Also use for other folders in …*

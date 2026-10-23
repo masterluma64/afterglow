@@ -1502,7 +1502,7 @@ mod skip_tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    /// Skipping an ending that runs to the end seeks to 100%, which must end
+    /// Skipping the ending seeks to 100%, which must end
     /// the file (so the next video comes up), even while paused.
     #[test]
     fn seeking_to_the_end_ends_the_file() {

@@ -316,8 +316,8 @@ impl App {
             }
             Action::Skip => {
                 if let (Ok(mpv), Some((skip, _, end))) = (&self.mpv, self.skip_now()) {
-                    // An ending that runs to the end of the video finishes it.
-                    if skip == progress::Skip::Ending && end >= self.playback.duration - 1.0 {
+                    // Skipping the ending finishes the video.
+                    if skip == progress::Skip::Ending {
                         mpv.send(&["seek", "100", "absolute-percent+exact"]);
                     } else {
                         mpv.send(&["seek", &format!("{end:.3}"), "absolute+exact"]);

@@ -111,15 +111,6 @@ pub enum Theme {
     Light,
 }
 
-/// A part of every video in a folder that can be skipped: from `start` to
-/// `end` seconds, counted from the start of the video for the opening and
-/// back from its end for the ending.
-#[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
-pub struct Span {
-    pub start: f64,
-    pub end: f64,
-}
-
 /// Settings for the videos in one folder. `None` follows the global
 /// setting.
 #[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
@@ -128,8 +119,13 @@ pub struct FolderSettings {
     /// Also used for the folders directly inside this one (seasons of a
     /// show, say) that have no settings of their own.
     pub include_subfolders: bool,
-    pub opening: Option<Span>,
-    pub ending: Option<Span>,
+    /// Where the opening ends, in seconds from the start of each video: it
+    /// can be skipped until then.
+    pub opening_end: Option<f64>,
+    /// Where the ending starts, in seconds back from the end of each video
+    /// (so it fits videos of different lengths): from then on it can be
+    /// skipped, which goes to the next video.
+    pub ending_start: Option<f64>,
     pub sub_languages: Option<String>,
     pub audio_languages: Option<String>,
     /// Where the subtitle delay and timing start for a video in the folder,
@@ -146,8 +142,8 @@ impl FolderSettings {
     /// Where the opening and ending are in a video of `duration` seconds, in
     /// seconds from its start, if the folder has them and they fit.
     pub fn skips(&self, duration: f64) -> Vec<(Skip, f64, f64)> {
-        let opening = self.opening.map(|s| (Skip::Opening, s.start, s.end));
-        let ending = self.ending.map(|s| (Skip::Ending, duration - s.start, duration - s.end));
+        let opening = self.opening_end.map(|end| (Skip::Opening, 0.0, end));
+        let ending = self.ending_start.map(|start| (Skip::Ending, duration - start, duration));
         [opening, ending]
             .into_iter()
             .flatten()
@@ -931,27 +927,27 @@ mod tests {
         let mut store = Store::default();
         let s1 = Path::new("D:\\Shows\\Kirby\\Season 1\\01.mkv");
         let s2 = Path::new("D:\\Shows\\Kirby\\Season 2\\01.mkv");
-        let opening = Some(Span { start: 10.0, end: 100.0 });
-        store.set_folder_settings(s1, FolderSettings { opening, ..FolderSettings::default() });
-        assert_eq!(store.folder_settings(s1).map(|(f, s)| (f, s.opening)), Some((Path::new("D:\\Shows\\Kirby\\Season 1"), opening)));
+        let opening_end = Some(100.0);
+        store.set_folder_settings(s1, FolderSettings { opening_end, ..FolderSettings::default() });
+        assert_eq!(store.folder_settings(s1).map(|(f, s)| (f, s.opening_end)), Some((Path::new("D:\\Shows\\Kirby\\Season 1"), opening_end)));
         assert!(store.folder_settings(s2).is_none(), "not used for other folders by itself");
 
         // Also used for other folders in Kirby: moved up a level.
-        store.set_folder_settings(s1, FolderSettings { include_subfolders: true, opening, ..FolderSettings::default() });
+        store.set_folder_settings(s1, FolderSettings { include_subfolders: true, opening_end, ..FolderSettings::default() });
         assert_eq!(store.folders.keys().collect::<Vec<_>>(), ["D:\\Shows\\Kirby"]);
-        assert_eq!(store.folder_settings(s2).map(|(_, s)| s.opening), Some(opening));
-        assert_eq!(store.folder_settings(Path::new("D:\\Shows\\Kirby\\OVA.mkv")).map(|(_, s)| s.opening), Some(opening));
+        assert_eq!(store.folder_settings(s2).map(|(_, s)| s.opening_end), Some(opening_end));
+        assert_eq!(store.folder_settings(Path::new("D:\\Shows\\Kirby\\OVA.mkv")).map(|(_, s)| s.opening_end), Some(opening_end));
         assert!(store.folder_settings(Path::new("D:\\Shows\\Kirby\\Season 1\\Extras\\a.mkv")).is_none(), "one level only");
 
         // A folder with settings of its own uses only those.
         let s3 = Path::new("D:\\Shows\\Kirby\\Season 3\\01.mkv");
         store.folders.insert("D:\\Shows\\Kirby\\Season 3".into(), FolderSettings { speed: Some(1.5), ..FolderSettings::default() });
-        assert_eq!(store.folder_settings(s3).map(|(_, s)| s.opening), Some(None));
+        assert_eq!(store.folder_settings(s3).map(|(_, s)| s.opening_end), Some(None));
 
         // Turned off again: back to Season 2 only. Reset: nothing saved.
-        store.set_folder_settings(s2, FolderSettings { opening, ..FolderSettings::default() });
+        store.set_folder_settings(s2, FolderSettings { opening_end, ..FolderSettings::default() });
         assert!(store.folder_settings(s1).is_none());
-        assert_eq!(store.folder_settings(s2).map(|(_, s)| s.opening), Some(opening));
+        assert_eq!(store.folder_settings(s2).map(|(_, s)| s.opening_end), Some(opening_end));
         store.set_folder_settings(s2, FolderSettings::default());
         assert!(store.folder_settings(s2).is_none() && !store.folders.contains_key("D:\\Shows\\Kirby\\Season 2"));
     }
@@ -979,11 +975,11 @@ mod tests {
     #[test]
     fn finds_the_opening_and_ending_in_a_video() {
         let folder = FolderSettings {
-            opening: Some(Span { start: 30.0, end: 120.0 }),
-            ending: Some(Span { start: 100.0, end: 10.0 }),
+            opening_end: Some(120.0),
+            ending_start: Some(100.0),
             ..FolderSettings::default()
         };
-        assert_eq!(folder.skips(1400.0), [(Skip::Opening, 30.0, 120.0), (Skip::Ending, 1300.0, 1390.0)]);
+        assert_eq!(folder.skips(1400.0), [(Skip::Opening, 0.0, 120.0), (Skip::Ending, 1300.0, 1400.0)]);
         // A video too short for them gets neither.
         assert_eq!(folder.skips(60.0), []);
         assert_eq!(FolderSettings::default().skips(1400.0), []);
