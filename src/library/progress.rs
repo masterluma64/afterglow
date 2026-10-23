@@ -179,6 +179,9 @@ pub struct Store {
     pub entries: HashMap<String, Entry>,
     /// Track choices per video.
     pub tracks: HashMap<String, TrackPrefs>,
+    /// The title stored in each video's file, once read: "" when it has none
+    /// worth showing (see `set_title`).
+    pub titles: HashMap<String, String>,
     /// The playlist, in play order.
     pub playlist: Vec<PathBuf>,
     /// The playlist entry that was playing last.
@@ -219,6 +222,7 @@ impl Default for Store {
         Self {
             entries: HashMap::new(),
             tracks: HashMap::new(),
+            titles: HashMap::new(),
             playlist: Vec::new(),
             current: None,
             folder: None,
@@ -429,6 +433,26 @@ impl Store {
         self.entries.get(&key(path)).copied().unwrap_or_default()
     }
 
+    /// The title stored in a video's file, if it has one worth showing.
+    pub fn title(&self, path: &Path) -> Option<&str> {
+        self.titles.get(&key(path)).map(String::as_str).filter(|t| !t.is_empty())
+    }
+
+    /// Whether a video's file was read for its title yet.
+    pub fn title_known(&self, path: &Path) -> bool {
+        self.titles.contains_key(&key(path))
+    }
+
+    /// Records the title read from a video's file. One that looks like a web
+    /// address (left by whoever shared the file) counts as none.
+    pub fn set_title(&mut self, path: &Path, title: Option<String>) {
+        let title = title.map(|t| t.trim().to_string()).unwrap_or_default();
+        let lower = title.to_lowercase();
+        let junk = ["www.", "http", ".com", ".net", ".org"].iter().any(|w| lower.contains(w));
+        self.titles.insert(key(path), if junk { String::new() } else { title });
+        self.dirty = true;
+    }
+
     pub fn tracks(&self, path: &Path) -> Option<&TrackPrefs> {
         self.tracks.get(&key(path))
     }
@@ -584,20 +608,21 @@ impl Store {
     /// Every video anything is remembered about, to look for ones whose
     /// files are gone (see [`gone`]).
     pub fn remembered_videos(&self) -> Vec<String> {
-        let mut keys: Vec<String> = self.entries.keys().chain(self.tracks.keys()).cloned().collect();
+        let mut keys: Vec<String> = self.entries.keys().chain(self.tracks.keys()).chain(self.titles.keys()).cloned().collect();
         keys.sort();
         keys.dedup();
         keys
     }
 
-    /// Forgets everything saved about these videos: progress, length and
-    /// track choices. Returns how many there were.
+    /// Forgets everything saved about these videos: progress, length, title
+    /// and track choices. Returns how many there were.
     pub fn forget(&mut self, keys: &[String]) -> usize {
         let mut forgotten = 0;
         for k in keys {
             let entry = self.entries.remove(k).is_some();
             let tracks = self.tracks.remove(k).is_some();
-            forgotten += usize::from(entry || tracks);
+            let title = self.titles.remove(k).is_some();
+            forgotten += usize::from(entry || tracks || title);
         }
         if forgotten > 0 {
             self.dirty = true;
@@ -910,6 +935,21 @@ mod tests {
         store.seed_stats();
         assert_eq!(store.stats.total, Tally::default(), "cleared stats aren't estimated again from saved progress");
         assert!(store.stats.series.is_empty() && store.stats.days.is_empty());
+    }
+
+    #[test]
+    fn keeps_titles_worth_showing() {
+        let mut store = Store::default();
+        let (a, b, c) = (Path::new("a.mkv"), Path::new("b.mkv"), Path::new("c.mkv"));
+        assert!(!store.title_known(a));
+        store.set_title(a, Some(" Spirited Away ".into()));
+        store.set_title(b, Some("Encoded by www.example.org".into()));
+        store.set_title(c, None);
+        assert_eq!(store.title(a), Some("Spirited Away"));
+        assert_eq!((store.title(b), store.title(c)), (None, None), "a web address or nothing counts as no title");
+        assert!(store.title_known(b) && store.title_known(c), "but they were read");
+        assert_eq!(store.forget(&[key(c)]), 1);
+        assert!(!store.title_known(c));
     }
 
     #[test]

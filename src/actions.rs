@@ -417,7 +417,7 @@ impl App {
                     self.keep_watched_mark(watched);
                 }
                 self.store.save();
-                let name = display_name(&path);
+                let name = self.video_name(&path);
                 self.notify(match (watched, playing) {
                     (true, _) => format!("{name}: marked as watched"),
                     (false, true) => format!("{name}: marked as unwatched"),

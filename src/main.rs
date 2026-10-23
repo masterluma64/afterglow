@@ -231,6 +231,8 @@ struct App {
     search_pick: usize,
     /// Scroll the list to this search result on the next frame.
     scroll_to_pick: Option<usize>,
+    /// What the window's title says now.
+    window_title: String,
     /// Display names of the playlist entries, and their lowercase forms.
     names: Vec<(String, String)>,
     /// When the playlist summary was added up: total and watched seconds, and
@@ -282,7 +284,7 @@ impl App {
             // draw a frame, so playback state comes in as events instead.
             for name in [
                 "time-pos", "duration", "pause", "mute", "volume", "speed", "sub-delay", "sub-speed",
-                "chapter-list", "track-list",
+                "chapter-list", "track-list", "metadata/by-key/title",
             ] {
                 mpv.observe(name);
             }
@@ -345,6 +347,7 @@ impl App {
             focus_search: false,
             search_pick: 0,
             scroll_to_pick: None,
+            window_title: APP_NAME.to_string(),
             names: Vec::new(),
             summary: None,
             confirm_reset: false,
@@ -453,7 +456,7 @@ impl App {
             }
             self.media_keys = Some(keys);
         }
-        let title = self.current_path().map(display_name);
+        let title = self.current_path().map(|path| self.video_name(path));
         let Playback { position, duration, paused, .. } = self.playback;
         let playing = self.loaded && !paused;
         let seek_long = self.store.settings.seek_long;
@@ -501,6 +504,7 @@ impl eframe::App for App {
         self.media_controls(&ctx, frame);
         self.receive_other_starts(&ctx);
         self.remember_window(&ctx);
+        self.update_window_title(&ctx);
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
         self.receive_disk(&ctx);
@@ -678,6 +682,7 @@ fn absolute_paths(args: impl Iterator<Item = std::ffi::OsString>) -> Vec<PathBuf
     args.map(PathBuf::from).map(|p| std::path::absolute(&p).unwrap_or(p)).collect()
 }
 
+/// A video's file name without its extension, or a folder's name.
 fn display_name(path: &Path) -> String {
     path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| path.display().to_string())
 }

@@ -4,11 +4,11 @@ use std::collections::HashMap;
 
 use crate::*;
 
-/// Finds the length of videos that haven't been played yet, on a background
-/// thread with its own headless mpv.
+/// Reads the length and stored title of videos that haven't been played
+/// yet, on a background thread with its own headless mpv.
 pub(crate) struct DurationProbe {
     pub(crate) requests: Sender<PathBuf>,
-    pub(crate) results: Receiver<(PathBuf, Option<f64>)>,
+    pub(crate) results: Receiver<(PathBuf, Option<mpv::Info>)>,
     pub(crate) pending: HashSet<PathBuf>,
 }
 
@@ -19,8 +19,8 @@ impl DurationProbe {
         let spawned = std::thread::Builder::new().name("duration-probe".into()).spawn(move || {
             let Ok(prober) = mpv::Prober::new() else { return };
             for path in request_rx {
-                let duration = prober.duration(&path, PROBE_TIMEOUT);
-                if result_tx.send((path, duration)).is_err() {
+                let info = prober.probe(&path, PROBE_TIMEOUT);
+                if result_tx.send((path, info)).is_err() {
                     return;
                 }
                 ctx.request_repaint();
@@ -115,21 +115,27 @@ pub(crate) fn move_item<T>(list: &mut Vec<T>, from: usize, to: usize) {
 }
 
 impl App {
-    /// Queues every playlist video whose length isn't known yet.
+    /// Queues every playlist video whose length or title isn't known yet,
+    /// the playing one first (its title is in the window's).
     pub(crate) fn request_durations(&mut self) {
-        for path in &self.playlist {
-            if self.store.get(path).duration <= 0.0 {
+        let playing = self.current_path().map(Path::to_path_buf);
+        for path in playing.iter().chain(&self.playlist) {
+            if self.store.get(path).duration <= 0.0 || !self.store.title_known(path) {
                 self.durations.request(path);
             }
         }
     }
 
     pub(crate) fn receive_durations(&mut self) {
-        while let Ok((path, duration)) = self.durations.results.try_recv() {
+        while let Ok((path, info)) = self.durations.results.try_recv() {
             self.durations.pending.remove(&path);
-            if let Some(d) = duration {
+            let Some(info) = info else { continue };
+            if let Some(d) = info.duration {
                 self.store.set_duration(&path, d);
             }
+            self.store.set_title(&path, info.title);
+            // Shown by their titles now.
+            self.names.clear();
         }
     }
 

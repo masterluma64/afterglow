@@ -36,6 +36,10 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   - Drag entries to reorder them.
   - The search box (/) filters the playlist by name; ↑ / ↓ pick a result and Enter plays
     it. Esc clears it.
+- **Titles**: a video whose file stores a title is shown by it, in the playlist, the window title
+  and elsewhere, unless another video in the playlist has the same one (as when a show puts its
+  name in every file). Otherwise, and for titles that look like a web address, the file name is
+  used.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
   What was saved about videos whose files were deleted is forgotten by itself, on startup
   and when refreshing the folder. Videos on a drive that isn't connected right now are left

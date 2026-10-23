@@ -310,22 +310,42 @@ impl App {
             return;
         }
         let folder = self.store.folder.as_deref();
-        self.names = self
+        // How many videos have each title, to keep shared ones out (see `video_name`).
+        let mut titles: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for title in self.playlist.iter().filter_map(|p| self.store.title(p)) {
+            *titles.entry(title).or_default() += 1;
+        }
+        let names = self
             .playlist
             .iter()
             .map(|path| {
+                let name = match self.store.title(path) {
+                    Some(title) if titles[title] == 1 => title.to_string(),
+                    _ => display_name(path),
+                };
                 // Videos from a subfolder of the opened folder show where they're from.
                 let subfolder = folder.and_then(|f| path.parent()?.strip_prefix(f).ok());
                 let name = match subfolder {
                     Some(sub) if !sub.as_os_str().is_empty() => {
-                        format!("{} / {}", sub.to_string_lossy().replace(std::path::MAIN_SEPARATOR, " / "), display_name(path))
+                        format!("{} / {name}", sub.to_string_lossy().replace(std::path::MAIN_SEPARATOR, " / "))
                     }
-                    _ => display_name(path),
+                    _ => name,
                 };
                 let lower = name.to_lowercase();
                 (name, lower)
             })
             .collect();
+        self.names = names;
+    }
+
+    /// The name a video is shown by: the title stored in its file, unless it
+    /// has none or another video in the playlist has the same one (as when a
+    /// show puts its own name in every file), else its file name.
+    pub(crate) fn video_name(&self, path: &Path) -> String {
+        match self.store.title(path) {
+            Some(title) if !self.playlist.iter().any(|p| p != path && self.store.title(p) == Some(title)) => title.to_string(),
+            _ => display_name(path),
+        }
     }
 
     /// The search box: / focuses it, ↑/↓ pick a result, Enter plays it and Esc

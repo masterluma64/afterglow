@@ -247,7 +247,7 @@ impl Node {
         }
     }
 
-    fn as_str(&self) -> Option<&str> {
+    pub fn as_str(&self) -> Option<&str> {
         match self {
             Node::Str(s) => Some(s),
             _ => None,
@@ -947,7 +947,16 @@ unsafe fn create_target(gl: &glow::Context, [w, h]: [i32; 2]) -> Result<GlTarget
     }
 }
 
-/// A headless mpv instance that only opens files to read their length.
+/// What [`Prober::probe`] reads from a video.
+#[derive(Debug, PartialEq)]
+pub struct Info {
+    /// Length in seconds, if mpv knows it.
+    pub duration: Option<f64>,
+    /// The title stored in the file, if it has one.
+    pub title: Option<String>,
+}
+
+/// A headless mpv instance that only opens files to read their length and title.
 /// It stays paused with null outputs, so nothing is played. Use it from one thread.
 pub struct Prober {
     api: Arc<Api>,
@@ -985,14 +994,14 @@ impl Prober {
         Ok(Self { api, handle: Ptr(handle) })
     }
 
-    /// Length of a video in seconds, or `None` if it can't be opened in time.
-    pub fn duration(&self, path: &Path, timeout: std::time::Duration) -> Option<f64> {
+    /// A video's length and title, or `None` if it can't be opened in time.
+    pub fn probe(&self, path: &Path, timeout: std::time::Duration) -> Option<Info> {
         let (cmd, file, mode) = (cstr("loadfile"), cstr(&path.to_string_lossy()), cstr("replace"));
         let mut args = [cmd.as_ptr(), file.as_ptr(), mode.as_ptr(), std::ptr::null()];
         self.api.check(unsafe { (self.api.command)(self.handle.0, args.as_mut_ptr()) }).ok()?;
 
         let deadline = std::time::Instant::now() + timeout;
-        let mut duration = None;
+        let mut info = None;
         let mut ended = false;
         while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
             let ev = unsafe { &*(self.api.wait_event)(self.handle.0, left.as_secs_f64()) };
@@ -1003,7 +1012,8 @@ impl Prober {
                     let code = unsafe {
                         (self.api.get_property)(self.handle.0, name.as_ptr(), MPV_FORMAT_DOUBLE, &mut v as *mut f64 as *mut c_void)
                     };
-                    duration = (code >= 0 && v > 0.0).then_some(v);
+                    let duration = (code >= 0 && v > 0.0).then_some(v);
+                    info = Some(Info { duration, title: self.get_str("metadata/by-key/title") });
                     break;
                 }
                 MPV_EVENT_END_FILE => {
@@ -1028,7 +1038,18 @@ impl Prober {
                 break;
             }
         }
-        duration
+        info
+    }
+
+    fn get_str(&self, name: &str) -> Option<String> {
+        let n = cstr(name);
+        let p = unsafe { (self.api.get_property_string)(self.handle.0, n.as_ptr()) };
+        if p.is_null() {
+            return None;
+        }
+        let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
+        unsafe { (self.api.free)(p as *mut c_void) };
+        Some(s)
     }
 }
 
@@ -1453,18 +1474,37 @@ mod prober_tests {
 
         let prober = Prober::new().expect("libmpv");
         let timeout = std::time::Duration::from_secs(5);
-        let d = prober.duration(&seven, timeout).expect("duration");
+        let d = prober.probe(&seven, timeout).and_then(|i| i.duration).expect("duration");
         assert!((d - 7.0).abs() < 0.05, "got {d}");
         // Probing again works: the previous file's events don't interfere.
-        let d = prober.duration(&three, timeout).expect("duration");
+        let info = prober.probe(&three, timeout).expect("info");
+        let d = info.duration.expect("duration");
         assert!((d - 3.0).abs() < 0.05, "got {d}");
+        assert_eq!(info.title, None, "no title stored");
         std::fs::remove_file(seven).unwrap();
         std::fs::remove_file(three).unwrap();
 
         let bogus = std::env::temp_dir().join("afterglow-not-a-video.mkv");
         std::fs::write(&bogus, b"definitely not a video").unwrap();
-        assert_eq!(prober.duration(&bogus, timeout), None);
+        assert_eq!(prober.probe(&bogus, timeout), None);
         std::fs::remove_file(bogus).unwrap();
+
+        // A WAV file stores its title in an INFO list, as "INAM".
+        let titled = silent_wav("afterglow-probe-titled.wav", 2);
+        let mut bytes = std::fs::read(&titled).unwrap();
+        let name = b"Big Buck Bunny\0\0";
+        let mut list = b"INFOINAM".to_vec();
+        list.extend_from_slice(&(name.len() as u32).to_le_bytes());
+        list.extend_from_slice(name);
+        bytes.extend_from_slice(b"LIST");
+        bytes.extend_from_slice(&(list.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&list);
+        let riff_len = (bytes.len() - 8) as u32;
+        bytes[4..8].copy_from_slice(&riff_len.to_le_bytes());
+        std::fs::write(&titled, bytes).unwrap();
+        let info = prober.probe(&titled, timeout).expect("info");
+        std::fs::remove_file(titled).unwrap();
+        assert_eq!(info.title.as_deref(), Some("Big Buck Bunny"));
     }
 
     /// A file that refers to other files (here an EDL disguised as .mkv)
@@ -1479,7 +1519,7 @@ mod prober_tests {
         std::fs::write(&edl, format!("# mpv EDL v0\n%{}%{source},0,4\n", source.len())).unwrap();
         let timeout = std::time::Duration::from_secs(5);
 
-        assert_eq!(Prober::new().expect("libmpv").duration(&edl, timeout), None, "the prober doesn't follow it");
+        assert_eq!(Prober::new().expect("libmpv").probe(&edl, timeout), None, "the prober doesn't follow it");
 
         let previews = Mpv::thumbnailer(egui::Context::default()).expect("libmpv");
         previews.load_file(&edl, 0.0, 0);

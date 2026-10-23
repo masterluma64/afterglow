@@ -150,7 +150,7 @@ impl App {
             let (index, left) = (up_next.index, up_next.at.saturating_duration_since(Instant::now()));
             child.label(RichText::new("Up next").weak());
             child.add_space(4.0);
-            child.label(RichText::new(display_name(&self.playlist[index])).bold());
+            child.label(RichText::new(self.video_name(&self.playlist[index])).bold());
             child.add_space(4.0);
             child.weak(format!("Starts in {} s", left.as_secs_f32().ceil() as u32));
             child.add_space(6.0);
@@ -177,7 +177,7 @@ impl App {
             let path = &self.playlist[index];
             let resume = self.store.resume_position(path);
             let verb = if resume.is_some() { "Continue" } else { "Play" };
-            let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, display_name(path)));
+            let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, self.video_name(path)));
             child.spacing_mut().button_padding = vec2(18.0, 9.0);
             if child.add(dialogs::primary_button(&child, text)).on_hover_text("Space").clicked() {
                 self.actions.push(Action::Play(index));

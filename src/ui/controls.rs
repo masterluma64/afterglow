@@ -56,7 +56,7 @@ impl App {
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     if let Some(path) = self.current_path() {
                         ui.separator();
-                        ui.add(egui::Label::new(RichText::new(display_name(path)).bold()).truncate());
+                        ui.add(egui::Label::new(RichText::new(self.video_name(path)).bold()).truncate());
                     }
                 });
             });

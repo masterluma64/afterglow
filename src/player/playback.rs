@@ -115,7 +115,7 @@ impl App {
             return;
         }
         let Some(path) = self.playlist.get(index).cloned() else { return };
-        let name = display_name(&path);
+        let name = self.video_name(&path);
         if !path.is_file() {
             return self.warn(format!("{name} was not found (moved or deleted?)"));
         }
@@ -125,7 +125,6 @@ impl App {
         mpv.set("pause", if paused { "yes" } else { "no" });
         mpv.load_file(&path, start.unwrap_or(0.0), LOAD_TAG);
         self.loads.asked();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!("{name} — {APP_NAME}")));
         // Drop the previous frame so it never shows under the new video.
         mpv.hide_frames();
         self.chapters.clear();
@@ -139,6 +138,7 @@ impl App {
         self.held_unwatched = false;
         self.current = Some(index);
         self.loaded = false;
+        self.update_window_title(ctx);
         self.store.set_current(Some(&path));
         self.store.save();
         match (paused, start) {
@@ -164,7 +164,20 @@ impl App {
         self.current = None;
         self.loaded = false;
         self.chapters.clear();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(APP_NAME.into()));
+        self.update_window_title(ctx);
+    }
+
+    /// Names the playing video in the window's title, once its name is known
+    /// or changes (when its title is read from the file).
+    pub(crate) fn update_window_title(&mut self, ctx: &egui::Context) {
+        let title = match self.current_path() {
+            Some(path) => format!("{} — {APP_NAME}", self.video_name(path)),
+            None => APP_NAME.to_string(),
+        };
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
     }
 
     pub(crate) fn file_loaded(&mut self) {
@@ -226,6 +239,15 @@ impl App {
             "sub-delay" => p.sub_delay = value.as_f64().unwrap_or(0.0),
             "sub-speed" => p.sub_speed = value.as_f64().unwrap_or(1.0),
             "chapter-list" => self.chapters = mpv::Chapter::list(&value),
+            // Only once the video is open, so a late report about the one
+            // before it can't name this one. A video without a title is left
+            // to the duration probe, which knows for sure.
+            "metadata/by-key/title" if self.loaded => {
+                if let (Some(title), Some(path)) = (value.as_str(), self.current_path().map(Path::to_path_buf)) {
+                    self.store.set_title(&path, Some(title.to_string()));
+                    self.names.clear();
+                }
+            }
             "track-list" => {
                 self.tracks = mpv::Track::list(&value);
                 if let Some(kind) = self.announce_track.take() {
