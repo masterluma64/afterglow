@@ -81,6 +81,10 @@ impl App {
                         ui.label("Auto-play");
                         ui.checkbox(&mut autoplay, "Play next video automatically");
                         ui.end_row();
+                        ui.label("Opening a folder");
+                        ui.checkbox(&mut settings.play_opened_folders, "Start playing right away")
+                            .on_hover_text("Otherwise it opens paused where you left off; press Space to play");
+                        ui.end_row();
                         ui.label("Volume");
                         ui.checkbox(&mut settings.level_volume, "Even out volume")
                             .on_hover_text("Quiet dialogue gets louder and loud scenes quieter");
