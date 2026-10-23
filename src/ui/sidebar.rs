@@ -347,7 +347,10 @@ impl App {
             }
         }
         ui.horizontal(|ui| {
-            let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { 24.0 };
+            // Room for the clear button once there is text: its icon, padding and gap.
+            let spacing = ui.spacing();
+            let clear_button = ICON_SIZE + 2.0 * spacing.button_padding.x + spacing.item_spacing.x;
+            let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { clear_button };
             let edit = egui::TextEdit::singleline(&mut self.search)
                 .hint_text(format!("{}  Search playlist (/)", icons::SEARCH))
                 .desired_width(width);
