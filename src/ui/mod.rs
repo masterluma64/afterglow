@@ -33,3 +33,20 @@ pub(crate) fn secondary(ui: &egui::Ui, on_accent: bool, text: impl Into<egui::Ri
     let text = text.into();
     if on_accent { text.color(ui.visuals().selection.stroke.color) } else { text.weak() }
 }
+
+/// Adds a text field, outlined in the accent color while it has focus. egui
+/// would outline it in the selection's text color, which is black or white
+/// and doesn't follow the accent (and can't be changed without also changing
+/// the color of selected text). `margin` is the padding around the text.
+pub(crate) fn text_field(ui: &mut egui::Ui, edit: egui::TextEdit<'_>, id: egui::Id, margin: egui::Margin) -> egui::Response {
+    let visuals = ui.visuals();
+    let focused = ui.memory(|m| m.has_focus(id));
+    // Always a 1 px outline, invisible without focus, so nothing shifts.
+    let outline = if focused { visuals.selection.bg_fill } else { egui::Color32::TRANSPARENT };
+    let frame = egui::Frame::new()
+        .fill(visuals.text_edit_bg_color())
+        .corner_radius(visuals.widgets.inactive.corner_radius)
+        .stroke((1.0, outline))
+        .inner_margin(margin - egui::Margin::same(1));
+    ui.add(edit.id(id).frame(frame))
+}

@@ -349,11 +349,9 @@ impl App {
         ui.horizontal(|ui| {
             let width = ui.available_width() - if self.search.is_empty() { 0.0 } else { 24.0 };
             let edit = egui::TextEdit::singleline(&mut self.search)
-                .margin(TEXT_MARGIN)
-                .id(id)
                 .hint_text(format!("{}  Search playlist (/)", icons::SEARCH))
                 .desired_width(width);
-            let resp = ui.add(edit);
+            let resp = ui::text_field(ui, edit, id, TEXT_MARGIN);
             if resp.changed() {
                 self.search_pick = 0;
                 self.scroll_to_pick = Some(0);

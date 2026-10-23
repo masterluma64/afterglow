@@ -248,10 +248,9 @@ impl App {
             ui.set_width(480.0);
             // Taller than other text fields: it is what the palette is for.
             let edit = egui::TextEdit::singleline(&mut palette.query)
-                .margin(egui::Margin::symmetric(10, 9))
                 .hint_text("Type a command or a video's name")
                 .desired_width(f32::INFINITY);
-            let resp = ui.add(edit);
+            let resp = ui::text_field(ui, edit, egui::Id::unique("palette-query"), egui::Margin::symmetric(10, 9));
             resp.request_focus();
             if resp.changed() {
                 palette.pick = 0;

@@ -98,11 +98,11 @@ impl App {
                 card(ui, "Languages", |ui| {
                     grid("settings-languages").show(ui, |ui| {
                         ui.label("Subtitles");
-                        ui.add(egui::TextEdit::singleline(&mut settings.sub_languages).margin(TEXT_MARGIN).hint_text("e.g. en,eng").desired_width(200.0))
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut settings.sub_languages).hint_text("e.g. en,eng").desired_width(200.0), egui::Id::unique("sub-languages"), TEXT_MARGIN)
                             .on_hover_text("Language codes in order of preference, separated by commas. Applies to the next video.");
                         ui.end_row();
                         ui.label("Audio");
-                        ui.add(egui::TextEdit::singleline(&mut settings.audio_languages).margin(TEXT_MARGIN).hint_text("the file's default").desired_width(200.0))
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut settings.audio_languages).hint_text("the file's default").desired_width(200.0), egui::Id::unique("audio-languages"), TEXT_MARGIN)
                             .on_hover_text("Language codes in order of preference, e.g. ja,jpn. Applies to the next video.");
                         ui.end_row();
                     });
