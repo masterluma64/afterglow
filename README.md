@@ -44,8 +44,8 @@ Decoding, audio and subtitle rendering are handled by [libmpv](https://mpv.io), 
   name in every file). Otherwise, and for titles that look like a web address, the file name is
   used.
 - **Progress tracking**: every video remembers its position, wherever it was opened from.
-  What was saved about videos whose files were deleted is forgotten by itself, on startup
-  and when refreshing the folder. Videos on a drive that isn't connected right now are left
+  What was saved about videos whose files were deleted (and the settings of deleted folders)
+  is forgotten by itself, on startup and when refreshing the folder. Videos on a drive that isn't connected right now are left
   alone.
   Videos count as watched at 90% (adjustable) or when they finish. The next one then starts after a
   5-second countdown (this can be turned off in Settings), from its beginning. Marking the playing

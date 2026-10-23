@@ -252,9 +252,9 @@ impl Default for Store {
     }
 }
 
-/// Which of these remembered videos are gone: their file no longer exists,
-/// though the drive or network share it was on is there. Videos on a drive
-/// that isn't connected right now are not counted. Checking can be slow on
+/// Which of these remembered videos (or folders) are gone: they no longer
+/// exist, though the drive or network share they were on is there. Ones on a
+/// drive that isn't connected right now are not counted. Checking can be slow on
 /// network drives, so this is meant for a background thread.
 pub fn gone(keys: Vec<String>) -> Vec<String> {
     let mut reachable: HashMap<PathBuf, bool> = HashMap::new();
@@ -628,15 +628,16 @@ impl Store {
         self.dirty = true;
     }
 
-    /// Every video anything is remembered about, to look for ones whose
-    /// files are gone (see [`gone`]).
-    pub fn remembered_videos(&self) -> Vec<String> {
+    /// Every video and folder anything is remembered about, to look for ones
+    /// that are gone (see [`gone`]).
+    pub fn remembered_paths(&self) -> Vec<String> {
         let mut keys: Vec<String> = self
             .entries
             .keys()
             .chain(self.tracks.keys())
             .chain(self.titles.keys())
             .chain(self.videos.keys())
+            .chain(self.folders.keys())
             .cloned()
             .collect();
         keys.sort();
@@ -644,15 +645,15 @@ impl Store {
         keys
     }
 
-    /// Forgets everything saved about these videos: progress, length, title,
-    /// track choices and settings. Returns how many there were.
+    /// Forgets everything saved about these videos and folders: progress,
+    /// length, title, track choices and settings. Returns how many there were.
     pub fn forget(&mut self, keys: &[String]) -> usize {
         let mut forgotten = 0;
         for k in keys {
             let entry = self.entries.remove(k).is_some();
             let tracks = self.tracks.remove(k).is_some();
             let title = self.titles.remove(k).is_some();
-            let settings = self.videos.remove(k).is_some();
+            let settings = self.videos.remove(k).is_some() | self.folders.remove(k).is_some();
             forgotten += usize::from(entry || tracks || title || settings);
         }
         if forgotten > 0 {
@@ -851,14 +852,26 @@ mod tests {
         }
         store.tracks_mut(&deleted).subtitle = Some("2".into());
         store.tracks_mut(&dir.join("only tracks.mkv")).audio = Some("1".into());
+        // Settings of a folder that is there, of one that was deleted, and of a movie that was.
+        let speed = FolderSettings { speed: Some(1.5), ..FolderSettings::default() };
+        store.folders.insert(key(&dir), speed.clone());
+        store.folders.insert(key(&dir.join("Deleted show")), speed.clone());
+        store.videos.insert(key(&dir.join("deleted movie.mkv")), speed);
 
-        let mut found = gone(store.remembered_videos());
+        let mut found = gone(store.remembered_paths());
         found.sort();
-        let mut expected = vec![key(&deleted), key(&dir.join("only tracks.mkv"))];
+        let mut expected = vec![
+            key(&deleted),
+            key(&dir.join("only tracks.mkv")),
+            key(&dir.join("Deleted show")),
+            key(&dir.join("deleted movie.mkv")),
+        ];
         expected.sort();
         assert_eq!(found, expected, "neither a video that exists nor one on an unplugged drive is gone");
-        assert_eq!(store.forget(&found), 2);
+        assert_eq!(store.forget(&found), 4);
         assert!(store.tracks(&deleted).is_none());
+        assert!(store.videos.is_empty());
+        assert_eq!(store.folders.keys().collect::<Vec<_>>(), [&key(&dir)], "the folder that is there keeps its settings");
         assert!(store.get(&there).watched && store.get(&unplugged).watched);
         let _ = std::fs::remove_dir_all(&dir);
     }

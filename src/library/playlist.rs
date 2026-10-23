@@ -373,11 +373,11 @@ impl App {
         self.watch.set_target(self.store.folder.clone().map(|f| (f, self.store.include_subfolders)));
     }
 
-    /// Starts looking, in the background, for remembered videos whose files
-    /// are gone; [`Self::receive_gone`] forgets them.
+    /// Starts looking, in the background, for remembered videos and folders
+    /// that are gone; [`Self::receive_gone`] forgets them.
     pub(crate) fn find_gone(&mut self, ctx: &egui::Context) {
         let (tx, rx) = mpsc::channel();
-        let (videos, ctx) = (self.store.remembered_videos(), ctx.clone());
+        let (videos, ctx) = (self.store.remembered_paths(), ctx.clone());
         let spawned = std::thread::Builder::new().name("find-gone".into()).spawn(move || {
             if tx.send(progress::gone(videos)).is_ok() {
                 ctx.request_repaint();
