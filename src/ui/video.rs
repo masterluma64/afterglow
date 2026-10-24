@@ -49,7 +49,8 @@ impl App {
         if self.mpv.is_ok() {
             ui::context_menu(&resp, |ui| self.video_menu(ui));
         }
-        self.paint_notice(ui, rect);
+        let top = self.paint_title(ui, rect).unwrap_or(rect.top());
+        self.paint_notice(ui, rect, top);
     }
 
     /// Paints the video into `rect`; mpv fits the video into it itself.
@@ -93,8 +94,38 @@ impl App {
             });
     }
 
-    /// The current notice, as a pill in the top-left corner of the video.
-    pub(crate) fn paint_notice(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+    /// The playing video's name, as a pill in the top-left corner of the
+    /// video: while paused and a moment after, and in fullscreen whenever the
+    /// controls show. Returns where it ends, for notices to go below it.
+    fn paint_title(&mut self, ui: &mut egui::Ui, rect: egui::Rect) -> Option<f32> {
+        let now = Instant::now();
+        if !self.loaded {
+            self.title_until = None;
+            return None;
+        }
+        if self.playback.paused {
+            self.title_until = Some(now + TITLE_LINGER);
+        }
+        let alpha = if self.fullscreen {
+            // Along with the controls, which float over the video there.
+            let idle = !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
+            if idle {
+                return None;
+            }
+            1.0
+        } else {
+            let left = self.title_until?.checked_duration_since(now).filter(|d| !d.is_zero())?;
+            ui.ctx().request_repaint_after(Duration::from_millis(30).min(left));
+            // Fade out over the last 300 ms.
+            (left.as_secs_f32() / 0.3).min(1.0)
+        };
+        let name = self.video_name(self.current_path()?);
+        Some(pill(ui, rect, rect.top(), name, Color32::WHITE, alpha).bottom())
+    }
+
+    /// The current notice, as a pill in the top-left corner of the video,
+    /// below `top`.
+    pub(crate) fn paint_notice(&mut self, ui: &mut egui::Ui, rect: egui::Rect, top: f32) {
         let Some(notice) = &self.notice else { return };
         let now = Instant::now();
         if now >= notice.until {
@@ -105,16 +136,7 @@ impl App {
         let left = (notice.until - now).as_secs_f32();
         let alpha = (left / 0.3).min(1.0);
         let color = if notice.warning { Color32::from_rgb(255, 196, 92) } else { Color32::WHITE };
-        let galley = ui.painter().layout(
-            notice.text.clone(),
-            egui::TextStyle::Body.resolve(ui.style()),
-            color.gamma_multiply(alpha),
-            (rect.width() - 64.0).max(100.0),
-        );
-        let pos = rect.left_top() + vec2(20.0, 18.0);
-        let bg = egui::Rect::from_min_size(pos, galley.size()).expand2(vec2(12.0, 7.0));
-        ui.painter().rect_filled(bg, 8.0, Color32::from_black_alpha((170.0 * alpha) as u8));
-        ui.painter().galley(pos, galley, Color32::WHITE);
+        pill(ui, rect, top, notice.text.clone(), color, alpha);
         ui.ctx().request_repaint_after(Duration::from_millis(30).min(notice.until - now));
     }
 
@@ -270,4 +292,16 @@ impl App {
             Color32::WHITE,
         );
     }
+}
+
+/// Text in a dark pill in the top-left corner of the video `rect`, below
+/// `top`, faded by `alpha`. Returns the pill's rectangle.
+fn pill(ui: &egui::Ui, rect: egui::Rect, top: f32, text: String, color: Color32, alpha: f32) -> egui::Rect {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let galley = ui.painter().layout(text, font, color.gamma_multiply(alpha), (rect.width() - 64.0).max(100.0));
+    let pos = egui::pos2(rect.left() + 20.0, top + 18.0);
+    let bg = egui::Rect::from_min_size(pos, galley.size()).expand2(vec2(12.0, 7.0));
+    ui.painter().rect_filled(bg, 8.0, Color32::from_black_alpha((170.0 * alpha) as u8));
+    ui.painter().galley(pos, galley, Color32::WHITE);
+    bg
 }

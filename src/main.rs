@@ -36,6 +36,8 @@ const APP_NAME: &str = "Afterglow";
 const APP_ID: &str = "afterglow";
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
+/// How long the video's name stays over it after playing on from a pause.
+const TITLE_LINGER: Duration = Duration::from_secs(2);
 const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
@@ -181,6 +183,9 @@ struct App {
     scrub: Option<f64>,
     last_save: Instant,
     last_activity: Instant,
+    /// Until when the video's name shows over it (outside fullscreen): kept
+    /// ahead while paused, so it lingers a moment after playing on.
+    title_until: Option<Instant>,
     /// The unpinned playlist while it is out.
     peek: Option<Peek>,
     /// Width of the docked playlist, which the slid-out one copies.
@@ -329,6 +334,7 @@ impl App {
             scrub: None,
             last_save: Instant::now(),
             last_activity: Instant::now(),
+            title_until: None,
             controls_rect: None,
             peek: None,
             sidebar_width: 280.0,
