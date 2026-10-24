@@ -590,7 +590,6 @@ impl App {
                     if let Ok(mpv) = &self.mpv {
                         mpv.send(&["cycle", "pause"]);
                     }
-                    self.notify(if self.playback.paused { "Playing" } else { "Paused" });
                 } else if let Some(up_next) = self.up_next.as_ref().filter(|_| self.current.is_none()) {
                     self.play_from_start(up_next.index, ctx);
                 } else if let Some(next) = self.ended.map(|i| i + 1).filter(|&i| i < self.playlist.len() && self.current.is_none()) {
