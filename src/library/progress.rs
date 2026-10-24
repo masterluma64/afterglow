@@ -753,6 +753,14 @@ impl Store {
         self.dirty = true;
     }
 
+    /// Drops recent folders and videos that no longer exist.
+    pub fn forget_recent(&mut self, gone: &[PathBuf]) {
+        let before = self.recent_folders.len() + self.recent_videos.len();
+        self.recent_folders.retain(|f| !gone.contains(f));
+        self.recent_videos.retain(|v| !gone.contains(v));
+        self.dirty |= self.recent_folders.len() + self.recent_videos.len() != before;
+    }
+
     pub fn set_include_subfolders(&mut self, include: bool) {
         self.include_subfolders = include;
         self.dirty = true;

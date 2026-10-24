@@ -59,12 +59,17 @@ impl DiskBusy {
 /// Whether the recent folders and videos are there, checked in the
 /// background: on an unplugged or offline drive, checking takes long enough
 /// to freeze the window, and the menus showing them are drawn every frame.
+/// Ones gone from a drive that is there are reported, to be forgotten; ones
+/// on a drive that isn't there are kept, greyed out.
 #[derive(Default)]
 pub(crate) struct RecentFolders {
     found: HashMap<PathBuf, bool>,
-    checking: Option<Receiver<HashMap<PathBuf, bool>>>,
+    checking: Option<Receiver<Checked>>,
     checked_at: Option<Instant>,
 }
+
+/// Whether each path is there, and the ones that are gone for good.
+type Checked = (HashMap<PathBuf, bool>, Vec<PathBuf>);
 
 impl RecentFolders {
     /// Whether `path` was there when last checked; not checked yet counts as there.
@@ -74,7 +79,6 @@ impl RecentFolders {
 
     /// Checks `paths` again, unless that is under way or was just done.
     pub(crate) fn check(&mut self, paths: &[PathBuf], ctx: &egui::Context) {
-        self.receive();
         let recent = self.checked_at.is_some_and(|at| at.elapsed() < Duration::from_secs(5));
         if self.checking.is_some() || recent {
             return;
@@ -82,11 +86,12 @@ impl RecentFolders {
         let (tx, rx) = mpsc::channel();
         let (paths, ctx) = (paths.to_vec(), ctx.clone());
         let spawned = std::thread::Builder::new().name("check-recent".into()).spawn(move || {
-            let found = paths.into_iter().map(|p| {
+            let found: HashMap<PathBuf, bool> = paths.into_iter().map(|p| {
                 let there = p.exists();
                 (p, there)
             }).collect();
-            if tx.send(found).is_ok() {
+            let gone = found.iter().filter(|&(p, &there)| !there && drive_there(p)).map(|(p, _)| p.clone()).collect();
+            if tx.send((found, gone)).is_ok() {
                 ctx.request_repaint();
             }
         });
@@ -95,13 +100,21 @@ impl RecentFolders {
         }
     }
 
-    pub(crate) fn receive(&mut self) {
-        if let Some(found) = self.checking.as_ref().and_then(|rx| rx.try_recv().ok()) {
-            self.found = found;
-            self.checking = None;
-            self.checked_at = Some(Instant::now());
-        }
+    /// Takes in a finished check; returns the paths that are gone for good.
+    pub(crate) fn receive(&mut self) -> Vec<PathBuf> {
+        let Some((found, gone)) = self.checking.as_ref().and_then(|rx| rx.try_recv().ok()) else {
+            return Vec::new();
+        };
+        self.found = found;
+        self.checking = None;
+        self.checked_at = Some(Instant::now());
+        gone
     }
+}
+
+/// Whether the drive or network share `path` is on is there.
+fn drive_there(path: &Path) -> bool {
+    path.ancestors().last().is_some_and(|root| root != path && root.exists())
 }
 
 /// Moves the item at `from` so it lands before the item now at `to`, or at
@@ -524,5 +537,14 @@ mod tests {
         assert_eq!(moved(1, 1), "abcd");
         assert_eq!(moved(1, 2), "abcd", "before the next one is where it already is");
         assert_eq!(moved(9, 0), "abcd", "out of range is ignored");
+    }
+
+    #[test]
+    fn tells_gone_from_unplugged() {
+        let system = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+        assert!(drive_there(&PathBuf::from(format!(r"{system}\no such folder\video.mkv"))));
+        let unplugged = ('D'..='Z').map(|d| format!(r"{d}:\")).find(|root| !Path::new(root).exists()).unwrap();
+        assert!(!drive_there(&PathBuf::from(format!(r"{unplugged}Shows\video.mkv"))), "a drive that isn't there");
+        assert!(!drive_there(Path::new(&system)), "a root by itself");
     }
 }

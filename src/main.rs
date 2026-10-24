@@ -396,6 +396,7 @@ impl App {
         }
         app.request_durations();
         app.find_gone(ctx);
+        app.check_recent(ctx);
         app.sync_watch();
         if let Some(warning) = load_warning {
             app.warn(warning);
@@ -528,7 +529,8 @@ impl eframe::App for App {
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
         self.receive_disk(&ctx);
-        self.recent.receive();
+        let gone = self.recent.receive();
+        self.store.forget_recent(&gone);
         self.receive_scans();
         self.receive_missing_files();
         self.receive_gone();
