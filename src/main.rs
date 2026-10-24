@@ -54,8 +54,12 @@ const SCROLL_NOTCH: f32 = 50.0;
 const SUB_STEP_TAG: u64 = 1;
 /// Tags the replies to subtitle files added back when a video is opened.
 const SUB_RESTORE_TAG: u64 = 2;
+/// Tags the reply to saving a screenshot as a file.
+const SCREENSHOT_TAG: u64 = 3;
 /// Tags the replies to opening a video (see `playback::Loads`).
 const LOAD_TAG: u64 = 4;
+/// Tags the reply to taking a screenshot's pixels, for the clipboard.
+const SCREENSHOT_COPY_TAG: u64 = 5;
 /// How long the next video is announced before it starts by itself.
 const AUTOPLAY_DELAY: Duration = Duration::from_secs(5);
 /// The smallest the window can be made: room for the docked playlist beside
@@ -204,6 +208,9 @@ struct App {
     announce_track: Option<&'static str>,
     /// A subtitle step waiting for mpv to report whether there was a line.
     announce_sub_step: Option<&'static str>,
+    /// Screenshots being taken, in order, to announce once mpv has done both
+    /// halves of each.
+    screenshots: Vec<actions::Screenshot>,
     /// Saved track choices being restored: how many subtitle files are still
     /// loading, and the choices to apply after.
     restoring: Option<(usize, progress::TrackPrefs)>,
@@ -337,6 +344,7 @@ impl App {
             tracks_changed_by_user: false,
             announce_track: None,
             announce_sub_step: None,
+            screenshots: Vec::new(),
             restoring: None,
             watch_mark: None,
             held_unwatched: false,
@@ -732,6 +740,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("Window", &[
         ("F", "Fullscreen"),
+        ("C / F12", "Take screenshot"),
         ("Esc", "Clear selection, leave fullscreen"),
         ("E", "Settings"),
         ("Ctrl+K", "Find a command"),
@@ -798,7 +807,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

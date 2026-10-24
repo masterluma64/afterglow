@@ -318,6 +318,9 @@ impl App {
                     }
                     self.select_saved_tracks();
                 }
+                mpv::Event::CommandDone { tag: tag @ (SCREENSHOT_TAG | SCREENSHOT_COPY_TAG), ok, result } => {
+                    self.screenshot_done(ctx, tag == SCREENSHOT_COPY_TAG, ok, &result);
+                }
                 mpv::Event::CommandDone { .. } => {}
                 // The end of a video played before the one asked for last.
                 mpv::Event::EndFile { entry, .. } if !self.loads.is_current(entry) => {}

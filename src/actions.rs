@@ -80,6 +80,10 @@ pub(crate) enum Action {
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
     CycleAudio,
+    /// Copies the current frame, with subtitles, to the clipboard and saves
+    /// it as a PNG in PicturesAfterglow.
+    Screenshot,
+    OpenScreenshotFolder,
     /// Opens the settings of a video's folder.
     OpenFolderSettings(PathBuf),
     /// Saves the settings of a video's folder (see `Store::set_folder_settings`).
@@ -185,6 +189,8 @@ impl App {
                 (M::NONE, Key::K, Action::TogglePause),
                 (M::NONE, Key::F11, Action::ToggleFullscreen),
                 (M::NONE, Key::F, Action::ToggleFullscreen),
+                (M::NONE, Key::F12, Action::Screenshot),
+                (M::NONE, Key::C, Action::Screenshot),
                 (M::NONE, Key::Escape, Action::Escape),
                 (M::NONE, Key::Delete, Action::RemoveSelected),
                 (M::NONE, Key::Home, Action::Seek { to: 0.0, exact: true }),
@@ -559,6 +565,14 @@ impl App {
                     self.apply(Action::ExitFullscreen, ctx);
                 }
             }
+            Action::Screenshot => self.screenshot(),
+            Action::OpenScreenshotFolder => match screenshot_folder() {
+                Some(folder) => {
+                    let _ = std::fs::create_dir_all(&folder);
+                    let _ = std::process::Command::new("explorer").arg(folder).spawn();
+                }
+                None => self.warn("There is no Pictures folder to keep screenshots in"),
+            },
             Action::ToggleWatched => {
                 if let Some(path) = self.current_path().map(Path::to_path_buf) {
                     let watched = self.store.get(&path).watched;
@@ -753,5 +767,88 @@ impl App {
         } else {
             self.save_current_progress();
         }
+    }
+}
+
+/// A screenshot under way: mpv saves it as a file and (if `copy`) copies
+/// its pixels separately, and it is announced once both are done.
+pub(crate) struct Screenshot {
+    path: PathBuf,
+    copy: bool,
+    copied: Option<bool>,
+    saved: Option<bool>,
+}
+
+impl App {
+    /// Saves the current frame as `<video name> <time>.png` in the
+    /// screenshots folder, and copies it to the clipboard unless turned off.
+    fn screenshot(&mut self) {
+        let (Ok(mpv), true) = (&self.mpv, self.loaded) else { return };
+        let Some(folder) = screenshot_folder() else {
+            return self.warn("There is no Pictures folder to keep screenshots in");
+        };
+        if let Err(e) = std::fs::create_dir_all(&folder) {
+            return self.warn(format!("Could not create {}: {e}", folder.display()));
+        }
+        let name = self.current_path().map(display_name).unwrap_or_default();
+        let time = format_time(self.playback.position).replace(':', ".");
+        let mut path = folder.join(format!("{name} {time}.png"));
+        // Several of the same second (stepping through frames) are numbered,
+        // also while earlier ones are still being written.
+        let mut n = 2;
+        while path.exists() || self.screenshots.iter().any(|s| s.path == path) {
+            path = folder.join(format!("{name} {time} ({n}).png"));
+            n += 1;
+        }
+        // Both are taken from the frame showing now.
+        let copy = self.store.settings.copy_screenshots;
+        if copy {
+            mpv.send_tagged(SCREENSHOT_COPY_TAG, &["screenshot-raw", "subtitles", "rgba"]);
+        }
+        mpv.send_tagged(SCREENSHOT_TAG, &["screenshot-to-file", &path.to_string_lossy(), "subtitles"]);
+        self.screenshots.push(Screenshot { path, copy, copied: None, saved: None });
+    }
+
+    /// mpv finished copying (`copy`) or saving the oldest screenshot that
+    /// waits for it; `result` holds the pixels of a copy.
+    pub(crate) fn screenshot_done(&mut self, ctx: &egui::Context, copy: bool, ok: bool, result: &mpv::Node) {
+        let waiting = |s: &Screenshot| if copy { s.copy && s.copied.is_none() } else { s.saved.is_none() };
+        let Some(index) = self.screenshots.iter().position(waiting) else { return };
+        let shot = &mut self.screenshots[index];
+        if copy {
+            let image = mpv::screenshot_image(result).filter(|_| ok);
+            shot.copied = Some(image.is_some());
+            if let Some(image) = image {
+                ctx.copy_image(image);
+            }
+        } else {
+            shot.saved = Some(ok);
+        }
+        // Not copied, the copy counts as done.
+        let (Some(copied), Some(saved)) = (if shot.copy { shot.copied } else { Some(true) }, shot.saved) else { return };
+        let shot = self.screenshots.remove(index);
+        let folder = short_folder(&shot.path);
+        match (shot.copy, copied, saved) {
+            (false, _, true) => self.notify(format!("Screenshot saved in {folder}")),
+            (false, _, false) => self.warn(format!("Could not save the screenshot in {folder}")),
+            (true, true, true) => self.notify(format!("Screenshot copied to clipboard and saved in {folder}")),
+            (true, true, false) => self.warn(format!("Screenshot copied to clipboard, but could not be saved in {folder}")),
+            (true, false, true) => self.warn(format!("Screenshot saved in {folder}, but could not be copied")),
+            (true, false, false) => self.warn("Could not take a screenshot"),
+        }
+    }
+}
+
+/// Where screenshots go: an Afterglow folder in the user's Pictures.
+pub(crate) fn screenshot_folder() -> Option<PathBuf> {
+    platform::pictures().map(|pictures| pictures.join(APP_NAME))
+}
+
+/// A file's folder and the one above it, e.g. `Pictures\Afterglow`.
+fn short_folder(path: &Path) -> String {
+    let folder = path.parent().unwrap_or(path);
+    match (folder.parent().and_then(Path::file_name), folder.file_name()) {
+        (Some(above), Some(name)) => Path::new(above).join(name).display().to_string(),
+        _ => folder.display().to_string(),
     }
 }

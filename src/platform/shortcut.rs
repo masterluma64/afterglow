@@ -5,21 +5,16 @@ use std::os::windows::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use windows::Win32::System::Com::{
-    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize,
+    CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     IPersistFile, STGM_READ,
 };
-use windows::Win32::UI::Shell::{FOLDERID_Desktop, IShellLinkW, KF_FLAG_DEFAULT, SHGetKnownFolderPath, ShellLink};
+use windows::Win32::UI::Shell::{FOLDERID_Desktop, IShellLinkW, ShellLink};
 use windows::core::{HSTRING, Interface};
 
 /// Where the shortcut goes. The desktop isn't always in the user's folder;
 /// OneDrive, for one, moves it.
 fn path() -> Option<PathBuf> {
-    unsafe {
-        let dir = SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None).ok()?;
-        let path = PathBuf::from(OsString::from_wide(dir.as_wide()));
-        CoTaskMemFree(Some(dir.0 as _));
-        Some(path.join(format!("{}.lnk", crate::APP_NAME)))
-    }
+    Some(super::known_folder(&FOLDERID_Desktop)?.join(format!("{}.lnk", crate::APP_NAME)))
 }
 
 /// The executable the desktop shortcut starts, if there is one.

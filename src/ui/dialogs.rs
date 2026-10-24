@@ -116,6 +116,10 @@ impl App {
                         ui.checkbox(&mut settings.hardware_decoding, "Decode video on the GPU")
                             .on_hover_text("Turn off if videos show glitches; uses more CPU");
                         ui.end_row();
+                        ui.label("Screenshots");
+                        ui.checkbox(&mut settings.copy_screenshots, "Copy to clipboard")
+                            .on_hover_text("Screenshots (C or F12) are always saved in Pictures\\Afterglow");
+                        ui.end_row();
                         ui.label("Theme");
                         ui.horizontal(|ui| {
                             for (theme, label) in [

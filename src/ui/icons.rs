@@ -55,6 +55,8 @@ pub const FLAG: &str = "\u{E244}";
 pub const FLAG_CHECKERED: &str = "\u{EA38}";
 pub const FILM_SLATE: &str = "\u{E8C2}";
 pub const MONITOR_PLAY: &str = "\u{E58C}";
+pub const CAMERA: &str = "\u{E10E}";
+pub const IMAGES: &str = "\u{E836}";
 // The text font has no arrows; shortcut texts use these code points inline.
 pub const ARROW_LEFT: &str = "\u{E058}";
 pub const ARROW_RIGHT: &str = "\u{E06C}";

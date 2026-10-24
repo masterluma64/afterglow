@@ -92,6 +92,7 @@ impl App {
                 }
             });
         });
+        self.menu_item(ui, Action::Screenshot);
         ui.separator();
         // The playing video's choices, as in its playlist menu.
         let current = self.current.zip(self.current_path().map(Path::to_path_buf));
@@ -190,6 +191,7 @@ impl App {
         for (speed, _) in SUB_TIMINGS {
             list.push(self.command(Action::SetSubSpeed(speed), "captions sync drift frame rate fps speed"));
         }
+        list.push(self.command(Action::Screenshot, "snapshot capture frame image picture png copy clipboard"));
         list.push(self.command(Action::UseSubTimingForFolder, "captions delay sync series show default"));
         // The playing video, as in its playlist menu.
         if let Some(index) = self.current {
@@ -222,6 +224,7 @@ impl App {
             self.command(Action::ClearPlaylist, "empty remove all"),
             self.command(Action::SetAutoplayNext(!self.autoplay_next()), "autoplay up next countdown"),
             self.command(Action::ToggleFullscreen, "full screen window maximize"),
+            self.command(Action::OpenScreenshotFolder, "snapshot pictures images"),
             self.command(Action::ToggleSidebar, "sidebar"),
             self.command(Action::TogglePin, "sidebar dock"),
             self.command(Action::ShowStats, "statistics hours watched time streak history"),

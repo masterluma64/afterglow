@@ -28,6 +28,7 @@ const MPV_FORMAT_DOUBLE: c_int = 5;
 const MPV_FORMAT_NODE: c_int = 6;
 const MPV_FORMAT_NODE_ARRAY: c_int = 7;
 const MPV_FORMAT_NODE_MAP: c_int = 8;
+const MPV_FORMAT_BYTE_ARRAY: c_int = 9;
 
 const MPV_EVENT_NONE: c_int = 0;
 const MPV_EVENT_END_FILE: c_int = 7;
@@ -222,6 +223,7 @@ pub enum Node {
     Double(f64),
     Array(Vec<Node>),
     Map(Vec<(String, Node)>),
+    Bytes(Vec<u8>),
 }
 
 impl Node {
@@ -270,6 +272,18 @@ impl Node {
     }
 }
 
+/// The picture from a `screenshot-raw` command asked for in `rgba`.
+pub fn screenshot_image(result: &Node) -> Option<ColorImage> {
+    let size = |key| result.get(key).and_then(Node::as_i64).and_then(|n| usize::try_from(n).ok());
+    let (w, h, stride) = (size("w")?, size("h")?, size("stride")?);
+    let Some(Node::Bytes(data)) = result.get("data") else { return None };
+    if result.get("format").and_then(Node::as_str) != Some("rgba") || w == 0 || stride < w * 4 || data.len() < stride * h {
+        return None;
+    }
+    let pixels = data.chunks(stride).take(h).flat_map(|row| row[..w * 4].as_chunks::<4>().0);
+    Some(ColorImage::new([w, h], pixels.map(|p| Color32::from_rgb(p[0], p[1], p[2])).collect()))
+}
+
 #[repr(C)]
 union RawNodeValue {
     string: *const c_char,
@@ -277,6 +291,7 @@ union RawNodeValue {
     int64: i64,
     double: f64,
     list: *const RawNodeList,
+    bytes: *const RawByteArray,
 }
 
 #[repr(C)]
@@ -290,6 +305,12 @@ struct RawNodeList {
     num: c_int,
     values: *const RawNode,
     keys: *const *const c_char,
+}
+
+#[repr(C)]
+struct RawByteArray {
+    data: *const u8,
+    size: usize,
 }
 
 #[repr(C)]
@@ -308,6 +329,10 @@ unsafe fn convert_node(raw: &RawNode) -> Node {
             MPV_FORMAT_FLAG => Node::Flag(raw.u.flag != 0),
             MPV_FORMAT_INT64 => Node::Int(raw.u.int64),
             MPV_FORMAT_DOUBLE => Node::Double(raw.u.double),
+            MPV_FORMAT_BYTE_ARRAY if !raw.u.bytes.is_null() => {
+                let bytes = &*raw.u.bytes;
+                Node::Bytes(if bytes.data.is_null() { Vec::new() } else { std::slice::from_raw_parts(bytes.data, bytes.size).to_vec() })
+            }
             MPV_FORMAT_NODE_ARRAY | MPV_FORMAT_NODE_MAP if !raw.u.list.is_null() => {
                 let list = &*raw.u.list;
                 let values = (0..list.num.max(0) as usize).map(|i| convert_node(&*list.values.add(i)));
@@ -1569,5 +1594,57 @@ mod skip_tests {
         }
         assert!(loaded && ended, "loaded: {loaded}, ended at its end: {ended}");
         std::fs::remove_file(wav).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod screenshot_tests {
+    use super::tests::use_built_dll;
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Screenshots work while video is drawn through the render API, as
+    /// Afterglow does: saved as a PNG, and as pixels for the clipboard.
+    #[test]
+    fn takes_screenshots() {
+        use_built_dll();
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
+        mpv.set("mute", "yes");
+        mpv.set_render_size(320, 180);
+        mpv.command(&["loadfile", "av://lavfi:testsrc=duration=5:size=640x360:rate=25"]).unwrap();
+        let path = std::env::temp_dir().join(format!("afterglow-screenshot-{}.png", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut frames = 0;
+        while frames < 5 {
+            assert!(Instant::now() < deadline, "no frames");
+            mpv.poll_events();
+            if mpv.take_frame().is_some_and(|img| img.pixels.iter().any(|p| *p != Color32::BLACK)) {
+                frames += 1;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        mpv.command(&["screenshot-to-file", &path.to_string_lossy(), "subtitles"]).expect("screenshot");
+        let png = std::fs::read(&path).expect("screenshot written");
+        assert!(png.starts_with(b"\x89PNG"), "saved as PNG");
+        let _ = std::fs::remove_file(&path);
+
+        mpv.send_tagged(7, &["screenshot-raw", "subtitles", "rgba"]);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let image = loop {
+            assert!(Instant::now() < deadline, "no raw screenshot");
+            let done = mpv.poll_events().into_iter().find_map(|ev| match ev {
+                Event::CommandDone { tag: 7, ok, result } => Some((ok, result)),
+                _ => None,
+            });
+            if let Some((ok, result)) = done {
+                assert!(ok, "screenshot-raw failed");
+                break screenshot_image(&result).expect("an rgba picture");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        // The video's own size, not the window's.
+        assert_eq!(image.size, [640, 360]);
+        assert!(image.pixels.iter().any(|p| *p != Color32::BLACK), "not blank");
     }
 }

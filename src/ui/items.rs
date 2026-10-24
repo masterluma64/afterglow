@@ -65,6 +65,8 @@ impl App {
             Action::SetTrack { .. } => item(icons::SUBTITLES, "Subtitles", "").enabled(loaded),
             Action::CycleSubtitles => item(icons::SUBTITLES, "Next subtitle track", "S").enabled(loaded),
             Action::LoadSubtitle => item(icons::FILE_PLUS, "Load subtitle file…", "").enabled(loaded),
+            Action::Screenshot => item(icons::CAMERA, "Take screenshot", "C").enabled(loaded),
+            Action::OpenScreenshotFolder => item(icons::IMAGES, "Open screenshots folder", ""),
             Action::ToggleLevelVolume => item(icons::MOON, "Even out volume", "").on(self.store.settings_for(self.current_path()).level_volume),
             Action::AdjustSubDelay(by) => {
                 let label = if *by < 0.0 { "Show subtitles earlier" } else { "Show subtitles later" };

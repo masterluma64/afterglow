@@ -27,6 +27,8 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
   subtitle timing, speed and more.
 - **Titles**: videos are shown by the title stored in the file when it tells them apart.
 - **Stats**: time watched, streaks, the last 30 days, most watched series and recent movies.
+- **Screenshots** (C or F12): the current frame, with its subtitles, is copied to the clipboard
+  and saved as a PNG in `Pictures\Afterglow`.
 - **Everything at hand**: a command palette (Ctrl+K), single-key shortcuts, a right-click menu
   on the video, seek bar previews, media keys and an option to even out the volume.
 
@@ -68,4 +70,5 @@ Press `?` in the app for all of them. The main ones:
 | O / Shift+O | Open folder / open video |
 | B | Show or hide the playlist |
 | F | Fullscreen |
+| C / F12 | Screenshot (copied, and saved in Pictures) |
 | Ctrl+K | Find any command |
