@@ -5,6 +5,9 @@ use crate::*;
 /// How long the Skip button stays up while the controls are hidden.
 const SKIP_BUTTON_TIME: f64 = 8.0;
 
+/// The size of the Skip button, and of the buttons over the video like it.
+const SKIP_BUTTON_PADDING: egui::Vec2 = vec2(26.0, 15.0);
+
 /// The dark look of everything drawn over the video, whatever the theme.
 pub(crate) fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {
     let mut visuals = egui::Visuals::dark();
@@ -84,20 +87,42 @@ impl App {
             .pivot(egui::Align2::RIGHT_BOTTOM)
             .show(ui.ctx(), |ui| {
                 ui.style_mut().visuals = video_visuals(accent);
-                ui.spacing_mut().button_padding = vec2(26.0, 15.0);
+                ui.spacing_mut().button_padding = SKIP_BUTTON_PADDING;
                 // Near the window's edge the area is narrow; keep it on one line.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                // White, so it stands out on any video, edged in the accent color;
-                // large and bold (the text keeps the one font size) to be noticed.
-                let text = RichText::new(format!("{}  {label}", icons::FAST_FORWARD)).color(Color32::from_gray(20)).bold();
-                let button = egui::Button::new(text)
-                    .fill(Color32::WHITE)
-                    .stroke(egui::Stroke::new(3.0, ui.visuals().selection.bg_fill))
-                    .corner_radius(8.0);
-                if ui.add(button).on_hover_text("Enter").clicked() {
+                if ui.add(skip_button(ui, format!("{}  {label}", icons::FAST_FORWARD))).on_hover_text("Enter").clicked() {
                     self.actions.push(Action::Skip);
                 }
             });
+    }
+
+    /// What the white button over the video does while nothing plays: play
+    /// up next, play the next video or open something new, or continue.
+    pub(crate) fn main_button(&self) -> Option<Action> {
+        if self.mpv.is_err() || self.current.is_some() {
+            return None;
+        }
+        if let Some(up_next) = &self.up_next {
+            return Some(Action::PlayFromStart(up_next.index));
+        }
+        if let Some(index) = self.end_screen_index() {
+            return Some(if index + 1 < self.playlist.len() {
+                Action::PlayFromStart(index + 1)
+            } else if self.single_video() {
+                Action::OpenVideo
+            } else {
+                Action::OpenFolder
+            });
+        }
+        self.continue_target().map(Action::Play)
+    }
+
+    /// The video the end screen is for, if it shows.
+    fn end_screen_index(&self) -> Option<usize> {
+        // A watched video opened by itself (restored on startup, say) has
+        // nothing in the hidden playlist to pick, so it gets the end screen too.
+        let watched_single = (self.single_video() && self.continue_target().is_none()).then_some(0);
+        self.ended.filter(|&i| i < self.playlist.len()).or(watched_single)
     }
 
     /// The playing video's name, as a pill in the top-left corner of the
@@ -185,25 +210,30 @@ impl App {
             let gone = 1.0 - left.as_secs_f32() / AUTOPLAY_DELAY.as_secs_f32();
             child.allocate_ui(vec2(220.0, 4.0), |ui| dialogs::meter(ui, gone));
             child.add_space(12.0);
+            // Centred under the text by the buttons' width on the last frame.
+            let id = egui::Id::unique("up-next-buttons");
+            let width = child.data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
             child.horizontal(|ui| {
-                ui.spacing_mut().button_padding = vec2(14.0, 6.0);
-                // Centre the two buttons under the text.
-                ui.add_space((ui.available_width() - 190.0).max(0.0) / 2.0);
-                let play = dialogs::primary_button(ui, format!("{}  Play now", icons::PLAY));
-                if ui.add(play).on_hover_text("Space").clicked() {
+                ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
+                let start = ui.cursor().left();
+                ui.spacing_mut().button_padding = SKIP_BUTTON_PADDING;
+                let play = skip_button(ui, format!("{}  Play now", icons::PLAY));
+                if ui.add(play).on_hover_text("Enter").clicked() {
                     self.actions.push(Action::PlayFromStart(index));
                 }
-                if ui.button("Cancel").on_hover_text("Esc").clicked() {
+                if ui.add(egui::Button::new("Cancel").corner_radius(8.0)).on_hover_text("Esc").clicked() {
                     self.actions.push(Action::CancelUpNext);
+                }
+                let measured = ui.min_rect().right() - start;
+                if (measured - width).abs() > 0.5 {
+                    ui.data_mut(|d| d.insert_temp(id, measured));
+                    ui.ctx().request_repaint();
                 }
             });
             child.ctx().request_repaint_after(Duration::from_millis(200).min(left));
             return;
         }
-        // A watched video opened by itself (restored on startup, say) has
-        // nothing in the hidden playlist to pick, so it gets the end screen too.
-        let watched_single = (self.single_video() && self.continue_target().is_none()).then_some(0);
-        if let Some(index) = self.ended.filter(|&i| i < self.playlist.len()).or(watched_single) {
+        if let Some(index) = self.end_screen_index() {
             self.end_screen(&mut child, index);
             return;
         }
@@ -211,9 +241,9 @@ impl App {
             let path = &self.playlist[index];
             let resume = self.store.resume_position(path);
             let verb = if resume.is_some() { "Continue" } else { "Play" };
-            let text = RichText::new(format!("{}   {verb}: {}", icons::PLAY, self.video_name(path)));
-            child.spacing_mut().button_padding = vec2(18.0, 9.0);
-            if child.add(dialogs::primary_button(&child, text)).on_hover_text("Space").clicked() {
+            let text = format!("{}   {verb}: {}", icons::PLAY, self.video_name(path));
+            child.spacing_mut().button_padding = SKIP_BUTTON_PADDING;
+            if child.add(skip_button(&child, text)).on_hover_text("Enter").clicked() {
                 self.actions.push(Action::Play(index));
             }
             if let Some(pos) = resume {
@@ -253,24 +283,24 @@ impl App {
         let id = egui::Id::unique("end-screen-buttons");
         let width = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
         ui.horizontal(|ui| {
-            ui.spacing_mut().button_padding = vec2(14.0, 6.0);
             ui.add_space(((ui.available_width() - width) / 2.0).max(0.0));
             let start = ui.cursor().left();
+            ui.spacing_mut().button_padding = SKIP_BUTTON_PADDING;
             if let Some(next) = next {
-                let play = dialogs::primary_button(ui, format!("{}  Play next", icons::PLAY));
-                if ui.add(play).on_hover_text("Space").clicked() {
+                let play = skip_button(ui, format!("{}  Play next", icons::PLAY));
+                if ui.add(play).on_hover_text("Enter").clicked() {
                     self.actions.push(Action::PlayFromStart(next));
                 }
             } else {
                 let open = if self.single_video() { Action::OpenVideo } else { Action::OpenFolder };
                 let item = self.item(&open);
-                let button = dialogs::primary_button(ui, format!("{}  {}", item.icon, item.label));
-                if ui.add(button).on_hover_text(item.key).clicked() {
+                let button = skip_button(ui, format!("{}  {}", item.icon, item.label));
+                if ui.add(button).on_hover_text(format!("Enter or {}", item.key)).clicked() {
                     self.actions.push(open);
                 }
             }
             let again = self.item(&Action::PlayOver(index));
-            if ui.button(format!("{}  {}", again.icon, again.label)).clicked() {
+            if ui.add(egui::Button::new(format!("{}  {}", again.icon, again.label)).corner_radius(8.0)).clicked() {
                 self.actions.push(Action::PlayOver(index));
             }
             let measured = ui.min_rect().right() - start;
@@ -297,6 +327,15 @@ impl App {
             Color32::WHITE,
         );
     }
+}
+
+/// The button Enter presses: white, so it stands out on any video, edged in
+/// the accent color; bold (the text keeps the one font size) to be noticed.
+fn skip_button(ui: &egui::Ui, text: String) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(text).color(Color32::from_gray(20)).bold())
+        .fill(Color32::WHITE)
+        .stroke(egui::Stroke::new(3.0, ui.visuals().selection.bg_fill))
+        .corner_radius(8.0)
 }
 
 /// Text in a dark pill in the top-left corner of the video `rect`, below

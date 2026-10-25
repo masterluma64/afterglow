@@ -736,7 +736,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         ("[ / ]", "Slower / faster"),
         ("Backspace", "Normal speed"),
         ("PgUp / PgDn", "Previous / next chapter"),
-        ("Enter", "Skip opening / ending"),
+        ("Enter", "Skip opening / ending, or press the button over the video"),
     ]),
     ("Sound", &[
         ("\u{E08E} / \u{E03E}", "Volume"),

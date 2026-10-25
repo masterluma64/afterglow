@@ -381,6 +381,9 @@ impl App {
                         mpv.send(&["seek", &format!("{end:.3}"), "absolute+exact"]);
                     }
                     self.notify(if skip == progress::Skip::Opening { "Skipped opening" } else { "Skipped ending" });
+                } else if let Some(action) = self.main_button() {
+                    // While nothing plays, Enter presses the button over the video.
+                    self.apply(action, ctx);
                 }
             }
             Action::MarkSkip(skip) => {
