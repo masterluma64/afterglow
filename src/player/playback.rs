@@ -22,6 +22,73 @@ pub(crate) fn chapter_target(chapters: &[mpv::Chapter], position: f64, forward: 
     }
 }
 
+/// Chapter titles that mark an opening, as lowercase words. A title matches
+/// when it has these words in a row, ignoring numbers after a word, so "OP"
+/// matches "OP2" and "Opening Credits", but not "Opera".
+const OPENING_TITLES: &[&str] = &["opening", "op", "title sequence"];
+/// Chapter titles that mark an opening unless another chapter is called
+/// one of the `OPENING_TITLES`: some videos call the scene before the
+/// opening "Intro".
+const INTRO_TITLES: &[&str] = &["intro"];
+/// Chapter titles that mark an ending (checked after the opening ones, so
+/// "Opening Credits" is an opening).
+const ENDING_TITLES: &[&str] = &["credits", "ending", "ed", "outro"];
+/// Words in a chapter title that make it a scene around the credits, not
+/// the credits: "Post-credits Scene", "Mid-credits".
+const SCENE_TITLES: &[&str] = &["post", "mid", "after", "scene", "stinger"];
+/// The longest a chapter found as the opening can be, in seconds.
+const MAX_OPENING: f64 = 180.0;
+/// Chapter titles after the ending that skipping it skips too.
+const PREVIEW_TITLES: &[&str] = &["preview", "next time"];
+
+/// Whether a chapter title matches one of `names`.
+fn title_matches(title: &str, names: &[&str]) -> bool {
+    let title = title.to_lowercase();
+    let words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .map(|word| word.trim_end_matches(|c: char| c.is_ascii_digit()))
+        .filter(|word| !word.is_empty())
+        .collect();
+    names.iter().any(|name| {
+        let name: Vec<&str> = name.split(' ').collect();
+        words.windows(name.len()).any(|w| w == name.as_slice())
+    })
+}
+
+/// The opening and ending of a video of `duration` seconds found from its
+/// chapter titles, in seconds from its start. An opening must start in the
+/// first half and an ending in the second half, so a chapter called
+/// "Ending" in the middle of a movie isn't one; an opening in the second
+/// half is the theme played at the end, so it's the ending.
+pub(crate) fn chapter_skips(chapters: &[mpv::Chapter], duration: f64) -> Vec<(progress::Skip, f64, f64)> {
+    let end_of = |i: usize| chapters.get(i + 1).map_or(duration, |c| c.time).min(duration);
+    let first_half = |c: &mpv::Chapter| c.time < duration / 2.0;
+    let opening = |c: &mpv::Chapter| title_matches(&c.title, OPENING_TITLES);
+    let ending = |c: &mpv::Chapter| {
+        if opening(c) { !first_half(c) } else { title_matches(&c.title, ENDING_TITLES) && !title_matches(&c.title, SCENE_TITLES) }
+    };
+    let mut skips = Vec::new();
+    let found = chapters
+        .iter()
+        .position(|c| opening(c) && first_half(c))
+        .or_else(|| chapters.iter().position(|c| title_matches(&c.title, INTRO_TITLES) && first_half(c)))
+        // Longer than that, it's a scene.
+        .filter(|&i| end_of(i) - chapters[i].time <= MAX_OPENING);
+    if let Some(i) = found {
+        skips.push((progress::Skip::Opening, chapters[i].time.max(0.0), end_of(i)));
+    }
+    if let Some(last) = chapters.iter().rposition(|c| ending(c) && !first_half(c)) {
+        // From the first of a run of them ("Credits Start", "Credits End").
+        let first = last - chapters[..last].iter().rev().take_while(|c| ending(c) && !first_half(c)).count();
+        // A preview after it ends with it, but a scene after the credits
+        // doesn't.
+        let previews = chapters[last + 1..].iter().take_while(|c| title_matches(&c.title, PREVIEW_TITLES)).count();
+        skips.push((progress::Skip::Ending, chapters[first].time, end_of(last + previews)));
+    }
+    skips.retain(|&(_, start, end)| duration > 0.0 && end > start);
+    skips
+}
+
 /// The next preset speed above (or below) `speed`, staying within the presets.
 pub(crate) fn step_speed(speed: f64, up: bool) -> f64 {
     let next = if up {
@@ -416,14 +483,20 @@ impl App {
         }
     }
 
-    /// The opening and ending of the loaded video, from its folder settings,
-    /// in seconds from its start.
+    /// The opening and ending of the loaded video, in seconds from its
+    /// start: from its folder settings, or else from its chapter titles.
     pub(crate) fn skips(&self) -> Vec<(progress::Skip, f64, f64)> {
-        let folder = self.current_path().and_then(|p| self.store.folder_settings(p));
-        match folder {
-            Some((_, folder)) if self.loaded => folder.skips(self.playback.duration),
-            _ => Vec::new(),
+        if !self.loaded {
+            return Vec::new();
         }
+        let duration = self.playback.duration;
+        let folder = self.current_path().and_then(|p| self.store.folder_settings(p));
+        let set = folder.map(|(_, folder)| folder.skips(duration)).unwrap_or_default();
+        let found = chapter_skips(&self.chapters, duration);
+        [progress::Skip::Opening, progress::Skip::Ending]
+            .into_iter()
+            .filter_map(|kind| set.iter().chain(&found).find(|s| s.0 == kind).copied())
+            .collect()
     }
 
     /// The opening or ending playing now, which the Skip button skips.
@@ -471,6 +544,53 @@ mod tests {
         assert_eq!(chapter_target(&chapters, 61.0, false), Some(0), "just started: the previous one");
         assert_eq!(chapter_target(&chapters, 1.0, false), Some(0));
         assert_eq!(chapter_target(&[], 1.0, false), None);
+    }
+
+    fn chapters(list: &[(f64, &str)]) -> Vec<crate::player::mpv::Chapter> {
+        list.iter().map(|&(time, title)| crate::player::mpv::Chapter { title: title.into(), time }).collect()
+    }
+
+    #[test]
+    fn matches_chapter_titles() {
+        for title in ["OP", "OP2", "Opening Credits", "Main Title Sequence"] {
+            assert!(title_matches(title, OPENING_TITLES), "{title}");
+        }
+        for title in ["Introduction", "Opera", "Topology", "Chapter 1"] {
+            assert!(!title_matches(title, OPENING_TITLES), "{title}");
+        }
+        assert!(title_matches("Intro", INTRO_TITLES) && !title_matches("Introduction", INTRO_TITLES));
+        for title in ["ED", "Ending", "End Credits", "Outro"] {
+            assert!(title_matches(title, ENDING_TITLES), "{title}");
+        }
+        for title in ["Edward", "The End", "Credit Card"] {
+            assert!(!title_matches(title, ENDING_TITLES), "{title}");
+        }
+    }
+
+    #[test]
+    fn finds_skips_from_chapters() {
+        use progress::Skip::{Ending, Opening};
+        // Chapter layouts from real shows.
+        let fmab = chapters(&[(0.0, "Prologue"), (58.8, "Opening"), (148.9, "Part A"), (655.2, "Part B"), (1347.6, "Ending"), (1437.4, "Preview")]);
+        assert_eq!(chapter_skips(&fmab, 1467.0), [(Opening, 58.8, 148.9), (Ending, 1347.6, 1467.0)]);
+        let frieren = chapters(&[(0.0, "Opening"), (90.0, "Episode"), (1460.0, "Credits Start"), (1550.0, "Credits End"), (1560.0, "Preview End")]);
+        assert_eq!(chapter_skips(&frieren, 1560.0), [(Opening, 0.0, 90.0), (Ending, 1460.0, 1560.0)]);
+        let tlou = chapters(&[(207.2, "Intro"), (274.3, "Chapter 01"), (4776.0, "Credits")]);
+        assert_eq!(chapter_skips(&tlou, 4847.0), [(Opening, 207.2, 274.3), (Ending, 4776.0, 4847.0)]);
+        // The scene before the opening is called Intro.
+        let eminence = chapters(&[(0.0, "Intro"), (43.0, "OP"), (133.0, "Part A"), (701.0, "Part B"), (1236.5, "Epilogue")]);
+        assert_eq!(chapter_skips(&eminence, 1422.0), [(Opening, 43.0, 133.0)]);
+        // A long Intro is a scene, and the opening played at the end is the
+        // ending.
+        let first = chapters(&[(0.0, "Intro"), (212.0, "Part A"), (762.0, "Part B"), (1330.0, "OP")]);
+        assert_eq!(chapter_skips(&first, 1421.0), [(Ending, 1330.0, 1421.0)]);
+        // A scene after the credits isn't skipped with them.
+        let movie = chapters(&[(0.0, "Chapter 1"), (6000.0, "End Credits"), (6500.0, "Post-credits Scene")]);
+        assert_eq!(chapter_skips(&movie, 6600.0), [(Ending, 6000.0, 6500.0)]);
+        // Too early to be the ending.
+        let odd = chapters(&[(0.0, "Start"), (100.0, "Ending"), (300.0, "Rest")]);
+        assert_eq!(chapter_skips(&odd, 400.0), []);
+        assert_eq!(chapter_skips(&[], 400.0), []);
     }
 
     #[test]

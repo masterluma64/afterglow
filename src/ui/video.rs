@@ -87,7 +87,11 @@ impl App {
                 ui.spacing_mut().button_padding = vec2(16.0, 9.0);
                 // Near the window's edge the area is narrow; keep it on one line.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                let button = dialogs::primary_button(ui, format!("{}  {label}", icons::FAST_FORWARD));
+                // White, so it stands out on any video, edged in the accent color.
+                let text = RichText::new(format!("{}  {label}", icons::FAST_FORWARD)).color(Color32::from_gray(20));
+                let button = egui::Button::new(text)
+                    .fill(Color32::WHITE)
+                    .stroke(egui::Stroke::new(2.0, ui.visuals().selection.bg_fill));
                 if ui.add(button).on_hover_text("Enter").clicked() {
                     self.actions.push(Action::Skip);
                 }

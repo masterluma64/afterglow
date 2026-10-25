@@ -58,6 +58,7 @@ impl App {
                     });
                     ui.add_space(2.0);
                     ui.weak("While it plays, a Skip button shows in the bottom-right corner of the video (Enter skips).");
+                    ui.weak("Without a time here, chapters named like Intro, Opening, Credits or Ending are used.");
                 });
                 ui.add_space(8.0);
                 card(ui, "Subtitles and audio", |ui| {
