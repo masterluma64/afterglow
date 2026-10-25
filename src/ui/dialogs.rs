@@ -134,6 +134,10 @@ impl App {
                         .on_hover_text("Screenshots (C or F12) are saved in Pictures\\Afterglow");
                         (settings.copy_screenshots, settings.save_screenshots) = mode;
                         ui.end_row();
+                        ui.label("Seek bar");
+                        ui.checkbox(&mut settings.show_remaining, "Show time remaining")
+                            .on_hover_text("At the end of the seek bar, instead of the video's length");
+                        ui.end_row();
                         ui.label("Theme");
                         ui.horizontal(|ui| {
                             for (theme, label) in [

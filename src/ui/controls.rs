@@ -124,7 +124,12 @@ impl App {
                 if icon_button(ui, speaker, if muted { "Unmute (M)" } else { "Mute (M)" }).clicked() {
                     self.actions.push(Action::ToggleMute);
                 }
-                ui.monospace(format_time(if self.loaded { duration } else { 0.0 }));
+                let end = match self.loaded {
+                    true if self.store.settings.show_remaining => format!("−{}", format_time((duration - position).max(0.0))),
+                    true => format_time(duration),
+                    false => format_time(0.0),
+                };
+                ui.monospace(end);
                 self.seek_bar(ui, position);
             });
         });

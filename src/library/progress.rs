@@ -60,6 +60,9 @@ pub struct Settings {
     pub copy_screenshots: bool,
     /// Whether screenshots are saved in the screenshots folder.
     pub save_screenshots: bool,
+    /// Whether the seek bar ends in the time left rather than the video's
+    /// length.
+    pub show_remaining: bool,
 }
 
 impl Default for Settings {
@@ -78,6 +81,7 @@ impl Default for Settings {
             level_volume: false,
             copy_screenshots: true,
             save_screenshots: true,
+            show_remaining: true,
         }
     }
 }
