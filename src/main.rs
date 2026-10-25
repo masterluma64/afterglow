@@ -268,8 +268,9 @@ struct App {
     show_help: bool,
     /// Whether the settings dialog is open.
     settings_open: bool,
-    /// The executable the desktop shortcut starts, as of opening Settings.
-    desktop_shortcut: Option<PathBuf>,
+    /// The executables the shortcuts start, by `shortcut::Place`, as of opening
+    /// Settings.
+    shortcuts: [Option<PathBuf>; 2],
     /// The video whose folder settings are open.
     folder_dialog: Option<PathBuf>,
     /// The speed the playing video's folder set, if it set one.
@@ -379,7 +380,7 @@ impl App {
             gone_scan: None,
             show_help: false,
             settings_open: false,
-            desktop_shortcut: None,
+            shortcuts: [None, None],
             folder_dialog: None,
             folder_speed: None,
             stats_open: false,

@@ -206,21 +206,24 @@ impl App {
                 // Changes Windows rather than the settings, so it takes effect right away.
                 card(ui, "Windows", |ui| {
                     grid("settings-windows").show(ui, |ui| {
-                        ui.label("Desktop");
-                        ui.horizontal(|ui| {
-                            let mut on = self.desktop_shortcut.is_some();
-                            if ui.checkbox(&mut on, "Shortcut to Afterglow").changed() {
-                                self.actions.push(Action::SetDesktopShortcut(on));
-                            }
-                            // Another copy of Afterglow (or this one, moved or renamed) made it.
-                            if let Some(exe) = &self.desktop_shortcut
-                                && !platform::is_this_exe(exe)
-                                && ui.button("Use this copy").on_hover_text(format!("It opens {}", exe.display())).clicked()
-                            {
-                                self.actions.push(Action::SetDesktopShortcut(true));
-                            }
-                        });
-                        ui.end_row();
+                        for place in platform::shortcut::Place::ALL {
+                            ui.label(place.name());
+                            ui.horizontal(|ui| {
+                                let current = &self.shortcuts[place as usize];
+                                let label = if current.is_some() { "Remove shortcut" } else { "Add shortcut" };
+                                if ui.button(label).clicked() {
+                                    self.actions.push(Action::SetShortcut(place, current.is_none()));
+                                }
+                                // Another copy of Afterglow (or this one, moved or renamed) made it.
+                                if let Some(exe) = current
+                                    && !platform::is_this_exe(exe)
+                                    && ui.button("Use this copy").on_hover_text(format!("It opens {}", exe.display())).clicked()
+                                {
+                                    self.actions.push(Action::SetShortcut(place, true));
+                                }
+                            });
+                            ui.end_row();
+                        }
                     });
                 });
             });

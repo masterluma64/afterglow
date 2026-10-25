@@ -1,4 +1,4 @@
-//! A shortcut to Afterglow on the desktop.
+//! Shortcuts to Afterglow on the desktop and in the Start menu.
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
@@ -8,18 +8,42 @@ use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     IPersistFile, STGM_READ,
 };
-use windows::Win32::UI::Shell::{FOLDERID_Desktop, IShellLinkW, ShellLink};
+use windows::Win32::UI::Shell::{FOLDERID_Desktop, FOLDERID_Programs, IShellLinkW, ShellLink};
 use windows::core::{HSTRING, Interface};
+
+/// Where a shortcut can go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    Desktop,
+    /// The user's own Start menu, so no admin rights are needed.
+    StartMenu,
+}
+
+impl Place {
+    pub const ALL: [Place; 2] = [Place::Desktop, Place::StartMenu];
+
+    /// Its name in the UI.
+    pub fn name(self) -> &'static str {
+        match self {
+            Place::Desktop => "Desktop",
+            Place::StartMenu => "Start menu",
+        }
+    }
+}
 
 /// Where the shortcut goes. The desktop isn't always in the user's folder;
 /// OneDrive, for one, moves it.
-fn path() -> Option<PathBuf> {
-    Some(super::known_folder(&FOLDERID_Desktop)?.join(format!("{}.lnk", crate::APP_NAME)))
+fn path(place: Place) -> Option<PathBuf> {
+    let folder = match place {
+        Place::Desktop => &FOLDERID_Desktop,
+        Place::StartMenu => &FOLDERID_Programs,
+    };
+    Some(super::known_folder(folder)?.join(format!("{}.lnk", crate::APP_NAME)))
 }
 
-/// The executable the desktop shortcut starts, if there is one.
-pub fn target() -> Option<PathBuf> {
-    let link = path()?;
+/// The executable the shortcut in `place` starts, if there is one.
+pub fn target(place: Place) -> Option<PathBuf> {
+    let link = path(place)?;
     if !link.exists() {
         return None;
     }
@@ -27,10 +51,10 @@ pub fn target() -> Option<PathBuf> {
     Some(with_com(|| unsafe { load(&link) }).unwrap_or_default())
 }
 
-/// Puts a shortcut to this executable on the desktop, replacing an older one.
-pub fn create() -> Result<(), String> {
+/// Puts a shortcut to this executable in `place`, replacing an older one.
+pub fn create(place: Place) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let link = path().ok_or("The desktop folder wasn't found")?;
+    let link = path(place).ok_or("The folder wasn't found")?;
     with_com(|| unsafe { save(&exe, &link) }).map_err(|e| e.message())
 }
 
@@ -68,8 +92,8 @@ unsafe fn save(exe: &Path, link: &Path) -> windows::core::Result<()> {
     }
 }
 
-pub fn remove() -> Result<(), String> {
-    let Some(link) = path() else { return Ok(()) };
+pub fn remove(place: Place) -> Result<(), String> {
+    let Some(link) = path(place) else { return Ok(()) };
     match std::fs::remove_file(link) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
         _ => Ok(()),

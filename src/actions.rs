@@ -46,8 +46,9 @@ pub(crate) enum Action {
     /// Asks before resetting every video's progress.
     ConfirmResetProgress,
     SetSettings(progress::Settings),
-    /// Puts a shortcut to Afterglow on the desktop, or removes it.
-    SetDesktopShortcut(bool),
+    /// Puts a shortcut to Afterglow on the desktop or in the Start menu, or
+    /// removes it.
+    SetShortcut(shortcut::Place, bool),
     /// Moves the progress file next to afterglow.exe, or into AppData.
     SetPortable(bool),
     SetIncludeSubfolders(bool),
@@ -310,14 +311,16 @@ impl App {
             Action::ShowStats => self.stats_open = true,
             Action::OpenSettings => {
                 self.settings_open = true;
-                self.desktop_shortcut = shortcut::target();
+                self.shortcuts = shortcut::Place::ALL.map(shortcut::target);
             }
-            Action::SetDesktopShortcut(on) => {
-                let result = if on { shortcut::create() } else { shortcut::remove() };
-                self.desktop_shortcut = shortcut::target();
+            Action::SetShortcut(place, on) => {
+                let result = if on { shortcut::create(place) } else { shortcut::remove(place) };
+                self.shortcuts[place as usize] = shortcut::target(place);
+                // "Start menu" keeps its capital.
+                let name = if place == shortcut::Place::Desktop { "desktop" } else { place.name() };
                 match result {
-                    Ok(()) => self.notify(if on { "Shortcut added to desktop" } else { "Shortcut removed from desktop" }),
-                    Err(e) => self.warn(format!("Couldn't change desktop shortcut: {e}")),
+                    Ok(()) => self.notify(if on { format!("Shortcut added to {name}") } else { format!("Shortcut removed from {name}") }),
+                    Err(e) => self.warn(format!("Couldn't change {name} shortcut: {e}")),
                 }
             }
             Action::SetPortable(portable) => {
