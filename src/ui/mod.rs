@@ -33,6 +33,9 @@ pub(crate) fn context_menu(response: &egui::Response, add_contents: impl FnOnce(
 pub(crate) fn fit_to_window(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     // Room for the menu's frame and a gap to the window's edges.
     let max_height = (ui.ctx().content_rect().height() - 40.0).max(80.0);
+    // A menu starts out at egui's default area size (400 points high) and
+    // would keep scrolling at that height; let it grow to the window's.
+    ui.set_max_height(max_height);
     egui::ScrollArea::vertical().max_height(max_height).show(ui, add_contents);
 }
 
