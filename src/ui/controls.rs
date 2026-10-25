@@ -29,7 +29,7 @@ impl App {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
-                let (response, _) = ui::menu_button(more).ui(ui, |ui| ui::fit_to_window(ui, |ui| {
+                let (response, _) = ui::menu_button(more).ui(ui, |ui| ui::fit_to_window(ui, None, |ui| {
                     let recent = self.store.recent_folders.clone();
                     let recent_videos = self.store.recent_videos.clone();
                     // Checked in the background while the menu is open.
@@ -230,8 +230,7 @@ impl App {
         ui.add_enabled_ui(self.loaded, |ui| {
             let button = egui::Button::new(RichText::new(icon).size(ICON_SIZE)).frame_when_inactive(false);
             let (response, _) = ui::menu_button(button).ui(ui, |ui| {
-                ui.label(RichText::new(if kind == "sub" { "Subtitles" } else { "Audio track" }).bold());
-                ui::fit_to_window(ui, |ui| self.track_items(ui, kind));
+                ui::fit_to_window(ui, Some(if kind == "sub" { "Subtitles" } else { "Audio track" }), |ui| self.track_items(ui, kind));
             });
             response.on_hover_text(tip);
         });
