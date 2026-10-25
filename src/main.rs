@@ -184,8 +184,11 @@ struct App {
     last_save: Instant,
     last_activity: Instant,
     /// Until when the video's name shows over it (outside fullscreen): kept
-    /// ahead while paused, so it lingers a moment after playing on.
+    /// ahead while paused or seeking, so it lingers a moment after.
     title_until: Option<Instant>,
+    /// When the video was last seeked with the keys, which keeps the controls
+    /// and the video's name up in fullscreen, as pausing does.
+    seeked: Option<Instant>,
     /// The unpinned playlist while it is out.
     peek: Option<Peek>,
     /// Width of the docked playlist, which the slid-out one copies.
@@ -335,6 +338,7 @@ impl App {
             last_save: Instant::now(),
             last_activity: Instant::now(),
             title_until: None,
+            seeked: None,
             controls_rect: None,
             peek: None,
             sidebar_width: 280.0,
@@ -414,6 +418,13 @@ impl App {
 
     fn current_path(&self) -> Option<&Path> {
         self.playlist.get(self.current?).map(PathBuf::as_path)
+    }
+
+    /// Whether the controls hide in fullscreen, and the video's name with
+    /// them: while a video plays and nothing has happened for a moment.
+    fn controls_idle(&self) -> bool {
+        let recent = |t: Instant| t.elapsed() < CONTROLS_HIDE_DELAY;
+        self.loaded && !self.playback.paused && !recent(self.last_activity) && !self.seeked.is_some_and(recent)
     }
 
     /// Whether the playlist is one video opened by itself (not from a folder).
@@ -557,6 +568,8 @@ impl eframe::App for App {
             self.last_activity = Instant::now();
         }
         let idle = self.loaded && !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
+        // Seeking with the keys keeps the controls up, but not the cursor.
+        let controls_idle = self.controls_idle();
 
         // A video opened by itself has no use for the playlist, so it hides
         // (B still shows it); it comes back once there is more to list.
@@ -593,7 +606,7 @@ impl eframe::App for App {
             self.floating_sidebar(&ctx, video);
         }
         self.controls_rect = None;
-        if self.fullscreen && !idle {
+        if self.fullscreen && !controls_idle {
             let accent = self.store.settings.accent;
             let area = egui::Area::new(egui::Id::unique("controls-overlay"))
                 .order(egui::Order::Foreground)

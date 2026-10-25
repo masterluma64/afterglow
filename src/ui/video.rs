@@ -67,7 +67,7 @@ impl App {
     /// for the first seconds of it.
     fn skip_button(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let Some((skip, start, _)) = self.skip_now() else { return };
-        let idle = !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
+        let idle = self.controls_idle();
         if idle && self.playback.position - start > SKIP_BUTTON_TIME {
             return;
         }
@@ -112,8 +112,7 @@ impl App {
         }
         let alpha = if self.fullscreen {
             // Along with the controls, which float over the video there.
-            let idle = !self.playback.paused && self.last_activity.elapsed() >= CONTROLS_HIDE_DELAY;
-            if idle {
+            if self.controls_idle() {
                 return None;
             }
             1.0

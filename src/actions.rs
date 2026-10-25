@@ -632,6 +632,9 @@ impl App {
             }
             Action::SeekBy(by) if self.loaded => {
                 mpv.send(&["seek", &by.to_string(), "relative"]);
+                // Shows where it got to, as while paused.
+                self.seeked = Some(Instant::now());
+                self.title_until = Some(Instant::now() + CONTROLS_HIDE_DELAY);
                 let to = (self.playback.position + by).clamp(0.0, duration);
                 let sign = if by < 0.0 { "−" } else { "+" };
                 self.notify(format!("{sign}{} s  ·  {} / {}", by.abs(), format_time(to), format_time(duration)));
