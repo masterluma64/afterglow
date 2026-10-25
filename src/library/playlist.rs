@@ -396,6 +396,12 @@ impl App {
         }
         self.playlist.remove(index);
         self.save_playlist();
+        // Emptied, it no longer comes from a folder: a video added next is
+        // one by itself.
+        if self.playlist.is_empty() {
+            self.store.set_folder(None);
+            self.sync_watch();
+        }
     }
 
     /// Points the folder watch at the folder the playlist came from.
