@@ -117,15 +117,22 @@ impl App {
                             .on_hover_text("Turn off if videos show glitches; uses more CPU");
                         ui.end_row();
                         ui.label("Screenshots");
-                        // One of the two stays on, so taking a screenshot always does something.
-                        ui.horizontal(|ui| {
-                            ui.add_enabled(settings.save_screenshots, egui::Checkbox::new(&mut settings.copy_screenshots, "Copy to clipboard"))
-                                .on_hover_text("Screenshots are taken with C or F12")
-                                .on_disabled_hover_text("Turn on saving to turn this off");
-                            ui.add_enabled(settings.copy_screenshots, egui::Checkbox::new(&mut settings.save_screenshots, "Save in Pictures\\Afterglow"))
-                                .on_hover_text("Screenshots are taken with C or F12")
-                                .on_disabled_hover_text("Turn on copying to turn this off");
-                        });
+                        // (copy, save); one of the two stays on, so taking a screenshot always does something.
+                        const SCREENSHOT_MODES: [((bool, bool), &str); 3] = [
+                            ((true, true), "Copy to clipboard and save"),
+                            ((true, false), "Copy to clipboard only"),
+                            ((false, true), "Save only"),
+                        ];
+                        let mut mode = (settings.copy_screenshots, settings.save_screenshots);
+                        let name = SCREENSHOT_MODES.iter().find(|(m, _)| *m == mode).map_or("Copy to clipboard and save", |(_, name)| name);
+                        egui::ComboBox::from_id_salt("screenshot-mode").selected_text(name).show_ui(ui, |ui| {
+                            for (m, name) in SCREENSHOT_MODES {
+                                ui.selectable_value(&mut mode, m, name);
+                            }
+                        })
+                        .response
+                        .on_hover_text("Screenshots (C or F12) are saved in Pictures\\Afterglow");
+                        (settings.copy_screenshots, settings.save_screenshots) = mode;
                         ui.end_row();
                         ui.label("Theme");
                         ui.horizontal(|ui| {
