@@ -263,15 +263,7 @@ impl App {
                     self.actions.push(Action::OpenSingle(file));
                 }
             }
-            Action::OpenSingle(video) => {
-                self.store.set_folder(None);
-                self.sync_watch();
-                self.replace_playlist(vec![video], ctx);
-                // Opened on purpose, so even a watched one opens, from its start.
-                if self.current.is_none() && !self.playlist.is_empty() {
-                    self.open_paused(0, false, ctx);
-                }
-            }
+            Action::OpenSingle(video) => self.replace_with_videos(vec![video], ctx),
             Action::OpenVideos => {
                 let files = rfd::FileDialog::new()
                     .set_title("Add videos to the playlist")

@@ -291,12 +291,7 @@ impl App {
     pub(crate) fn drop_videos(&mut self, videos: Vec<PathBuf>, behavior: progress::DroppedVideos, ctx: &egui::Context) {
         match behavior {
             progress::DroppedVideos::Add => self.add_videos(videos, ctx),
-            progress::DroppedVideos::Replace => {
-                // The playlist no longer comes from a folder.
-                self.store.set_folder(None);
-                self.sync_watch();
-                self.replace_playlist(videos, ctx);
-            }
+            progress::DroppedVideos::Replace => self.replace_with_videos(videos, ctx),
         }
     }
 
@@ -344,7 +339,22 @@ impl App {
         self.show_sidebar = !self.single_video();
         match self.continue_target() {
             Some(index) => self.open_paused(index, true, ctx),
-            None => self.notify(format!("{} videos, all watched", self.playlist.len())),
+            None => {
+                let n = self.playlist.len();
+                self.notify(format!("{n} video{}, all watched", if n == 1 { "" } else { "s" }));
+            }
+        }
+    }
+
+    /// Makes videos opened on purpose (Open video…, or dropped to replace
+    /// the playlist) the playlist, which no longer comes from a folder. Even
+    /// a watched one opens, from its start.
+    pub(crate) fn replace_with_videos(&mut self, videos: Vec<PathBuf>, ctx: &egui::Context) {
+        self.store.set_folder(None);
+        self.sync_watch();
+        self.replace_playlist(videos, ctx);
+        if self.current.is_none() && !self.playlist.is_empty() {
+            self.open_paused(0, false, ctx);
         }
     }
 
