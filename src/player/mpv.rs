@@ -506,7 +506,6 @@ impl Mpv {
             ("input-default-bindings", "no"),
             ("osd-level", "0"),
             ("sub-auto", "fuzzy"),
-            ("slang", "en,eng"),
             ("volume-max", "150"),
             ("ytdl", "no"),
             // libmpv's defaults already, stated so they can't change under us:

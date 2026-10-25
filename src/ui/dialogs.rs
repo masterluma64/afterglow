@@ -100,14 +100,15 @@ impl App {
                 card(ui, "Languages", |ui| {
                     grid("settings-languages").show(ui, |ui| {
                         ui.label("Subtitles");
-                        ui::text_field(ui, egui::TextEdit::singleline(&mut settings.sub_languages).hint_text("e.g. en,eng").desired_width(200.0), egui::Id::unique("sub-languages"), TEXT_MARGIN)
-                            .on_hover_text("Language codes in order of preference, separated by commas. Applies to the next video.");
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut settings.sub_languages).hint_text("the file's default").desired_width(200.0), egui::Id::unique("sub-languages"), TEXT_MARGIN)
+                            .on_hover_text("Applies to the next video");
                         ui.end_row();
                         ui.label("Audio");
                         ui::text_field(ui, egui::TextEdit::singleline(&mut settings.audio_languages).hint_text("the file's default").desired_width(200.0), egui::Id::unique("audio-languages"), TEXT_MARGIN)
-                            .on_hover_text("Language codes in order of preference, e.g. ja,jpn. Applies to the next video.");
+                            .on_hover_text("Applies to the next video");
                         ui.end_row();
                     });
+                    ui.weak(LANGUAGES_HINT);
                 });
                 ui.add_space(8.0);
                 card(ui, "Video and appearance", |ui| {
@@ -568,6 +569,10 @@ pub(crate) fn card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mu
         add_contents(ui);
     });
 }
+
+/// What the language fields expect, under them.
+pub(crate) const LANGUAGES_HINT: &str =
+    "Language codes in order of preference, separated by commas, like en,eng for English or ja,jpn for Japanese. Left empty, the file's default is used.";
 
 /// The main button of a dialog or screen, in the accent color.
 pub(crate) fn primary_button(ui: &egui::Ui, text: impl Into<RichText>) -> egui::Button<'static> {

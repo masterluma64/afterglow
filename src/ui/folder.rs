@@ -64,7 +64,7 @@ impl App {
                 card(ui, "Subtitles and audio", |ui| {
                     grid("folder-languages").show(ui, |ui| {
                         ui.label("Subtitle languages");
-                        custom_field(ui, &mut folder.sub_languages, global.sub_languages.clone(), |v| v.clone(), |ui, v| {
+                        custom_field(ui, &mut folder.sub_languages, global.sub_languages.clone(), |v| if v.is_empty() { "the file's default".into() } else { v.clone() }, |ui, v| {
                             ui::text_field(ui, egui::TextEdit::singleline(v).hint_text("e.g. en,eng").desired_width(140.0), egui::Id::unique("folder-sub-languages"), TEXT_MARGIN);
                         });
                         ui.end_row();
@@ -88,6 +88,7 @@ impl App {
                         });
                         ui.end_row();
                     });
+                    ui.weak(LANGUAGES_HINT);
                 });
                 ui.add_space(8.0);
                 card(ui, "Playback", |ui| {

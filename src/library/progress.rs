@@ -75,7 +75,7 @@ impl Default for Settings {
             sidebar_side: Side::Left,
             theme: Theme::System,
             accent: None,
-            sub_languages: "en,eng".into(),
+            sub_languages: String::new(),
             audio_languages: String::new(),
             hardware_decoding: true,
             level_volume: false,
@@ -1227,7 +1227,7 @@ mod tests {
         };
         store.set_folder_settings(video, folder);
         assert_eq!(store.settings_for(Some(video)).sub_languages, "ja");
-        assert_eq!(store.settings_for(Some(other)).sub_languages, "en,eng");
+        assert_eq!(store.settings_for(Some(other)).sub_languages, "");
         assert_eq!((store.watched_fraction(video), store.watched_fraction(other)), (0.6, 0.9));
         assert!(!store.autoplay_after(video) && store.autoplay_after(other));
         store.update_position(video, 61.0, 100.0);
