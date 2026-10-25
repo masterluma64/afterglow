@@ -377,9 +377,11 @@ impl App {
             Action::Skip => {
                 if let (Ok(mpv), Some((skip, _, end))) = (&self.mpv, self.skip_now()) {
                     // Skipping the ending finishes the video, unless a scene
-                    // follows the credits.
+                    // follows the credits. It stops rather than seeking to the
+                    // end, where a paused video would stay on its last frame.
                     if skip == progress::Skip::Ending && end >= self.playback.duration - 0.5 {
-                        mpv.send(&["seek", "100", "absolute-percent+exact"]);
+                        mpv.send(&["stop"]);
+                        self.played_to_end(ctx);
                     } else {
                         mpv.send(&["seek", &format!("{end:.3}"), "absolute+exact"]);
                     }

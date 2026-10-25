@@ -398,24 +398,29 @@ impl App {
                         self.finish(ctx);
                         continue;
                     }
-                    if !eof {
-                        continue;
+                    if eof {
+                        self.played_to_end(ctx);
                     }
-                    let Some(index) = self.current else { continue };
-                    if let Some(path) = self.playlist.get(index).cloned() {
-                        self.store.finish(&path);
-                    }
-                    self.finish(ctx);
-                    let autoplay = self.playlist.get(index).is_some_and(|p| self.store.autoplay_after(p));
-                    if index + 1 < self.playlist.len() && autoplay {
-                        self.up_next = Some(UpNext { index: index + 1, at: Instant::now() + AUTOPLAY_DELAY });
-                    } else {
-                        self.ended = Some(index);
-                    }
-                    self.store.save();
                 }
             }
         }
+    }
+
+    /// Marks the playing video watched and goes on to the next one's
+    /// countdown, or the end screen.
+    pub(crate) fn played_to_end(&mut self, ctx: &egui::Context) {
+        let Some(index) = self.current else { return };
+        if let Some(path) = self.playlist.get(index).cloned() {
+            self.store.finish(&path);
+        }
+        self.finish(ctx);
+        let autoplay = self.playlist.get(index).is_some_and(|p| self.store.autoplay_after(p));
+        if index + 1 < self.playlist.len() && autoplay {
+            self.up_next = Some(UpNext { index: index + 1, at: Instant::now() + AUTOPLAY_DELAY });
+        } else {
+            self.ended = Some(index);
+        }
+        self.store.save();
     }
 
     /// Records the playing position (`playback` itself is kept up to date by
