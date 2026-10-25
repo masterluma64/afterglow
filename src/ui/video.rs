@@ -84,14 +84,16 @@ impl App {
             .pivot(egui::Align2::RIGHT_BOTTOM)
             .show(ui.ctx(), |ui| {
                 ui.style_mut().visuals = video_visuals(accent);
-                ui.spacing_mut().button_padding = vec2(16.0, 9.0);
+                ui.spacing_mut().button_padding = vec2(26.0, 15.0);
                 // Near the window's edge the area is narrow; keep it on one line.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                // White, so it stands out on any video, edged in the accent color.
-                let text = RichText::new(format!("{}  {label}", icons::FAST_FORWARD)).color(Color32::from_gray(20));
+                // White, so it stands out on any video, edged in the accent color;
+                // large and bold (the text keeps the one font size) to be noticed.
+                let text = RichText::new(format!("{}  {label}", icons::FAST_FORWARD)).color(Color32::from_gray(20)).bold();
                 let button = egui::Button::new(text)
                     .fill(Color32::WHITE)
-                    .stroke(egui::Stroke::new(2.0, ui.visuals().selection.bg_fill));
+                    .stroke(egui::Stroke::new(3.0, ui.visuals().selection.bg_fill))
+                    .corner_radius(8.0);
                 if ui.add(button).on_hover_text("Enter").clicked() {
                     self.actions.push(Action::Skip);
                 }
