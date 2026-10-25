@@ -769,49 +769,60 @@ impl App {
     }
 }
 
-/// A screenshot under way: mpv saves it as a file and (if `copy`) copies
-/// its pixels separately, and it is announced once both are done.
+/// A screenshot under way: mpv saves it as a file (if it has a `path`) and
+/// (if `copy`) copies its pixels separately, and it is announced once both
+/// are done.
 pub(crate) struct Screenshot {
-    path: PathBuf,
+    path: Option<PathBuf>,
     copy: bool,
     copied: Option<bool>,
     saved: Option<bool>,
 }
 
 impl App {
-    /// Saves the current frame as `<video name> <time>.png` in the
-    /// screenshots folder, and copies it to the clipboard unless turned off.
+    /// Saves the current frame in the screenshots folder and copies it to
+    /// the clipboard, each unless turned off.
     fn screenshot(&mut self) {
         let (Ok(mpv), true) = (&self.mpv, self.loaded) else { return };
-        let Some(folder) = screenshot_folder() else {
-            return self.warn("There is no Pictures folder to keep screenshots in");
+        let copy = self.store.settings.copy_screenshots;
+        let path = match self.store.settings.save_screenshots.then(|| self.screenshot_path()) {
+            Some(Ok(path)) => Some(path),
+            Some(Err(e)) => return self.warn(e),
+            None if copy => None,
+            None => return self.warn("Screenshots are neither copied nor saved; turn one on in Settings"),
         };
-        if let Err(e) = std::fs::create_dir_all(&folder) {
-            return self.warn(format!("Could not create {}: {e}", folder.display()));
+        // Both are taken from the frame showing now.
+        if copy {
+            mpv.send_tagged(SCREENSHOT_COPY_TAG, &["screenshot-raw", "subtitles", "rgba"]);
         }
+        if let Some(path) = &path {
+            mpv.send_tagged(SCREENSHOT_TAG, &["screenshot-to-file", &path.to_string_lossy(), "subtitles"]);
+        }
+        self.screenshots.push(Screenshot { path, copy, copied: None, saved: None });
+    }
+
+    /// A free `<video name> <time>.png` in the screenshots folder, which is
+    /// created if needed.
+    fn screenshot_path(&self) -> Result<PathBuf, String> {
+        let folder = screenshot_folder().ok_or("There is no Pictures folder to keep screenshots in")?;
+        std::fs::create_dir_all(&folder).map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
         let name = self.current_path().map(display_name).unwrap_or_default();
         let time = format_time(self.playback.position).replace(':', ".");
         let mut path = folder.join(format!("{name} {time}.png"));
         // Several of the same second (stepping through frames) are numbered,
         // also while earlier ones are still being written.
         let mut n = 2;
-        while path.exists() || self.screenshots.iter().any(|s| s.path == path) {
+        while path.exists() || self.screenshots.iter().any(|s| s.path.as_ref() == Some(&path)) {
             path = folder.join(format!("{name} {time} ({n}).png"));
             n += 1;
         }
-        // Both are taken from the frame showing now.
-        let copy = self.store.settings.copy_screenshots;
-        if copy {
-            mpv.send_tagged(SCREENSHOT_COPY_TAG, &["screenshot-raw", "subtitles", "rgba"]);
-        }
-        mpv.send_tagged(SCREENSHOT_TAG, &["screenshot-to-file", &path.to_string_lossy(), "subtitles"]);
-        self.screenshots.push(Screenshot { path, copy, copied: None, saved: None });
+        Ok(path)
     }
 
     /// mpv finished copying (`copy`) or saving the oldest screenshot that
     /// waits for it; `result` holds the pixels of a copy.
     pub(crate) fn screenshot_done(&mut self, ctx: &egui::Context, copy: bool, ok: bool, result: &mpv::Node) {
-        let waiting = |s: &Screenshot| if copy { s.copy && s.copied.is_none() } else { s.saved.is_none() };
+        let waiting = |s: &Screenshot| if copy { s.copy && s.copied.is_none() } else { s.path.is_some() && s.saved.is_none() };
         let Some(index) = self.screenshots.iter().position(waiting) else { return };
         let shot = &mut self.screenshots[index];
         if copy {
@@ -823,10 +834,14 @@ impl App {
         } else {
             shot.saved = Some(ok);
         }
-        // Not copied, the copy counts as done.
-        let (Some(copied), Some(saved)) = (if shot.copy { shot.copied } else { Some(true) }, shot.saved) else { return };
+        // Not copied or not saved, that part counts as done.
+        let copied = if shot.copy { shot.copied } else { Some(true) };
+        let saved = if shot.path.is_some() { shot.saved } else { Some(true) };
+        let (Some(copied), Some(saved)) = (copied, saved) else { return };
         let shot = self.screenshots.remove(index);
-        let folder = short_folder(&shot.path);
+        let Some(folder) = shot.path.as_deref().map(short_folder) else {
+            return if copied { self.notify("Screenshot copied to clipboard") } else { self.warn("Could not copy the screenshot") };
+        };
         match (shot.copy, copied, saved) {
             (false, _, true) => self.notify(format!("Screenshot saved in {folder}")),
             (false, _, false) => self.warn(format!("Could not save the screenshot in {folder}")),

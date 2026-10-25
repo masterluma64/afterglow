@@ -56,8 +56,10 @@ pub struct Settings {
     pub hardware_decoding: bool,
     /// Evens out loud and quiet parts of the sound ("night mode").
     pub level_volume: bool,
-    /// Whether screenshots are also copied to the clipboard (they are always saved).
+    /// Whether screenshots are copied to the clipboard.
     pub copy_screenshots: bool,
+    /// Whether screenshots are saved in the screenshots folder.
+    pub save_screenshots: bool,
 }
 
 impl Default for Settings {
@@ -75,6 +77,7 @@ impl Default for Settings {
             hardware_decoding: true,
             level_volume: false,
             copy_screenshots: true,
+            save_screenshots: true,
         }
     }
 }
