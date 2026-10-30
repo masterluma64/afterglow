@@ -36,8 +36,6 @@ const APP_NAME: &str = "Afterglow";
 const APP_ID: &str = "afterglow";
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 const CONTROLS_HIDE_DELAY: Duration = Duration::from_millis(2500);
-/// How long the video's name stays over it after playing on from a pause.
-const TITLE_LINGER: Duration = Duration::from_secs(2);
 const NOTICE_DURATION: Duration = Duration::from_millis(1500);
 const WARNING_DURATION: Duration = Duration::from_secs(6);
 const ICON_SIZE: f32 = 17.0;
@@ -183,11 +181,8 @@ struct App {
     scrub: Option<f64>,
     last_save: Instant,
     last_activity: Instant,
-    /// Until when the video's name shows over it (outside fullscreen): kept
-    /// ahead while paused or seeking, so it lingers a moment after.
-    title_until: Option<Instant>,
     /// When the video was last seeked with the keys, which keeps the controls
-    /// and the video's name up in fullscreen, as pausing does.
+    /// up in fullscreen, as pausing does.
     seeked: Option<Instant>,
     /// The unpinned playlist while it is out.
     peek: Option<Peek>,
@@ -338,7 +333,6 @@ impl App {
             scrub: None,
             last_save: Instant::now(),
             last_activity: Instant::now(),
-            title_until: None,
             seeked: None,
             controls_rect: None,
             peek: None,
@@ -421,8 +415,8 @@ impl App {
         self.playlist.get(self.current?).map(PathBuf::as_path)
     }
 
-    /// Whether the controls hide in fullscreen, and the video's name with
-    /// them: while a video plays and nothing has happened for a moment.
+    /// Whether the controls hide in fullscreen: while a video plays and
+    /// nothing has happened for a moment.
     fn controls_idle(&self) -> bool {
         let recent = |t: Instant| t.elapsed() < CONTROLS_HIDE_DELAY;
         self.loaded && !self.playback.paused && !recent(self.last_activity) && !self.seeked.is_some_and(recent)

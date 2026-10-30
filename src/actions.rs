@@ -424,10 +424,12 @@ impl App {
             Action::ClearRecentFolders => {
                 self.store.clear_recent_folders();
                 self.store.save();
+                self.notify("Recent folders cleared");
             }
             Action::ClearRecentVideos => {
                 self.store.clear_recent_videos();
                 self.store.save();
+                self.notify("Recent videos cleared");
             }
             Action::FocusSearch => {
                 self.show_sidebar = true;
@@ -524,6 +526,10 @@ impl App {
                 if !autoplay {
                     self.cancel_up_next();
                 }
+                // The Settings checkbox shows it already.
+                if !self.settings_open {
+                    self.notify(if autoplay { "Auto-play on" } else { "Auto-play off" });
+                }
             }
             Action::CancelUpNext => self.cancel_up_next(),
             Action::Next | Action::Prev => {
@@ -591,6 +597,7 @@ impl App {
                     if let Ok(mpv) = &self.mpv {
                         mpv.send(&["cycle", "pause"]);
                     }
+                    self.notify(if self.playback.paused { "Playing" } else { "Paused" });
                 } else if let Some(up_next) = self.up_next.as_ref().filter(|_| self.current.is_none()) {
                     self.play_from_start(up_next.index, ctx);
                 } else if let Some(next) = self.ended.map(|i| i + 1).filter(|&i| i < self.playlist.len() && self.current.is_none()) {
@@ -634,7 +641,6 @@ impl App {
                 mpv.send(&["seek", &by.to_string(), "relative"]);
                 // Shows where it got to, as while paused.
                 self.seeked = Some(Instant::now());
-                self.title_until = Some(Instant::now() + CONTROLS_HIDE_DELAY);
                 let to = (self.playback.position + by).clamp(0.0, duration);
                 let sign = if by < 0.0 { "−" } else { "+" };
                 self.notify(format!("{sign}{} s  ·  {} / {}", by.abs(), format_time(to), format_time(duration)));
@@ -652,6 +658,9 @@ impl App {
             Action::SetTrack { kind, id } => {
                 let prop = if kind == "sub" { "sid" } else { "aid" };
                 mpv.set(prop, &id.map_or("no".into(), |id| id.to_string()));
+                if self.loaded {
+                    self.announce_track = Some(kind);
+                }
             }
             Action::CycleSubtitles if self.loaded => {
                 mpv.send(&["cycle", "sub"]);
@@ -686,6 +695,7 @@ impl App {
             Action::FrameStep { forward } if self.loaded => {
                 // Steps one frame and leaves playback paused.
                 mpv.send(&[if forward { "frame-step" } else { "frame-back-step" }]);
+                self.notify(if forward { "Next frame" } else { "Previous frame" });
             }
             Action::AdjustSubDelay(by) if self.loaded => {
                 mpv.send(&["add", "sub-delay", &by.to_string()]);
