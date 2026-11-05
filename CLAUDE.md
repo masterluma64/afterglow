@@ -8,8 +8,8 @@ How this repo is worked on. See `README.md` for what the app does and how to bui
   Commit only your own files, by path: `git commit -- <files>`. Never run a bare `git commit`
   after `git add`. Check `git status` and `git log` right before committing, because the repo
   may have moved since you last looked.
-- Work happens on `develop`. `main` is brought up to date by fast-forwarding it to `develop`
-  (`git push origin develop:main`), at every release and when the owner asks.
+- Work happens on `develop`. `develop` is merged into `main` only when a release happens (see
+  `docs/releasing.md`). Don't push to `main` otherwise.
 - Commit messages are a plain sentence describing the change ("Let Enter press the button over
   the video, styled like the Skip button"). Version bumps are just "Version X.Y.Z".
 
