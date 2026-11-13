@@ -12,6 +12,8 @@ How this repo is worked on. See `README.md` for what the app does and how to bui
   `docs/releasing.md`). Don't push to `main` otherwise.
 - Commit messages are a plain sentence describing the change ("Let Enter press the button over
   the video, styled like the Skip button"). Version bumps are just "Version X.Y.Z".
+- No `Co-Authored-By` trailers or other AI attribution in commits. The README says how the
+  project is made instead.
 
 ## Naming
 
