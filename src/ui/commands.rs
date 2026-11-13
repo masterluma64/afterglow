@@ -208,6 +208,7 @@ impl App {
             ]);
         }
         list.extend([
+            self.command(Action::ToggleHome, "continue watching start recent shows series"),
             self.command(Action::OpenFolder, "playlist browse"),
             self.command(Action::OpenVideo, "movie file browse single"),
             self.command(Action::OpenVideos, "files browse"),

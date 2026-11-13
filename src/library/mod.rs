@@ -27,7 +27,13 @@ pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<
     std::fs::read_dir(dir)?;
     let mut videos = Vec::new();
     collect(dir, include_subfolders, &mut HashSet::new(), &mut videos);
-    // Files directly in the folder come first, then subfolders in order.
+    sort_in_folder(dir, &mut videos);
+    Ok(videos)
+}
+
+/// Puts videos in a folder in the order opening it plays them: the folder's
+/// own files first, then each subfolder's, in natural order.
+pub fn sort_in_folder(dir: &Path, videos: &mut [PathBuf]) {
     let key = |p: &PathBuf| {
         let rel = p.strip_prefix(dir).unwrap_or(p);
         (rel.components().count() > 1, rel.to_string_lossy().replace('\\', "/"))
@@ -36,7 +42,6 @@ pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<
         let (ka, kb) = (key(a), key(b));
         ka.0.cmp(&kb.0).then_with(|| natural_cmp(&ka.1, &kb.1))
     });
-    Ok(videos)
 }
 
 /// `seen` holds the folders already scanned, so a link back up the tree

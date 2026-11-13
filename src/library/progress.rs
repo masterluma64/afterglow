@@ -659,6 +659,25 @@ impl Store {
         self.dirty = true;
     }
 
+    /// What there is to continue in a folder opened before, going by what is
+    /// remembered about its videos: the one to play next (one started and not
+    /// finished, or else the first unwatched one after the last watched, the
+    /// way opening the folder picks it), how many are watched and how many
+    /// there are. `None` once all are watched.
+    pub fn continue_in(&self, folder: &Path) -> Option<(PathBuf, usize, usize)> {
+        let mut videos: Vec<PathBuf> =
+            self.entries.keys().map(PathBuf::from).filter(|p| p.starts_with(folder) && super::is_video(p)).collect();
+        super::sort_in_folder(folder, &mut videos);
+        let watched = |p: &PathBuf| self.get(p).watched;
+        let started = videos.iter().position(|p| self.resume_position(p).is_some());
+        let after = videos.iter().rposition(watched).map_or(0, |i| i + 1);
+        let next = started
+            .or_else(|| (after..videos.len()).find(|&i| !watched(&videos[i])))
+            .or_else(|| videos.iter().position(|p| !watched(p)))?;
+        let done = videos.iter().filter(|p| watched(p)).count();
+        Some((videos[next].clone(), done, videos.len()))
+    }
+
     /// Whether a video was opened by itself, like a movie: it is the whole
     /// playlist, which didn't come from a folder.
     pub fn is_movie(&self, video: &Path) -> bool {
@@ -1127,6 +1146,26 @@ mod tests {
         store.set_folder(None);
         store.set_folder_settings(movie, FolderSettings::default());
         assert!(store.videos.is_empty(), "reset: nothing kept");
+    }
+
+    #[test]
+    fn finds_what_to_continue_in_a_folder() {
+        let mut store = Store::default();
+        let show = Path::new(r"D:\Shows\Kirby");
+        let episode = |n: u32| show.join(format!("Episode {n}.mkv"));
+        for n in [1, 2, 10, 3] {
+            store.set_duration(&episode(n), 1200.0);
+        }
+        store.set_duration(Path::new(r"D:\Shows\Other\Episode 1.mkv"), 1200.0);
+        assert_eq!(store.continue_in(show), Some((episode(1), 0, 4)), "nothing watched: the first");
+        store.set_watched(&episode(1), true);
+        store.set_watched(&episode(3), true);
+        assert_eq!(store.continue_in(show), Some((episode(10), 2, 4)), "after the last watched, in natural order");
+        store.update_position(&episode(2), 300.0, 1200.0);
+        assert_eq!(store.continue_in(show), Some((episode(2), 2, 4)), "one started comes first");
+        store.set_watched(&episode(2), true);
+        store.set_watched(&episode(10), true);
+        assert_eq!(store.continue_in(show), None, "all watched");
     }
 
     #[test]

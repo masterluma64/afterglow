@@ -17,6 +17,12 @@ pub(crate) enum Action {
     /// Explorer): opened like `Open`, and the first video is opened right
     /// away, paused.
     OpenAndShow(Vec<PathBuf>),
+    /// Opens a folder from the home screen, going on with `video`.
+    ContinueFolder { folder: PathBuf, video: PathBuf },
+    /// Takes a folder or video off the home screen (and the recent ones).
+    ForgetRecent(PathBuf),
+    /// Shows the home screen over the video (pausing it), or hides it.
+    ToggleHome,
     /// Videos the folder watch found new in the playlist's folder.
     Arrived(Vec<PathBuf>),
     /// Answers what dropped videos should do; with `remember`, it becomes the
@@ -104,9 +110,9 @@ pub(crate) enum Action {
     ToggleLevelVolume,
     /// Marks the playing video as watched, or unwatched if it is.
     ToggleWatched,
-    /// Clears the selection, cancels the next video's countdown, hides the
-    /// slid-out playlist, leaves fullscreen or the mini player, whichever
-    /// applies first.
+    /// Clears the selection, closes the home screen, cancels the next video's
+    /// countdown, hides the slid-out playlist, leaves fullscreen or the mini
+    /// player, whichever applies first.
     Escape,
     LoadSubtitle,
     AdjustSubDelay(f64),
@@ -132,6 +138,7 @@ impl Action {
         matches!(
             self,
             Action::Open(_)
+                | Action::ContinueFolder { .. }
                 | Action::Drop(_)
                 | Action::OpenAndShow(_)
                 | Action::Arrived(_)
@@ -291,6 +298,22 @@ impl App {
                 }
             }
             Action::Open(paths) => self.open(paths, false, None),
+            Action::ContinueFolder { folder, video } => self.open(vec![folder], false, Some(video)),
+            Action::ForgetRecent(path) => {
+                self.store.forget_recent(std::slice::from_ref(&path));
+                self.store.save();
+                self.home_cards = None;
+                self.notify(format!("{} removed from Continue watching", display_name(&path)));
+            }
+            Action::ToggleHome => {
+                self.home = !self.home;
+                if self.home && self.loaded && !self.playback.paused
+                    && let Ok(mpv) = &self.mpv
+                {
+                    mpv.set("pause", "yes");
+                }
+                self.home_cards = None;
+            }
             Action::Drop(paths) => self.open(paths, true, None),
             Action::OpenAndShow(paths) => {
                 let video = paths.iter().find(|p| library::is_video(p)).cloned();
@@ -608,6 +631,8 @@ impl App {
             Action::Escape => {
                 if !self.selected.is_empty() {
                     self.selected.clear();
+                } else if self.home {
+                    self.home = false;
                 } else if self.up_next.is_some() {
                     self.cancel_up_next();
                 } else if self.peek.is_some() {

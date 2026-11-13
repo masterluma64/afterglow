@@ -25,7 +25,12 @@ impl App {
         if resp.drag_started() {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
-        if self.loaded {
+        if self.loaded && self.home {
+            // The home screen over the paused video, which shows dimly through.
+            self.paint_frame(ui, rect);
+            ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(225));
+            self.home_screen(ui, rect);
+        } else if self.loaded {
             self.paint_frame(ui, rect);
             self.skip_button(ui, rect);
             if resp.double_clicked() {
@@ -212,31 +217,7 @@ impl App {
             self.end_screen(&mut child, index);
             return;
         }
-        if let Some(index) = self.continue_target() {
-            let path = &self.playlist[index];
-            let resume = self.store.resume_position(path);
-            let verb = if resume.is_some() { "Continue" } else { "Play" };
-            let text = format!("{}   {verb}: {}", icons::PLAY, self.video_name(path));
-            child.spacing_mut().button_padding = SKIP_BUTTON_PADDING;
-            if child.add(skip_button(&child, text)).on_hover_text("Enter").clicked() {
-                self.actions.push(Action::Play(index));
-            }
-            if let Some(pos) = resume {
-                child.add_space(4.0);
-                child.weak(format!("from {}", format_time(pos)));
-            }
-            return;
-        }
-
-        let (title, hint) = if self.playlist.is_empty() {
-            ("Drop a folder or videos here", "A folder plays all of its videos in order.")
-        } else {
-            ("Everything in the playlist is watched", "Pick a video to watch it again, or open something new.")
-        };
-        child.label(RichText::new(icons::FOLDER_PLUS).size(44.0).weak());
-        child.add_space(6.0);
-        child.label(RichText::new(title).bold());
-        child.weak(hint);
+        self.home_screen(ui, rect);
     }
 
     /// What shows once a video played to its end and nothing starts after it:

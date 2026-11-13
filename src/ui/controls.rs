@@ -17,6 +17,11 @@ impl App {
             if icon_button(ui, icons::SIDEBAR, "Show or hide the playlist (B)").clicked() {
                 self.actions.push(Action::ToggleSidebar);
             }
+            // While nothing plays the home screen shows anyway.
+            let home = ui.add_enabled(self.current.is_some(), egui::Button::new(RichText::new(icons::HOUSE).size(ICON_SIZE)).frame_when_inactive(false));
+            if home.on_hover_text("Home: what there is to continue watching").clicked() {
+                self.actions.push(Action::ToggleHome);
+            }
             ui.separator();
             if icon_button(ui, icons::FOLDER_PLUS, "Open folder: replace the playlist with its videos (O)").clicked() {
                 self.actions.push(Action::OpenFolder);

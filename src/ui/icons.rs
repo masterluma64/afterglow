@@ -59,6 +59,7 @@ pub const CAMERA: &str = "\u{E10E}";
 pub const IMAGES: &str = "\u{E836}";
 pub const STACK: &str = "\u{E466}";
 pub const PICTURE_IN_PICTURE: &str = "\u{E64C}";
+pub const HOUSE: &str = "\u{E2C2}";
 // The text font has no arrows; shortcut texts use these code points inline.
 pub const ARROW_LEFT: &str = "\u{E058}";
 pub const ARROW_RIGHT: &str = "\u{E06C}";
@@ -67,7 +68,7 @@ pub const ARROW_UP: &str = "\u{E08E}";
 #[cfg(test)]
 pub const ARROW_DOWN: &str = "\u{E03E}";
 
-const FILL_FAMILY: &str = "phosphor-fill";
+pub(crate) const FILL_FAMILY: &str = "phosphor-fill";
 
 pub fn install(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
@@ -97,7 +98,7 @@ pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-const BOLD_FAMILY: &str = "bold";
+pub(crate) const BOLD_FAMILY: &str = "bold";
 
 /// Bold text, for titles and the values that matter; the text size stays the
 /// same everywhere.

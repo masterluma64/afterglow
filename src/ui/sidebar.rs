@@ -120,13 +120,8 @@ fn still_row(ui: &mut egui::Ui, entry: &progress::Entry, name: &str, playing: bo
     let left = frame.right() + 8.0;
     let width = (rect.right() - 6.0 - left).max(10.0);
     let font = egui::TextStyle::Body.resolve(ui.style());
-    let line = |text: String, color: Color32| {
-        let mut job = egui::text::LayoutJob::single_section(text, egui::TextFormat::simple(font.clone(), color));
-        job.wrap = egui::text::TextWrapping::truncate_at_width(width);
-        ui.fonts_mut(|f| f.layout_job(job))
-    };
-    let title = line(name.to_string(), if entry.watched && !playing { weak } else { strong });
-    let detail = line(detail, weak);
+    let title = ui::one_line(ui, name.to_string(), font.clone(), if entry.watched && !playing { weak } else { strong }, width);
+    let detail = ui::one_line(ui, detail, font, weak, width);
     let gap = 2.0;
     let top = rect.center().y - (title.size().y + gap + detail.size().y) / 2.0;
     let painter = ui.painter();

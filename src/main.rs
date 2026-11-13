@@ -289,6 +289,11 @@ struct App {
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
+    /// Whether the home screen shows over the video (it always shows while
+    /// nothing plays).
+    home: bool,
+    /// The home screen's cards, and when they were worked out.
+    home_cards: Option<(Instant, Vec<ui::home::Card>)>,
     /// How the window was before the mini player, while it is on.
     mini: Option<ui::mini::Restore>,
     /// The window's handle, once it exists.
@@ -401,6 +406,8 @@ impl App {
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
             other_starts: other_starts.into_iter().collect(),
+            home: false,
+            home_cards: None,
             mini: None,
             hwnd: None,
             taskbar: None,
@@ -612,6 +619,10 @@ impl eframe::App for App {
 
         // A video opened by itself has no use for the playlist, so it hides
         // (B still shows it); it comes back once there is more to list.
+        // Playing again closes the home screen over the video.
+        if self.home && self.loaded && !self.playback.paused {
+            self.home = false;
+        }
         let single = self.single_video();
         if single != self.was_single_video {
             self.was_single_video = single;
@@ -876,7 +887,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::PICTURE_IN_PICTURE, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::PICTURE_IN_PICTURE, icons::HOUSE, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

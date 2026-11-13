@@ -5,6 +5,7 @@ pub(crate) mod commands;
 pub(crate) mod controls;
 pub(crate) mod dialogs;
 pub(crate) mod folder;
+pub(crate) mod home;
 pub(crate) mod icons;
 pub(crate) mod items;
 pub(crate) mod mini;
@@ -69,6 +70,14 @@ pub(crate) fn text_field(ui: &mut egui::Ui, edit: egui::TextEdit<'_>, id: egui::
         .stroke((1.0, outline))
         .inner_margin(margin - egui::Margin::same(1));
     ui.add(edit.id(id).frame(frame))
+}
+
+/// Text laid out on one line of at most `width`, cut off with … when longer,
+/// for painting where a label can't go.
+pub(crate) fn one_line(ui: &egui::Ui, text: String, font: egui::FontId, color: egui::Color32, width: f32) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::single_section(text, egui::TextFormat::simple(font, color));
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+    ui.fonts_mut(|f| f.layout_job(job))
 }
 
 /// A submenu whose contents scroll once they are taller than the window

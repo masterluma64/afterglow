@@ -135,6 +135,8 @@ impl App {
                 item(icons::MONITOR_PLAY, name, "").enabled(self.recent.found(video))
             }
             Action::OpenVideos => item(icons::FILE_VIDEO, "Add videos…", "I"),
+            Action::ToggleHome if self.home => item(icons::HOUSE, "Back to the video", "Esc"),
+            Action::ToggleHome => item(icons::HOUSE, "Home: continue watching", "").enabled(self.current.is_some()),
             Action::Open(paths) => {
                 let folder = paths.first();
                 let name = folder.map(|f| display_name(f)).unwrap_or_default();

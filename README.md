@@ -13,6 +13,9 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
 
 - **Progress**: every video remembers its position and counts as watched at 90% (adjustable).
   On startup, the last video opens paused on the frame where you left off.
+- **Continue watching**: the home screen (the house button, and whenever nothing plays) shows
+  the shows and movies you are in the middle of, each with a still of what is next. One click
+  opens it there.
 - **Playlist**: open a folder (optionally with its subfolders) or add videos; new files in the
   folder show up by themselves. Search, drag to reorder, and select several (Ctrl / Shift+click)
   to mark or remove them. Each video shows a still from it, with how much is left. It can dock
