@@ -1471,7 +1471,8 @@ mod entry_tests {
         };
 
         mpv.load_file(&one, 0.0, 9);
-        until(&|e| replies(e).len() == 1, &mut events);
+        // Once it is open: replaced before that, mpv drops it without an end.
+        until(&|e| replies(e).len() == 1 && e.iter().any(|e| matches!(e, Event::FileLoaded)), &mut events);
         // Replace it before it ends, then let the second play to its end.
         mpv.load_file(&two, 0.0, 9);
         until(&|e| ends(e).iter().any(|&(_, eof)| eof), &mut events);
