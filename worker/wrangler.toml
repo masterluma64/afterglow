@@ -1,0 +1,7 @@
+# The update server: hands out afterglow's releases (see docs/updates.md).
+# Deploy with `npx wrangler deploy` from this folder. Its secrets are set with
+# `npx wrangler secret put GITHUB_TOKEN` and `npx wrangler secret put CLIENT_KEYS`.
+name = "afterglow-updates"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
