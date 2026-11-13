@@ -108,6 +108,7 @@ impl App {
         self.menu_item(ui, Action::OpenVideos);
         ui.separator();
         self.menu_item(ui, Action::ToggleFullscreen);
+        self.menu_item(ui, Action::ToggleOnTop).on_hover_text("Stay in front of other windows, even when another one is used");
         self.menu_item(ui, Action::ToggleSidebar);
         ui.separator();
         self.app_items(ui);
@@ -228,6 +229,7 @@ impl App {
             self.command(Action::ClearPlaylist, "empty remove all"),
             self.command(Action::SetAutoplayNext(!self.autoplay_next()), "autoplay up next countdown"),
             self.command(Action::ToggleFullscreen, "full screen window maximize"),
+            self.command(Action::ToggleOnTop, "always on top pin float window front"),
             self.command(Action::OpenScreenshotFolder, "snapshot pictures images"),
             self.command(Action::ToggleSidebar, "sidebar"),
             self.command(Action::TogglePin, "sidebar dock"),

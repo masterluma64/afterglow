@@ -219,6 +219,8 @@ pub struct Store {
     pub autoplay_next: bool,
     /// Where the window was, to open it there again.
     pub window: Option<WindowPlacement>,
+    /// Whether the window stays on top of other windows.
+    pub on_top: bool,
     /// Watching stats, which outlast the progress of deleted videos.
     pub stats: Stats,
     /// Settings per folder of videos.
@@ -255,6 +257,7 @@ impl Default for Store {
             autoplay_next: true,
             sidebar_pinned: true,
             window: None,
+            on_top: false,
             stats: Stats::default(),
             folders: HashMap::new(),
             videos: HashMap::new(),
@@ -798,6 +801,11 @@ impl Store {
             self.window = Some(window);
             self.dirty = true;
         }
+    }
+
+    pub fn set_on_top(&mut self, on_top: bool) {
+        self.on_top = on_top;
+        self.dirty = true;
     }
 
     pub fn set_autoplay_next(&mut self, autoplay: bool) {

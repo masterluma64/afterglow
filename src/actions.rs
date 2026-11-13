@@ -77,6 +77,8 @@ pub(crate) enum Action {
     ToggleMute,
     ToggleFullscreen,
     ExitFullscreen,
+    /// Keeps the window on top of other windows, or stops doing so.
+    ToggleOnTop,
     ToggleSidebar,
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
@@ -195,6 +197,7 @@ impl App {
                 (M::NONE, Key::K, Action::TogglePause),
                 (M::NONE, Key::F11, Action::ToggleFullscreen),
                 (M::NONE, Key::F, Action::ToggleFullscreen),
+                (M::NONE, Key::T, Action::ToggleOnTop),
                 (M::NONE, Key::F12, Action::Screenshot),
                 (M::NONE, Key::C, Action::Screenshot),
                 (M::NONE, Key::Escape, Action::Escape),
@@ -577,6 +580,13 @@ impl App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
                 }
             }
+            Action::ToggleOnTop => {
+                let on_top = !self.store.on_top;
+                self.store.set_on_top(on_top);
+                self.store.save();
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(window_level(on_top)));
+                self.notify(if on_top { "Kept on top of other windows" } else { "No longer kept on top" });
+            }
             Action::ToggleSidebar if self.sidebar_docked() => self.show_sidebar = !self.show_sidebar,
             Action::ToggleSidebar => self.peek = if self.peek.is_some() { None } else { Some(Peek::default()) },
             Action::Escape => {
@@ -820,6 +830,11 @@ fn audio_delay_notice(delay: f64) -> String {
         d if d < 0.0 => format!("Audio delay {d:+.1} s (sound earlier)"),
         _ => "Audio delay 0.0 s".into(),
     }
+}
+
+/// The window's level for keeping it on top of other windows, or not.
+pub(crate) fn window_level(on_top: bool) -> egui::WindowLevel {
+    if on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal }
 }
 
 /// A screenshot under way: mpv saves it as a file (if it has a `path`) and

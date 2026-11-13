@@ -153,6 +153,7 @@ impl App {
             Action::SetAutoplayNext(_) => item(icons::SKIP_FORWARD, "Play next video automatically", "").on(self.autoplay_next()),
             Action::ToggleFullscreen if self.fullscreen => item(icons::CORNERS_IN, "Exit fullscreen", "F"),
             Action::ToggleFullscreen => item(icons::CORNERS_OUT, "Fullscreen", "F"),
+            Action::ToggleOnTop => item(icons::STACK, "Keep on top", "T").on(self.store.on_top),
             Action::Skip => {
                 let label = match self.skip_now() {
                     Some((progress::Skip::Ending, ..)) => "Skip ending",

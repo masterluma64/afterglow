@@ -98,6 +98,9 @@ fn main() -> eframe::Result {
         .with_min_inner_size(MIN_WINDOW_SIZE)
         .with_drag_and_drop(true)
         .with_icon(std::sync::Arc::new(window_icon()));
+    if store.on_top {
+        viewport = viewport.with_always_on_top();
+    }
     // Open the window where it was, unless that is no longer on screen.
     if let Some(window) = store.window {
         viewport = viewport
@@ -759,6 +762,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ]),
     ("Window", &[
         ("F", "Fullscreen"),
+        ("T", "Keep on top of other windows"),
         ("C / F12", "Take screenshot"),
         ("Esc", "Clear selection, leave fullscreen"),
         ("E", "Settings"),
@@ -826,7 +830,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];
