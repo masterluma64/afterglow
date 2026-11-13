@@ -298,9 +298,9 @@ struct App {
     mini: Option<ui::mini::Restore>,
     /// The window's handle, once it exists.
     hwnd: Option<isize>,
-    /// The playing video's progress on the taskbar button, set up once the
-    /// window exists.
-    taskbar: Option<Result<taskbar::TaskbarProgress, String>>,
+    /// The playing video's progress on the taskbar button and the buttons in
+    /// its preview, set up once the window exists.
+    taskbar: Option<Result<taskbar::Taskbar, String>>,
     /// Files from later starts of Afterglow (see `instance`): one pipe per
     /// data folder it used since starting.
     other_starts: Vec<Receiver<Vec<PathBuf>>>,
@@ -499,11 +499,12 @@ impl App {
         }
     }
 
-    /// Shows how far the playing video is on the taskbar button.
-    fn taskbar_progress(&mut self) {
+    /// Shows how far the playing video is on the taskbar button, and takes
+    /// clicks on the buttons in its preview.
+    fn taskbar_progress(&mut self, ctx: &egui::Context) {
         if self.taskbar.is_none() {
             let Some(hwnd) = self.hwnd else { return };
-            let taskbar = taskbar::TaskbarProgress::new(hwnd);
+            let taskbar = taskbar::Taskbar::new(hwnd, ctx.clone());
             if let Err(e) = &taskbar {
                 eprintln!("taskbar progress unavailable: {e}");
             }
@@ -511,8 +512,20 @@ impl App {
         }
         let Playback { position, duration, paused, .. } = self.playback;
         let progress = (self.loaded && duration > 0.0).then(|| position / duration);
-        if let Some(Ok(taskbar)) = &mut self.taskbar {
-            taskbar.show(progress, paused);
+        let buttons = taskbar::Buttons {
+            playing: self.loaded && !paused,
+            has_previous: self.current.is_some_and(|i| i > 0),
+            has_next: self.current.is_some_and(|i| i + 1 < self.playlist.len()),
+        };
+        let Some(Ok(taskbar)) = &mut self.taskbar else { return };
+        taskbar.show(progress, paused);
+        taskbar.set_buttons(buttons);
+        for button in taskbar.clicks() {
+            self.actions.push(match button {
+                taskbar::Button::Previous => Action::Prev,
+                taskbar::Button::PlayPause => Action::TogglePause,
+                taskbar::Button::Next => Action::Next,
+            });
         }
     }
 
@@ -578,7 +591,7 @@ impl eframe::App for App {
             }
         }
         self.media_controls(&ctx);
-        self.taskbar_progress();
+        self.taskbar_progress(&ctx);
         self.receive_other_starts(&ctx);
         self.remember_window(&ctx);
         self.update_window_title(&ctx);
