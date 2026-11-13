@@ -233,6 +233,23 @@ impl App {
                         }
                     });
                 });
+                ui.add_space(8.0);
+                card(ui, "About", |ui| {
+                    ui.label("Afterglow is free software under the GNU General Public License, version 3 or later. It plays videos with libmpv and FFmpeg.");
+                    ui.horizontal(|ui| {
+                        ui.hyperlink_to("Source code", env!("CARGO_PKG_REPOSITORY"));
+                        // Shipped next to the exe; otherwise the copy in the repository.
+                        let notices = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("THIRD-PARTY-NOTICES.txt"))).filter(|p| p.is_file());
+                        if ui.link("Third-party licenses").clicked() {
+                            match notices {
+                                Some(file) => {
+                                    let _ = std::process::Command::new("notepad").arg(file).spawn();
+                                }
+                                None => ui.ctx().open_url(egui::OpenUrl::new_tab(concat!(env!("CARGO_PKG_REPOSITORY"), "/blob/main/THIRD-PARTY-NOTICES.txt"))),
+                            }
+                        }
+                    });
+                });
             });
             ui.add_space(12.0);
             ui.horizontal(|ui| {
