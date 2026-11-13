@@ -1,6 +1,6 @@
 # Releasing
 
-Releases are tagged `vX.Y.Z` and published as GitHub releases on the private repo, with the
+Releases are tagged `vX.Y.Z` and published as GitHub releases, with the
 exe packed in a 7z archive.
 
 Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and

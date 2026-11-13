@@ -21,17 +21,16 @@ How this repo is worked on. See `README.md` for what the app does and how to bui
 
 ## Licensing and distribution
 
-afterglow is closed source and only for the owner's own use: no testers, no public release.
-So the GPL libmpv build from shinchiro stays, since the GPL only applies when copies go to
-others. The GitHub repo is private, which is why release builds with libmpv packed in may be
-attached to its releases.
+afterglow is free software under GPL-3.0-or-later (`LICENSE`), chosen in November 2026 to
+prepare for a public release. That is what lets release builds include shinchiro's GPL
+libmpv. Code and assets added to the repo must be compatible with GPL-3.0-or-later.
 
-Don't suggest an LGPL libmpv, a licence change or publishing unless the owner brings up
-sharing again. If they do, these were weighed in October 2026:
+Options weighed before, and set aside: an LGPL libmpv build to stay closed source (needs a
+portable MSYS2 to build), and downloading libmpv on first start (a licensing grey area, with
+no reliable host).
 
-- An LGPL libmpv build. Building it needs a portable MSYS2; MSVC alone isn't enough.
-- GPL-3.0-or-later in public. The history was checked and is clean.
-- Downloading libmpv on first start. Rejected: a licensing grey area, with no reliable host.
+Self-updating is wanted later, straight from GitHub releases (no server in between). Release
+archives are already signed for it (see `docs/releasing.md`).
 
 ## Ideas
 

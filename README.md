@@ -60,9 +60,16 @@ cargo run --release -- "D:\Shows\Foo"    # play a folder
 The release exe (about 43 MB) has libmpv packed in and unpacks it into its `data` folder on
 the first start, so it needs a folder it can write to.
 
-**Licensing**: Afterglow is closed source and for private use. Its libmpv build is GPL, so
-builds must not be shared publicly. Icons are [Phosphor](https://phosphoricons.com) (MIT);
-bold text is Ubuntu Medium (`assets/fonts/UFL.txt`).
+## License
+
+Afterglow is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. See [`LICENSE`](LICENSE).
+
+Release builds include [libmpv](https://mpv.io) (GPL) and FFmpeg from shinchiro's
+[mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake). Icons are
+[Phosphor](https://phosphoricons.com) (MIT); bold text is Ubuntu Medium
+(`assets/fonts/UFL.txt`).
 
 ## Keyboard shortcuts
 

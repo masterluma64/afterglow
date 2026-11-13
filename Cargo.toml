@@ -2,6 +2,8 @@
 name = "afterglow"
 version = "0.5.2"
 edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/masterluma64/afterglow"
 
 [dependencies]
 # Without wgpu, Linux and web support: the UI is drawn with OpenGL only.
