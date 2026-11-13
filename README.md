@@ -36,6 +36,8 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
   and saved as a PNG in `Pictures\Afterglow`.
 - **Mini player** (Shift+T): a small borderless window kept on top in a corner of the screen,
   to watch while doing something else. T keeps the normal window on top instead.
+- **Updates**: a new release downloads in the background and installs with **Restart to
+  update**, then shows what is new (see `docs/updates.md`).
 - **Everything at hand**: a command palette (Ctrl+K), single-key shortcuts, a right-click menu
   on the video, seek bar previews, media keys, progress on the taskbar button and an option to
   even out the volume.

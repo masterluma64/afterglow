@@ -208,6 +208,46 @@ impl App {
                     });
                 });
                 ui.add_space(8.0);
+                card(ui, "Updates", |ui| {
+                    grid("settings-updates").show(ui, |ui| {
+                        ui.label("Update server").on_hover_text("The Worker that hands out releases (see docs/updates.md)");
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut settings.update_server).hint_text("https://….workers.dev").desired_width(240.0), egui::Id::unique("update-server"), TEXT_MARGIN);
+                        ui.end_row();
+                        ui.label("Key");
+                        ui::text_field(ui, egui::TextEdit::singleline(&mut settings.update_key).password(true).desired_width(240.0), egui::Id::unique("update-key"), TEXT_MARGIN);
+                        ui.end_row();
+                        ui.label("Automatically");
+                        ui.checkbox(&mut settings.check_for_updates, "Check when Afterglow starts")
+                            .on_hover_text("A newer version downloads in the background; it is installed when you restart to update");
+                        ui.end_row();
+                        ui.label("");
+                        ui.horizontal(|ui| {
+                            let state = self.updater.state.clone();
+                            let busy = matches!(state, update::State::Checking | update::State::Downloading { .. });
+                            let can_check = !settings.update_server.trim().is_empty() && !busy;
+                            if let update::State::Ready { .. } = state {
+                                if gradient::button(ui, format!("{}  Restart to update", icons::DOWNLOAD)).clicked() {
+                                    self.actions.push(Action::InstallUpdate);
+                                }
+                            } else if ui.add_enabled(can_check, egui::Button::new("Check now")).clicked() {
+                                self.actions.push(Action::CheckForUpdates);
+                            }
+                            let status = match state {
+                                update::State::Idle => String::new(),
+                                update::State::Checking => "Checking…".into(),
+                                update::State::UpToDate => format!("{} is the newest version", update::VERSION),
+                                update::State::Downloading { release, done } => format!("Downloading {} · {:.0}%", release.version, done * 100.0),
+                                update::State::Ready { release, .. } => format!("{} is ready", release.version),
+                                update::State::Failed(e) => e,
+                            };
+                            let failed = matches!(self.updater.state, update::State::Failed(_));
+                            let status = if failed { RichText::new(status).color(ui.visuals().error_fg_color) } else { RichText::new(status).weak() };
+                            ui.add(egui::Label::new(status).wrap());
+                        });
+                        ui.end_row();
+                    });
+                });
+                ui.add_space(8.0);
                 // Changes Windows rather than the settings, so it takes effect right away.
                 card(ui, "Windows", |ui| {
                     grid("settings-windows").show(ui, |ui| {
@@ -291,6 +331,28 @@ impl App {
         // Esc or a click outside cancels the drop without remembering anything.
         if modal.should_close() {
             self.pending_drop = None;
+        }
+    }
+
+    /// After an update: the version it went to and its release notes.
+    pub(crate) fn whats_new_dialog(&mut self, ctx: &egui::Context) {
+        let Some(notes) = self.whats_new.clone() else { return };
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::unique("whats-new")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.label(RichText::new(format!("{}  Updated to Afterglow {}", icons::SPARKLE, notes.version)).bold());
+            ui.add_space(4.0);
+            ui.weak("What's new in this version:");
+            ui.add_space(8.0);
+            let max_height = (ui.ctx().content_rect().height() - 200.0).max(160.0);
+            egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
+                card(ui, &format!("Afterglow {}", notes.version), |ui| release_notes(ui, &notes.notes));
+            });
+            ui.add_space(12.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = gradient::button(ui, "Done").clicked());
+        });
+        if close || modal.should_close() {
+            self.whats_new = None;
         }
     }
 
@@ -484,6 +546,33 @@ impl App {
         // Esc or a click outside cancels.
         if modal.should_close() {
             self.confirm_clear_stats = false;
+        }
+    }
+}
+
+/// Release notes as written on GitHub (Markdown), shown simply: list items
+/// get a bullet, headings are bold, and the rest is text.
+fn release_notes(ui: &mut egui::Ui, notes: &str) {
+    if notes.trim().is_empty() {
+        ui.weak("This release has no notes.");
+        return;
+    }
+    for line in notes.lines().map(str::trim_end) {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            ui.add_space(4.0);
+        } else if let Some(heading) = trimmed.strip_prefix('#') {
+            ui.label(RichText::new(heading.trim_start_matches('#').trim()).bold());
+        } else if let Some(item) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+            // Nested items keep their indent.
+            let indent = (line.len() - trimmed.len()) as f32 * 4.0;
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(indent);
+                ui.label("•");
+                ui.add(egui::Label::new(item.replace("**", "").replace('`', "")).wrap());
+            });
+        } else {
+            ui.add(egui::Label::new(trimmed.replace("**", "").replace('`', "")).wrap());
         }
     }
 }
