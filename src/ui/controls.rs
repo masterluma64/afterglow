@@ -195,7 +195,8 @@ impl App {
         if active {
             let frac = (position / duration).clamp(0.0, 1.0) as f32;
             let filled = egui::Rect::from_min_max(track.min, egui::pos2(track.left() + track.width() * frac, track.bottom()));
-            ui.painter().rect_filled(filled, 2.0, visuals.selection.bg_fill);
+            let colors = gradient::accent(visuals);
+            gradient::fill(ui.painter(), filled, 2.0, track, colors, gradient::Direction::Across);
             // Chapter starts show as small gaps in the track.
             for chapter in self.chapters.iter().filter(|c| c.time > 0.5 && c.time < duration) {
                 let x = track.left() + track.width() * (chapter.time / duration) as f32;
@@ -203,7 +204,7 @@ impl App {
                 ui.painter().rect_filled(gap, 0.0, visuals.panel_fill);
             }
             if resp.hovered() || resp.dragged() {
-                ui.painter().circle_filled(egui::pos2(filled.right(), track.center().y), 6.0, visuals.selection.bg_fill);
+                ui.painter().circle_filled(egui::pos2(filled.right(), track.center().y), 6.0, gradient::at(colors, frac));
             }
         }
     }

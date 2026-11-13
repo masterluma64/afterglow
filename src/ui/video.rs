@@ -29,6 +29,7 @@ impl App {
             // The home screen over the paused video, which shows dimly through.
             self.paint_frame(ui, rect);
             ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(225));
+            gradient::horizon(ui.painter(), rect, ui.visuals().selection.bg_fill);
             self.home_screen(ui, rect);
         } else if self.loaded {
             self.paint_frame(ui, rect);
@@ -178,6 +179,7 @@ impl App {
         if self.current.is_some() {
             return;
         }
+        gradient::horizon(ui.painter(), rect, child.visuals().selection.bg_fill);
         if let Some(up_next) = &self.up_next {
             let (index, left) = (up_next.index, up_next.at.saturating_duration_since(Instant::now()));
             child.label(RichText::new("Up next").weak());

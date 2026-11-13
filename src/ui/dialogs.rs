@@ -239,7 +239,7 @@ impl App {
                     autoplay = true;
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(primary_button(ui, "Done")).clicked() {
+                    if gradient::button(ui, "Done").clicked() {
                         close = true;
                     }
                     ui.add_space(8.0);
@@ -515,7 +515,7 @@ pub(crate) fn meter(ui: &mut egui::Ui, share: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
     ui.painter().rect_filled(rect, 2.0, tile_fill(ui));
     let filled = egui::Rect::from_min_size(rect.min, vec2(rect.width() * share.clamp(0.0, 1.0), rect.height()));
-    ui.painter().rect_filled(filled, 2.0, ui.visuals().selection.bg_fill);
+    gradient::fill(ui.painter(), filled, 2.0, rect, gradient::accent(ui.visuals()), gradient::Direction::Across);
 }
 
 /// Bars for the time watched on each day, oldest first, in a tile with the
@@ -547,8 +547,11 @@ fn daily_chart(ui: &mut egui::Ui, daily: &[(stats::Day, f64)]) {
             }
             let height = ((*seconds / most.max(1.0)) as f32 * rect.height()).max(4.0);
             let bar = egui::Rect::from_min_max(egui::pos2(x + 1.5, rect.bottom() - height), egui::pos2(x + slot - 1.5, rect.bottom()));
-            let color = if hovered == Some(i) { visuals.selection.bg_fill.gamma_multiply(1.3) } else { visuals.selection.bg_fill };
-            ui.painter().rect_filled(bar, 2.0, color);
+            // Each bar runs up the gradient as far as it reaches, so the
+            // busiest days glow the most.
+            let colors = gradient::accent(visuals);
+            let colors = if hovered == Some(i) { colors.map(|c| c.gamma_multiply(1.3)) } else { colors };
+            gradient::fill(ui.painter(), bar, 2.0, rect, colors, gradient::Direction::Up);
         }
         if let Some((day, seconds)) = hovered.and_then(|i| daily.get(i)) {
             resp.on_hover_text_at_pointer(format!("{}: {}", stats::format_date(*day), format_total(*seconds)));
@@ -577,12 +580,6 @@ pub(crate) fn card(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mu
 /// What the language fields expect, under them.
 pub(crate) const LANGUAGES_HINT: &str =
     "Language codes in order of preference, separated by commas, like en,eng for English or ja,jpn for Japanese. Left empty, the file's default is used.";
-
-/// The main button of a dialog or screen, in the accent color.
-pub(crate) fn primary_button(ui: &egui::Ui, text: impl Into<RichText>) -> egui::Button<'static> {
-    let selection = ui.visuals().selection;
-    egui::Button::new(text.into().color(selection.stroke.color)).fill(selection.bg_fill)
-}
 
 /// A key as a keycap; keys given as "A / B" are drawn as two.
 fn keycaps(ui: &mut egui::Ui, keys: &str) {

@@ -232,7 +232,8 @@ fn card_ui(ui: &mut egui::Ui, card: &Card, still: Option<egui::TextureId>) -> eg
         let round = egui::CornerRadius { sw: 8, se: 8, ..Default::default() };
         painter.rect_filled(bar, round, Color32::from_black_alpha(170));
         let filled = egui::Rect::from_min_size(bar.min, vec2(bar.width() * card.fraction, bar.height()));
-        painter.rect_filled(filled, egui::CornerRadius { sw: 8, ..Default::default() }, accent);
+        let round = egui::CornerRadius { sw: 8, ..Default::default() };
+        gradient::fill(painter, filled, round, bar, gradient::accent(visuals), gradient::Direction::Across);
     }
     if resp.hovered() {
         painter.rect_stroke(frame, 8.0, (2.0, accent), egui::StrokeKind::Outside);

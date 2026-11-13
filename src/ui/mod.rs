@@ -5,6 +5,7 @@ pub(crate) mod commands;
 pub(crate) mod controls;
 pub(crate) mod dialogs;
 pub(crate) mod folder;
+pub(crate) mod gradient;
 pub(crate) mod home;
 pub(crate) mod icons;
 pub(crate) mod items;

@@ -127,7 +127,7 @@ impl App {
                     folder = FolderSettings::default();
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui.add(primary_button(ui, "Done")).clicked() {
+                    if gradient::button(ui, "Done").clicked() {
                         close = true;
                     }
                 });

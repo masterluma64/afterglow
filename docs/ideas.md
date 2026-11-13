@@ -2,5 +2,4 @@
 
 Parked ideas, kept until the owner decides to pick them up.
 
-- **Gradients** (October 2026): use gradients instead of flat colors in the UI. The app icon
-  already uses a violet-to-orange sunset gradient.
+None right now. Gradients (parked October 2026) were built in November 2026.

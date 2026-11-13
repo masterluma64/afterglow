@@ -9,7 +9,7 @@ mod ui;
 use library::{disk, playlist, progress, stats, watch};
 use platform::{clock, instance, media_keys, power, screen, shortcut, taskbar};
 use player::{dll_search, mpv, playback, thumbnails};
-use ui::{app_icon, commands, controls, dialogs, icons, items, video};
+use ui::{app_icon, commands, controls, dialogs, gradient, icons, items, video};
 use ui::icons::Bold;
 
 use std::collections::HashSet;

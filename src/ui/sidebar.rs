@@ -35,11 +35,21 @@ pub(crate) fn playlist_row(
                 // One line per entry (cut off with …), so rows have a fixed height.
                 .truncate()
                 .sense(Sense::click_and_drag());
-            let resp = ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button);
+            // The playing row's fill is a gradient, painted under the button.
+            let resp = ui
+                .scope(|ui| {
+                    ui.visuals_mut().selection.bg_fill = Color32::TRANSPARENT;
+                    ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button)
+                })
+                .inner;
+            if playing {
+                gradient::fill_slot(ui.painter(), background, resp.rect, 4.0, gradient::accent(ui.visuals()));
+            }
             if in_progress {
                 let r = resp.rect.shrink2(vec2(4.0, 1.0));
-                let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
-                ui.painter().line_segment([r.left_bottom(), end], (2.0, ui.visuals().selection.bg_fill));
+                let bar = egui::Rect::from_min_max(egui::pos2(r.left(), r.bottom() - 2.0), egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom()));
+                let colors = if playing { [ui.visuals().selection.stroke.color; 2] } else { gradient::accent(ui.visuals()) };
+                gradient::fill(ui.painter(), bar, 1.0, r, colors, gradient::Direction::Across);
             }
             resp
         }
@@ -80,7 +90,7 @@ fn still_row(ui: &mut egui::Ui, entry: &progress::Entry, name: &str, playing: bo
     let visuals = ui.visuals();
     let painter = ui.painter();
     if playing {
-        painter.rect_filled(rect, 4.0, visuals.selection.bg_fill);
+        gradient::fill(painter, rect, 4.0, rect, gradient::accent(visuals), gradient::Direction::Across);
     } else if resp.hovered() || resp.dragged() {
         painter.rect_filled(rect, 4.0, visuals.widgets.hovered.weak_bg_fill);
     }
@@ -101,8 +111,8 @@ fn still_row(ui: &mut egui::Ui, entry: &progress::Entry, name: &str, playing: bo
         let bar = egui::Rect::from_min_max(egui::pos2(frame.left(), frame.bottom() - 3.0), frame.max);
         painter.rect_filled(bar, egui::CornerRadius { sw: 3, se: 3, ..Default::default() }, Color32::from_black_alpha(160));
         let filled = egui::Rect::from_min_size(bar.min, vec2(bar.width() * entry.fraction(), bar.height()));
-        let accent = if playing { visuals.selection.stroke.color } else { visuals.selection.bg_fill };
-        painter.rect_filled(filled, egui::CornerRadius { sw: 3, ..Default::default() }, accent);
+        let colors = if playing { [visuals.selection.stroke.color; 2] } else { gradient::accent(visuals) };
+        gradient::fill(painter, filled, egui::CornerRadius { sw: 3, ..Default::default() }, bar, colors, gradient::Direction::Across);
     }
 
     let (strong, weak) = if playing {
@@ -550,7 +560,7 @@ impl App {
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 4.0), Sense::hover());
         ui.painter().rect_filled(rect, 2.0, ui.visuals().widgets.inactive.bg_fill);
         let filled = egui::Rect::from_min_size(rect.min, vec2(rect.width() * fraction, rect.height()));
-        ui.painter().rect_filled(filled, 2.0, ui.visuals().selection.bg_fill);
+        gradient::fill(ui.painter(), filled, 2.0, rect, gradient::accent(ui.visuals()), gradient::Direction::Across);
         ui.add_space(2.0);
     }
 }
