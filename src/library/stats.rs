@@ -44,8 +44,11 @@ pub struct Stats {
     pub before: Tally,
     /// Per day, keyed "2026-10-22" so the file reads well and sorts by date.
     pub days: BTreeMap<String, Tally>,
-    /// Per series: the name of the folder the videos were in.
+    /// Per series: the full path of the folder the videos were in. Stats
+    /// kept before November 2026 have only the folder's name.
     pub series: HashMap<String, Tally>,
+    /// Names given to series in the stats, by the same key as `series`.
+    pub names: HashMap<String, String>,
     /// Per movie (a video opened by itself): its title, or else its file name.
     pub movies: HashMap<String, Movie>,
     /// Whether `before` was estimated (it is, once).
@@ -99,6 +102,20 @@ impl Stats {
         self.total.finished += self.before.finished;
     }
 
+    /// Names a series in the stats; an empty name goes back to the folder's.
+    pub fn set_name(&mut self, series: &str, name: &str) {
+        match name.trim() {
+            "" => self.names.remove(series),
+            name => self.names.insert(series.to_string(), name.to_string()),
+        };
+    }
+
+    /// The name a series is shown by: the one it was given, or else its
+    /// folder's (the last part of its path).
+    pub fn series_name(&self, series: &str) -> String {
+        self.names.get(series).cloned().unwrap_or_else(|| folder_name(series).to_string())
+    }
+
     fn day(&self, day: Day) -> Tally {
         self.days.get(&date_key(day)).copied().unwrap_or_default()
     }
@@ -126,9 +143,24 @@ impl Stats {
             .filter_map(|(k, t)| Some((day_from_key(k)?, t.seconds)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .filter(|(_, s)| *s >= 1.0);
-        let mut top_series: Vec<(String, Tally)> = self.series.iter().filter(|(_, t)| t.active()).map(|(k, t)| (k.clone(), *t)).collect();
-        top_series.sort_by(|a, b| b.1.seconds.total_cmp(&a.1.seconds));
-        top_series.truncate(5);
+        let mut top: Vec<(&String, Tally)> = self.series.iter().filter(|(_, t)| t.active()).map(|(k, t)| (k, *t)).collect();
+        top.sort_by(|a, b| b.1.seconds.total_cmp(&a.1.seconds).then_with(|| a.0.cmp(b.0)));
+        top.truncate(5);
+        // Folders of the same name ("Season 1" of two shows) show the folder
+        // above too, unless they were given names.
+        let folders: Vec<&str> = top.iter().map(|(k, _)| folder_name(k)).collect();
+        let top_series = top
+            .iter()
+            .zip(&folders)
+            .map(|((key, tally), folder)| {
+                let shared = folders.iter().filter(|f| *f == folder).count() > 1;
+                let name = match parent_name(key) {
+                    Some(parent) if shared && !self.names.contains_key(*key) => format!("{parent} / {folder}"),
+                    _ => self.series_name(key),
+                };
+                TopSeries { key: (*key).clone(), name, tally: *tally }
+            })
+            .collect();
         let movie_finishes: u32 = self.movies.values().map(|m| m.finished).sum();
         let mut recent_movies: Vec<(String, Movie)> =
             self.movies.iter().filter(|(_, m)| m.seconds >= 60.0 || m.finished > 0).map(|(k, m)| (k.clone(), *m)).collect();
@@ -162,7 +194,7 @@ pub struct Summary {
     pub longest_streak: u32,
     pub best_day: Option<(Day, f64)>,
     /// The most watched series, most first.
-    pub top_series: Vec<(String, Tally)>,
+    pub top_series: Vec<TopSeries>,
     /// Videos finished that weren't movies.
     pub videos_finished: u32,
     /// Movies finished at least once.
@@ -172,6 +204,29 @@ pub struct Summary {
     pub recent_movies: Vec<(String, Movie)>,
     /// The last 30 days, oldest first, with the seconds watched on each.
     pub daily: Vec<(Day, f64)>,
+}
+
+/// One of the most watched series.
+pub struct TopSeries {
+    /// Its key in `Stats::series`, to name it by.
+    pub key: String,
+    /// What it is shown as.
+    pub name: String,
+    pub tally: Tally,
+}
+
+/// The last part of a series' path ("Season 1"); a key from before full
+/// paths were kept is a name already.
+fn folder_name(series: &str) -> &str {
+    series.trim_end_matches(['\\', '/']).rsplit(['\\', '/']).next().filter(|n| !n.is_empty()).unwrap_or(series)
+}
+
+/// The folder above a series' folder ("Kirby" for "D:\\Shows\\Kirby\\Season 1").
+fn parent_name(series: &str) -> Option<&str> {
+    let trimmed = series.trim_end_matches(['\\', '/']);
+    let (parent, _) = trimmed.rsplit_once(['\\', '/'])?;
+    let name = folder_name(parent);
+    (!name.is_empty() && !name.ends_with(':')).then_some(name)
 }
 
 /// Days since 1970-01-01 for a date (Howard Hinnant's `days_from_civil`).
@@ -254,7 +309,7 @@ mod tests {
         assert_eq!(s.current_streak, 3, "today has nothing yet, so the streak runs to yesterday");
         assert_eq!(s.longest_streak, 3);
         assert_eq!(s.best_day, Some((today - 10, 7200.0)));
-        assert_eq!(s.top_series[0].0, "Kirby");
+        assert_eq!(s.top_series[0].name, "Kirby");
         assert_eq!(s.top_series.len(), 2);
         assert_eq!(s.daily.len(), 30);
         assert_eq!(s.daily[29], (today, 0.0));
@@ -262,5 +317,22 @@ mod tests {
         stats.add_time("Kirby", 5.0, today);
         assert_eq!(stats.summary(today).current_streak, 4);
         assert_eq!(stats.summary(today + 2).current_streak, 0, "a missed day ends it");
+    }
+
+    #[test]
+    fn names_series_apart() {
+        let today = day_from_date(2026, 11, 13);
+        let mut stats = Stats::default();
+        stats.add_time(r"D:\Shows\Kirby\Season 1", 300.0, today);
+        stats.add_time(r"D:\Shows\Frieren\Season 1", 200.0, today);
+        stats.add_time(r"E:\Movies\Docs", 100.0, today);
+        let names = |stats: &Stats| stats.summary(today).top_series.into_iter().map(|s| s.name).collect::<Vec<_>>();
+        assert_eq!(names(&stats), ["Kirby / Season 1", "Frieren / Season 1", "Docs"], "the same folder name tells its show");
+        stats.set_name(r"D:\Shows\Kirby\Season 1", " Kirby: Right Back at Ya! ");
+        assert_eq!(names(&stats), ["Kirby: Right Back at Ya!", "Frieren / Season 1", "Docs"]);
+        stats.set_name(r"D:\Shows\Kirby\Season 1", "");
+        assert_eq!(stats.series_name(r"D:\Shows\Kirby\Season 1"), "Season 1", "an empty name goes back to the folder's");
+        assert_eq!(stats.series_name("Kirby"), "Kirby", "kept before full paths: a name already");
+        assert_eq!(parent_name(r"D:\Season 1"), None, "not the drive");
     }
 }

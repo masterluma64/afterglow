@@ -671,10 +671,17 @@ impl Store {
     }
 
     /// The series a video counts towards in the stats: the opened folder it
-    /// is in (so seasons in subfolders count as one), or else its own folder.
+    /// is in (so seasons in subfolders count as one), or else its own folder,
+    /// by its full path, so folders of the same name stay apart.
     fn series_of(&self, path: &Path) -> String {
         let folder = self.folder.as_deref().filter(|f| path.starts_with(f)).or_else(|| path.parent());
-        folder.and_then(Path::file_name).map_or_else(|| "Other".into(), |name| name.to_string_lossy().into_owned())
+        folder.filter(|f| f.file_name().is_some()).map_or_else(|| "Other".into(), key)
+    }
+
+    /// Names a series in the stats (see `Stats::set_name`).
+    pub fn name_series(&mut self, series: &str, name: &str) {
+        self.stats.set_name(series, name);
+        self.dirty = true;
     }
 
     /// The first time stats are kept, estimates what was watched before from
@@ -1106,7 +1113,7 @@ mod tests {
 
         store.forget(&[key(a), key(b)]);
         assert_eq!(store.stats.total, Tally { seconds: 1150.0, finished: 1 }, "forgetting deleted videos keeps their stats");
-        assert_eq!(store.stats.series["Kirby"].seconds, 1150.0);
+        assert_eq!(store.stats.series[r"D:\Shows\Kirby"].seconds, 1150.0, "by the folder's full path");
 
         store.update_position(a, 600.0, 1200.0);
         store.clear_stats();
@@ -1159,7 +1166,7 @@ mod tests {
         let s = store.stats.summary(crate::clock::today());
         assert_eq!(s.total, Tally { seconds: 6200.0, finished: 2 }, "the totals count both");
         assert_eq!((s.videos_finished, s.movies_watched, s.movie_seconds), (1, 1, 5000.0));
-        assert_eq!(s.top_series.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["Kirby"], "movies aren't a series");
+        assert_eq!(s.top_series.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Kirby"], "movies aren't a series");
         assert_eq!(s.recent_movies[0].0, "Up (2009)", "by its title");
     }
 

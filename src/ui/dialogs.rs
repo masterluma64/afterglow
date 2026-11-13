@@ -404,18 +404,16 @@ impl App {
             ui.add_space(12.0);
             daily_chart(ui, &s.daily);
 
-            if let Some((_, top)) = s.top_series.first() {
+            if let Some(top) = s.top_series.first().map(|t| t.tally) {
                 ui.add_space(14.0);
                 ui.label(RichText::new("Most watched").bold());
                 ui.add_space(2.0);
-                for (name, tally) in &s.top_series {
+                for series in &s.top_series {
+                    let tally = series.tally;
                     ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
                         ui.label(RichText::new(videos(tally.finished)).weak());
                         ui.label(RichText::new(format_total(tally.seconds)).bold());
-                        // The name takes the room left, cut off with … when long.
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            ui.add(egui::Label::new(name.as_str()).truncate()).on_hover_text(name.as_str());
-                        });
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| self.series_name_field(ui, series));
                     });
                     let share = (tally.seconds / top.seconds.max(1.0)) as f32;
                     meter(ui, share);
@@ -457,9 +455,45 @@ impl App {
             });
         });
         // While the confirmation to clear them is open on top, clicks and Esc
-        // are meant for that.
-        if close || (modal.should_close() && !self.confirm_clear_stats) {
+        // are meant for that; while a series is being named, Esc stops that.
+        if modal.should_close() && self.naming_series.is_some() && !close {
+            self.naming_series = None;
+        } else if close || (modal.should_close() && !self.confirm_clear_stats) {
             self.stats_open = false;
+            self.naming_series = None;
+        }
+    }
+
+    /// A series' name in the stats, with a button to give it another: then a
+    /// field, where Enter keeps the name (an empty one goes back to the
+    /// folder's) and Esc cancels.
+    fn series_name_field(&mut self, ui: &mut egui::Ui, series: &stats::TopSeries) {
+        match &mut self.naming_series {
+            Some((key, text)) if *key == series.key => {
+                let id = egui::Id::unique("series-name");
+                let edit = egui::TextEdit::singleline(text).hint_text("the folder's name").desired_width(ui.available_width() - 8.0);
+                let resp = ui::text_field(ui, edit, id, egui::Margin::symmetric(6, 2));
+                if !resp.has_focus() && !resp.lost_focus() {
+                    resp.request_focus();
+                }
+                if resp.lost_focus() {
+                    if ui.input(|i| i.key_pressed(Key::Enter)) {
+                        let (key, name) = (key.clone(), text.clone());
+                        self.store.name_series(&key, &name);
+                        self.store.save();
+                    }
+                    self.naming_series = None;
+                }
+            }
+            _ => {
+                let tip = format!("Rename in the stats, so it is clear which one it is\n{}", series.key);
+                if ui.add(egui::Button::new(RichText::new(icons::PENCIL).weak()).frame_when_inactive(false).small()).on_hover_text(tip).clicked() {
+                    let name = self.store.stats.names.get(&series.key).cloned().unwrap_or_default();
+                    self.naming_series = Some((series.key.clone(), name));
+                }
+                // The name takes the room left, cut off with … when long.
+                ui.add(egui::Label::new(series.name.as_str()).truncate()).on_hover_text(&series.key);
+            }
         }
     }
 
