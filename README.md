@@ -33,7 +33,8 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
 - **Mini player** (Shift+T): a small borderless window kept on top in a corner of the screen,
   to watch while doing something else. T keeps the normal window on top instead.
 - **Everything at hand**: a command palette (Ctrl+K), single-key shortcuts, a right-click menu
-  on the video, seek bar previews, media keys and an option to even out the volume.
+  on the video, seek bar previews, media keys, progress on the taskbar button and an option to
+  even out the volume.
 
 Progress and settings are saved in `data\progress.json` next to `afterglow.exe`, so the folder
 is portable; Settings can move it to `%LOCALAPPDATA%\afterglow` instead. `AFTERGLOW_DATA_DIR`

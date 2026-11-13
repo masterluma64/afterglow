@@ -1,5 +1,6 @@
 //! Windows integration: one instance at a time, media keys, staying awake,
-//! monitors, the date, the desktop shortcut and the Pictures folder.
+//! monitors, the date, the desktop shortcut, the taskbar button and the
+//! Pictures folder.
 
 pub(crate) mod clock;
 pub(crate) mod instance;
@@ -7,6 +8,7 @@ pub(crate) mod media_keys;
 pub(crate) mod power;
 pub(crate) mod screen;
 pub(crate) mod shortcut;
+pub(crate) mod taskbar;
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;

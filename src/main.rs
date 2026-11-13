@@ -7,7 +7,7 @@ mod player;
 mod ui;
 
 use library::{disk, playlist, progress, stats, watch};
-use platform::{clock, instance, media_keys, power, screen, shortcut};
+use platform::{clock, instance, media_keys, power, screen, shortcut, taskbar};
 use player::{dll_search, mpv, playback, thumbnails};
 use ui::{app_icon, commands, controls, dialogs, icons, items, video};
 use ui::icons::Bold;
@@ -289,6 +289,9 @@ struct App {
     mini: Option<ui::mini::Restore>,
     /// The window's handle, once it exists.
     hwnd: Option<isize>,
+    /// The playing video's progress on the taskbar button, set up once the
+    /// window exists.
+    taskbar: Option<Result<taskbar::TaskbarProgress, String>>,
     /// Files from later starts of Afterglow (see `instance`): one pipe per
     /// data folder it used since starting.
     other_starts: Vec<Receiver<Vec<PathBuf>>>,
@@ -395,6 +398,7 @@ impl App {
             other_starts: other_starts.into_iter().collect(),
             mini: None,
             hwnd: None,
+            taskbar: None,
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
@@ -483,6 +487,23 @@ impl App {
         }
     }
 
+    /// Shows how far the playing video is on the taskbar button.
+    fn taskbar_progress(&mut self) {
+        if self.taskbar.is_none() {
+            let Some(hwnd) = self.hwnd else { return };
+            let taskbar = taskbar::TaskbarProgress::new(hwnd);
+            if let Err(e) = &taskbar {
+                eprintln!("taskbar progress unavailable: {e}");
+            }
+            self.taskbar = Some(taskbar);
+        }
+        let Playback { position, duration, paused, .. } = self.playback;
+        let progress = (self.loaded && duration > 0.0).then(|| position / duration);
+        if let Some(Ok(taskbar)) = &mut self.taskbar {
+            taskbar.show(progress, paused);
+        }
+    }
+
     /// Handles media keys and shows what's playing in Windows' media overlay.
     fn media_controls(&mut self, ctx: &egui::Context) {
         if self.media_keys.is_none() {
@@ -545,6 +566,7 @@ impl eframe::App for App {
             }
         }
         self.media_controls(&ctx);
+        self.taskbar_progress();
         self.receive_other_starts(&ctx);
         self.remember_window(&ctx);
         self.update_window_title(&ctx);
