@@ -3,7 +3,8 @@
 use crate::*;
 
 /// A playlist entry with its watch progress. `selection` is every selected
-/// video, in playlist order, when this one is among them.
+/// video, in playlist order, when this one is among them. `still` is its
+/// video's still, when stills are shown: `Some(None)` until it is taken.
 /// What is picked from its right-click menu is added to `picked`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn playlist_row(
@@ -15,21 +16,34 @@ pub(crate) fn playlist_row(
     name: &str,
     playing: bool,
     selection: Option<&[PathBuf]>,
+    still: Option<Option<egui::TextureId>>,
 ) -> egui::Response {
     let store = &app.store;
     let entry = store.get(path);
     // Painted under the row once its size is known.
     let background = ui.painter().add(egui::Shape::Noop);
-    let dim = |text: RichText| ui::secondary(ui, playing, text);
-    let text = if entry.watched { dim(RichText::new(format!("{}  {name}", icons::CHECK))) } else { RichText::new(name) };
-    let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
-    let button = egui::Button::selectable(playing, "")
-        .left_text(text)
-        .right_text(dim(RichText::new(length)))
-        // One line per entry (cut off with …), so rows have a fixed height.
-        .truncate()
-        .sense(Sense::click_and_drag());
-    let resp = ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button);
+    let in_progress = (!entry.watched && entry.fraction() > 0.0) || store.resume_position(path).is_some();
+    let resp = match still {
+        Some(still) => still_row(ui, &entry, name, playing, in_progress, still),
+        None => {
+            let dim = |text: RichText| ui::secondary(ui, playing, text);
+            let text = if entry.watched { dim(RichText::new(format!("{}  {name}", icons::CHECK))) } else { RichText::new(name) };
+            let length = if entry.duration > 0.0 { format_time(entry.duration) } else { String::new() };
+            let button = egui::Button::selectable(playing, "")
+                .left_text(text)
+                .right_text(dim(RichText::new(length)))
+                // One line per entry (cut off with …), so rows have a fixed height.
+                .truncate()
+                .sense(Sense::click_and_drag());
+            let resp = ui.add_sized([ui.available_width(), PLAYLIST_ROW_HEIGHT], button);
+            if in_progress {
+                let r = resp.rect.shrink2(vec2(4.0, 1.0));
+                let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
+                ui.painter().line_segment([r.left_bottom(), end], (2.0, ui.visuals().selection.bg_fill));
+            }
+            resp
+        }
+    };
     if selection.is_some() {
         if playing {
             // Already accent-colored: an outline shows it is selected too.
@@ -38,11 +52,6 @@ pub(crate) fn playlist_row(
             let fill = ui.visuals().selection.bg_fill.gamma_multiply(0.35);
             ui.painter().set(background, egui::Shape::rect_filled(resp.rect, 4.0, fill));
         }
-    }
-    if (!entry.watched && entry.fraction() > 0.0) || store.resume_position(path).is_some() {
-        let r = resp.rect.shrink2(vec2(4.0, 1.0));
-        let end = egui::pos2(r.left() + r.width() * entry.fraction(), r.bottom());
-        ui.painter().line_segment([r.left_bottom(), end], (2.0, ui.visuals().selection.bg_fill));
     }
     let resp = resp.on_hover_text(format!("{}\n{}", path.display(), hover_text(&entry)));
     ui::context_menu(&resp, |ui| {
@@ -60,6 +69,69 @@ pub(crate) fn playlist_row(
         ui.separator();
         subfolder_option(ui, app, picked);
     });
+    resp
+}
+
+/// A playlist entry with a still of its video (`None` until it is taken),
+/// its progress along the bottom of the still, and its name above how much
+/// of it is left.
+fn still_row(ui: &mut egui::Ui, entry: &progress::Entry, name: &str, playing: bool, in_progress: bool, still: Option<egui::TextureId>) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), STILL_ROW_HEIGHT), Sense::click_and_drag());
+    let visuals = ui.visuals();
+    let painter = ui.painter();
+    if playing {
+        painter.rect_filled(rect, 4.0, visuals.selection.bg_fill);
+    } else if resp.hovered() || resp.dragged() {
+        painter.rect_filled(rect, 4.0, visuals.widgets.hovered.weak_bg_fill);
+    }
+    // 16:9, as tall as the row leaves room for.
+    let height = rect.height() - 8.0;
+    let frame = egui::Rect::from_min_size(rect.min + vec2(4.0, 4.0), vec2(height * 16.0 / 9.0, height));
+    match still {
+        // A watched video's still is dimmed, like its name.
+        Some(id) => {
+            let tint = if entry.watched && !playing { Color32::from_gray(110) } else { Color32::WHITE };
+            egui::Image::new((id, frame.size())).corner_radius(3).tint(tint).paint_at(ui, frame);
+        }
+        None => {
+            painter.rect_filled(frame, 3.0, Color32::from_black_alpha(if visuals.dark_mode { 90 } else { 30 }));
+        }
+    }
+    if in_progress {
+        let bar = egui::Rect::from_min_max(egui::pos2(frame.left(), frame.bottom() - 3.0), frame.max);
+        painter.rect_filled(bar, egui::CornerRadius { sw: 3, se: 3, ..Default::default() }, Color32::from_black_alpha(160));
+        let filled = egui::Rect::from_min_size(bar.min, vec2(bar.width() * entry.fraction(), bar.height()));
+        let accent = if playing { visuals.selection.stroke.color } else { visuals.selection.bg_fill };
+        painter.rect_filled(filled, egui::CornerRadius { sw: 3, ..Default::default() }, accent);
+    }
+
+    let (strong, weak) = if playing {
+        (visuals.selection.stroke.color, visuals.selection.stroke.color.gamma_multiply(0.8))
+    } else {
+        (visuals.text_color(), visuals.weak_text_color())
+    };
+    let detail = match (entry.watched, entry.duration > 0.0) {
+        (true, true) => format!("{}  Watched · {}", icons::CHECK, format_time(entry.duration)),
+        (true, false) => format!("{}  Watched", icons::CHECK),
+        (false, true) if in_progress => format!("{} left", format_total(entry.duration - entry.position)),
+        (false, true) => format_time(entry.duration),
+        (false, false) => String::new(),
+    };
+    let left = frame.right() + 8.0;
+    let width = (rect.right() - 6.0 - left).max(10.0);
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let line = |text: String, color: Color32| {
+        let mut job = egui::text::LayoutJob::single_section(text, egui::TextFormat::simple(font.clone(), color));
+        job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+        ui.fonts_mut(|f| f.layout_job(job))
+    };
+    let title = line(name.to_string(), if entry.watched && !playing { weak } else { strong });
+    let detail = line(detail, weak);
+    let gap = 2.0;
+    let top = rect.center().y - (title.size().y + gap + detail.size().y) / 2.0;
+    let painter = ui.painter();
+    painter.galley(egui::pos2(left, top), title.clone(), strong);
+    painter.galley(egui::pos2(left, top + title.size().y + gap), detail, weak);
     resp
 }
 
@@ -91,6 +163,11 @@ pub(crate) fn format_total(seconds: f64) -> String {
 }
 
 impl App {
+    /// Height of a playlist entry, without the spacing between entries.
+    pub(crate) fn row_height(&self) -> f32 {
+        if self.store.settings.playlist_stills { STILL_ROW_HEIGHT } else { PLAYLIST_ROW_HEIGHT }
+    }
+
     /// Whether the playlist sits beside the video. Unpinned (and in fullscreen)
     /// it slides out over the video instead.
     pub(crate) fn sidebar_docked(&self) -> bool {
@@ -235,8 +312,8 @@ impl App {
         let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
         if let Some(pick) = self.scroll_to_pick.take() {
             // Keep the picked result in the middle of the list.
-            let row = PLAYLIST_ROW_HEIGHT + ui.spacing().item_spacing.y;
-            let offset = pick as f32 * row - (ui.available_height() - PLAYLIST_ROW_HEIGHT) / 2.0;
+            let row = self.row_height() + ui.spacing().item_spacing.y;
+            let offset = pick as f32 * row - (ui.available_height() - self.row_height()) / 2.0;
             scroll = scroll.vertical_scroll_offset(offset.max(0.0));
         }
         let selection = self.selected_paths();
@@ -245,14 +322,16 @@ impl App {
             self.selected = selection.iter().cloned().collect();
         }
         // Only the rows in view are laid out.
-        scroll.show_rows(ui, PLAYLIST_ROW_HEIGHT, visible.len(), |ui, range| {
+        let (row_height, stills) = (self.row_height(), self.store.settings.playlist_stills);
+        scroll.show_rows(ui, row_height, visible.len(), |ui, range| {
             let mut rows = Vec::new();
             for &index in &visible[range] {
                 let path = &self.playlist[index];
                 let name = &self.names[index].0;
                 let selected = self.selected.contains(path).then_some(selection.as_slice());
+                let still = stills.then(|| self.stills.get(path));
                 let mut chosen = Vec::new();
-                let resp = playlist_row(ui, self, &mut chosen, index, path, name, self.current == Some(index), selected);
+                let resp = playlist_row(ui, self, &mut chosen, index, path, name, self.current == Some(index), selected, still);
                 self.actions.append(&mut chosen);
                 if resp.clicked() {
                     let modifiers = ui.input(|i| i.modifiers);

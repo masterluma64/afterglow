@@ -150,6 +150,10 @@ impl App {
                             }
                         });
                         ui.end_row();
+                        ui.label("Playlist");
+                        ui.checkbox(&mut settings.playlist_stills, "Show a still of each video")
+                            .on_hover_text("A frame from a fifth of the way into each video, beside its name");
+                        ui.end_row();
                         ui.label("Playlist side");
                         ui.horizontal(|ui| {
                             for (side, label) in [(progress::Side::Left, "Left"), (progress::Side::Right, "Right")] {

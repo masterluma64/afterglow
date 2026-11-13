@@ -63,6 +63,8 @@ pub struct Settings {
     /// Whether the seek bar ends in the time left rather than the video's
     /// length.
     pub show_remaining: bool,
+    /// Whether the playlist shows a still of each video.
+    pub playlist_stills: bool,
 }
 
 impl Default for Settings {
@@ -82,6 +84,7 @@ impl Default for Settings {
             copy_screenshots: true,
             save_screenshots: true,
             show_remaining: true,
+            playlist_stills: true,
         }
     }
 }

@@ -15,7 +15,8 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
   On startup, the last video opens paused on the frame where you left off.
 - **Playlist**: open a folder (optionally with its subfolders) or add videos; new files in the
   folder show up by themselves. Search, drag to reorder, and select several (Ctrl / Shift+click)
-  to mark or remove them. It can dock beside the video or slide out over it.
+  to mark or remove them. Each video shows a still from it, with how much is left. It can dock
+  beside the video or slide out over it.
 - **Single videos**: *Open video* plays one video by itself, with the playlist hidden, its own
   settings and its own place in the stats as a movie.
 - **Up next**: the next video starts after a short countdown (or not, if you turn it off); an

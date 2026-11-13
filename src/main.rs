@@ -47,6 +47,8 @@ const EDGE_WIDTH: f32 = 24.0;
 const PEEK_HIDE_DELAY: Duration = Duration::from_millis(300);
 /// Height of a playlist entry, without the spacing between entries.
 const PLAYLIST_ROW_HEIGHT: f32 = 26.0;
+/// Height of a playlist entry showing a still of its video.
+const STILL_ROW_HEIGHT: f32 = 52.0;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Scroll distance, in points, of one mouse wheel notch.
 const SCROLL_NOTCH: f32 = 50.0;
@@ -231,6 +233,8 @@ struct App {
     /// Seek-bar previews, once started in the background (see `thumbnails_ready`).
     thumbnails: Option<Result<thumbnails::Thumbnails, String>>,
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
+    /// A still of each video, for the playlist.
+    stills: player::stills::Stills,
     up_next: Option<UpNext>,
     /// The video that just played to its end, when no next video starts by
     /// itself: the video area shows what can be done next (see `end_screen`).
@@ -367,6 +371,7 @@ impl App {
             held_unwatched: false,
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
+            stills: player::stills::Stills::new(ctx.clone()),
             up_next: None,
             ended: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
@@ -588,6 +593,7 @@ impl eframe::App for App {
         if let Some(Ok(thumbnails)) = &mut self.thumbnails {
             thumbnails.update(&ctx);
         }
+        self.stills.update();
 
         // While a video plays and the mouse is still, the cursor hides over
         // the video, and in fullscreen so do the controls, which float over
