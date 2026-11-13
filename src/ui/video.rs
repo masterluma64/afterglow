@@ -28,7 +28,7 @@ impl App {
         if self.loaded && self.home {
             // The home screen over the paused video, which shows dimly through.
             self.paint_frame(ui, rect);
-            ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(225));
+            ui.painter().rect_filled(rect, 0.0, Color32::from_black_alpha(240));
             gradient::horizon(ui.painter(), rect, ui.visuals().selection.bg_fill);
             self.home_screen(ui, rect);
         } else if self.loaded {
