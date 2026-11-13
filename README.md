@@ -1,79 +1,51 @@
 <p align="center"><img src="assets/icon.png" width="96" alt=""></p>
 
-# Afterglow
+<h1 align="center">Afterglow</h1>
 
-A minimalist video player for Windows that remembers where you left off. Open a folder of a
-show and it plays the videos in order, picking up where you stopped; open a single video, like
-a movie, and it plays just that. Written in Rust with [egui](https://github.com/emilk/egui);
-[libmpv](https://mpv.io) does the decoding, sound and subtitles.
+<p align="center">
+An open-source, experimental video player, made for my own use.<br>
+Based on mpv and built in Rust.
+</p>
 
-![Afterglow playing a video, with the playlist beside it](assets/screenshot.png)
+![Afterglow playing an episode, with the playlist beside it](assets/screenshot.png)
 
-## Features
+Afterglow is a video player for Windows that remembers where you left off. Open the folder of
+a show and it plays the episodes in order, picking up where you stopped. Open a single video,
+like a movie, and it plays just that.
 
-- **Progress**: every video remembers its position and counts as watched at 90% (adjustable).
-  On startup, the last video opens paused on the frame where you left off.
-- **Continue watching**: the home screen (the house button, and whenever nothing plays) shows
-  the shows and movies you are in the middle of, each with a still of what is next. One click
-  opens it there.
-- **Playlist**: open a folder (optionally with its subfolders) or add videos; new files in the
-  folder show up by themselves. Search, drag to reorder, and select several (Ctrl / Shift+click)
-  to mark or remove them. Each video shows a still from it, with how much is left. It can dock
-  beside the video or slide out over it.
-- **Single videos**: *Open video* plays one video by itself, with the playlist hidden, its own
-  settings and its own place in the stats as a movie.
-- **Up next**: the next video starts after a short countdown (or not, if you turn it off); an
-  end screen offers what to do once nothing is left.
-- **Subtitles and audio**: embedded and matching external subtitles are picked up, with
-  preferred languages. Shift the timing, sync to the line you just heard, or fix subtitles made
-  for another frame rate. Sound that is out of sync with the picture can be delayed or brought
-  forward (G / H). Track choices and delays are remembered per video.
-- **Folder settings**: skip a show's opening and ending, and give a folder its own languages,
-  subtitle timing, speed and more.
-- **Titles**: videos are shown by the title stored in the file when it tells them apart.
-- **Stats**: time watched, streaks, the last 30 days, most watched series and recent movies.
-- **Screenshots** (C or F12): the current frame, with its subtitles, is copied to the clipboard
-  and saved as a PNG in `Pictures\Afterglow`.
-- **Mini player** (Shift+T): a small borderless window kept on top in a corner of the screen,
-  to watch while doing something else. T keeps the normal window on top instead.
-- **Everything at hand**: a command palette (Ctrl+K), single-key shortcuts, a right-click menu
-  on the video, seek bar previews, media keys, progress on the taskbar button and an option to
-  even out the volume.
+It's a personal project: I build what I want in a player, the way I want it. You're welcome to
+use it, but expect rough edges, and features that come and go.
 
-Progress and settings are saved in `%LOCALAPPDATA%fterglow\progress.json`. Copies from before
-portable mode was removed move theirs there on their first start. `AFTERGLOW_DATA_DIR` overrides
-the folder (for testing).
+## Download
 
-## Building
+Get the installer from the [latest release](https://github.com/masterluma64/afterglow/releases/latest).
+It needs 64-bit Windows 10 or 11, installs just for you (no administrator rights needed) and
+can add Afterglow to "Open with" for videos.
 
-Put `libmpv-2.dll` from shinchiro's
-[mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake/releases) (the
-`mpv-dev-x86_64` archive) in `vendor/`. Release builds only accept the DLL whose SHA-256 is
-in `vendor/libmpv-2.dll.sha256` (release 20261016); to update libmpv, test the new one and
-put its hash there.
+Afterglow isn't code-signed, so Windows SmartScreen may warn you the first time. Choose
+**More info**, then **Run anyway**.
 
-```sh
-cargo run --release
-cargo run --release -- "D:\Shows\Foo"    # play a folder
-```
+## What it does
 
-The release exe (about 43 MB) has libmpv packed in and unpacks it into the data folder on the
-first start.
+![The home screen, with a card for each show in progress](assets/home.png)
 
-## License
-
-Afterglow is free software: you can redistribute it and/or modify it under the terms of the
-GNU General Public License as published by the Free Software Foundation, either version 3 of
-the License, or (at your option) any later version. See [`LICENSE`](LICENSE).
-
-Release builds include [libmpv](https://mpv.io) (GPL) and FFmpeg from shinchiro's
-[mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake). Icons are
-[Phosphor](https://phosphoricons.com) (MIT); bold text is Ubuntu Medium
-(`assets/fonts/UFL.txt`).
-
-## Keyboard shortcuts
-
-Press `?` in the app for all of them. The main ones:
+- **Picks up where you left off.** Every video remembers its position, and counts as watched
+  once you're 90% in (adjustable). The home screen shows what you're in the middle of, with a
+  still of what's next; one click carries on.
+- **Plays a show in order.** Open a folder and its episodes become the playlist, each with a
+  still and how much is left. The next one starts after a short countdown. New episodes
+  added to the folder show up by themselves.
+- **Skips openings and endings,** found from chapter names or set once for a whole show.
+- **Gets subtitles and sound in sync.** Shift the subtitles, sync them to the line you just
+  heard, or fix ones made for another frame rate. Delay or advance the sound for audio that's
+  out of sync (G / H). Your choices are remembered per video, or per show.
+- **Stays out of the way.** A mini player kept on top in a corner of the screen (Shift+T),
+  fullscreen with controls that hide, and media keys and taskbar controls that work while
+  you're in another window.
+- **Keeps stats:** time watched, streaks, the last 30 days and your most watched shows, which
+  you can name.
+- **Takes screenshots** (C), with subtitles, to the clipboard and `Pictures\Afterglow`.
+- **Has a key for everything.** Press `?` for the list, or Ctrl+K to find any command.
 
 | Key | Action |
 | --- | --- |
@@ -81,9 +53,53 @@ Press `?` in the app for all of them. The main ones:
 | ← / → | Seek 5 s (Shift: 30 s) |
 | ↑ / ↓ | Volume |
 | N / P | Next / previous video |
+| Enter | Skip the opening or ending |
 | W | Mark watched / unwatched |
-| O / Shift+O | Open folder / open video |
-| B | Show or hide the playlist |
+| O / Shift+O | Open a folder / a single video |
 | F | Fullscreen |
-| C / F12 | Screenshot (copied, and saved in Pictures) |
+| Shift+T | Mini player |
 | Ctrl+K | Find any command |
+
+## Your data
+
+Progress, settings and stats stay on your PC, in `%LOCALAPPDATA%\afterglow`. Afterglow
+doesn't collect or send anything, and only goes online when you click a link in it.
+Uninstalling leaves that folder, so your progress is still there if you reinstall; delete it
+to remove everything.
+
+## How it's made
+
+Afterglow is written in Rust, with [egui](https://github.com/emilk/egui) for the interface and
+[libmpv](https://mpv.io) (with FFmpeg) for playing video, sound and subtitles.
+
+**AI disclosure:** much of Afterglow's code and documentation was written with AI assistance,
+by Anthropic's Claude through Claude Code. I decide what goes in, direct the work, and test
+and review the changes before they're released.
+
+## Building
+
+Put `libmpv-2.dll` from shinchiro's
+[mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake/releases) (the
+`mpv-dev-x86_64` archive) in `vendor/`. Release builds only accept the DLL whose SHA-256 is in
+`vendor/libmpv-2.dll.sha256` (release 20261016); to update libmpv, test the new one and put its
+hash there.
+
+```sh
+cargo run --release
+cargo run --release -- "D:\Shows\Foo"    # play a folder
+```
+
+The release exe has libmpv packed in, and unpacks it into the data folder on its first start.
+`AFTERGLOW_DATA_DIR` sets another data folder, for testing. `docs/releasing.md` describes
+making a release, including the installer.
+
+## License
+
+Afterglow is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. See [`LICENSE`](LICENSE).
+
+Release builds include libmpv and FFmpeg (GPL) from shinchiro's
+[mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake). Icons are
+[Phosphor](https://phosphoricons.com) (MIT); bold text is Ubuntu Medium (Ubuntu Font Licence).
+[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt) lists everything Afterglow is built with.
