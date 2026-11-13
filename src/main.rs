@@ -285,6 +285,10 @@ struct App {
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
+    /// How the window was before the mini player, while it is on.
+    mini: Option<ui::mini::Restore>,
+    /// The window's handle, once it exists.
+    hwnd: Option<isize>,
     /// Files from later starts of Afterglow (see `instance`): one pipe per
     /// data folder it used since starting.
     other_starts: Vec<Receiver<Vec<PathBuf>>>,
@@ -389,6 +393,8 @@ impl App {
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
             other_starts: other_starts.into_iter().collect(),
+            mini: None,
+            hwnd: None,
         };
         // Before opening anything, so language preferences apply to it.
         app.apply_settings(ctx);
@@ -436,6 +442,9 @@ impl App {
     /// the same way next time. Fullscreen and minimized don't count, and while
     /// maximized the size it had before is kept for un-maximizing.
     fn remember_window(&mut self, ctx: &egui::Context) {
+        if self.mini() {
+            return self.remember_mini(ctx);
+        }
         if self.fullscreen {
             return;
         }
@@ -475,14 +484,10 @@ impl App {
     }
 
     /// Handles media keys and shows what's playing in Windows' media overlay.
-    fn media_controls(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    fn media_controls(&mut self, ctx: &egui::Context) {
         if self.media_keys.is_none() {
-            let hwnd = match frame.window_handle().map(|h| h.as_raw()) {
-                Ok(RawWindowHandle::Win32(h)) => h.hwnd.get() as *mut std::ffi::c_void,
-                _ => return,
-            };
-            let keys = media_keys::MediaKeys::new(hwnd, ctx.clone());
+            let Some(hwnd) = self.hwnd else { return };
+            let keys = media_keys::MediaKeys::new(hwnd as *mut std::ffi::c_void, ctx.clone());
             if let Err(e) = &keys {
                 eprintln!("media keys unavailable: {e}");
             }
@@ -533,7 +538,13 @@ impl eframe::App for App {
         self.handle_mpv_events(&ctx);
         self.sample_playback();
         self.handle_input(&ctx);
-        self.media_controls(&ctx, frame);
+        if self.hwnd.is_none() {
+            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+            if let Ok(RawWindowHandle::Win32(h)) = frame.window_handle().map(|h| h.as_raw()) {
+                self.hwnd = Some(h.hwnd.get());
+            }
+        }
+        self.media_controls(&ctx);
         self.receive_other_starts(&ctx);
         self.remember_window(&ctx);
         self.update_window_title(&ctx);
@@ -579,7 +590,7 @@ impl eframe::App for App {
             self.show_sidebar = !single;
             self.peek = None;
         }
-        if !self.fullscreen {
+        if !self.controls_overlay() {
             egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
             egui::Panel::bottom("controls")
                 .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::symmetric(8, 6)))
@@ -606,7 +617,10 @@ impl eframe::App for App {
             self.floating_sidebar(&ctx, video);
         }
         self.controls_rect = None;
-        if self.fullscreen && !controls_idle {
+        // The mini player shows its controls only while the pointer is on it
+        // (or while paused), so they don't cover the little video there is.
+        let away = self.mini() && hover.is_none() && self.loaded && !self.playback.paused;
+        if self.controls_overlay() && !controls_idle && !away {
             let accent = self.store.settings.accent;
             let area = egui::Area::new(egui::Id::unique("controls-overlay"))
                 .order(egui::Order::Foreground)
@@ -626,6 +640,9 @@ impl eframe::App for App {
         }
         if idle && (self.fullscreen || hover.is_some_and(|p| video.contains(p))) {
             ctx.set_cursor_icon(egui::CursorIcon::None);
+        }
+        if self.mini() {
+            self.mini_resize(&ctx, window);
         }
         self.drop_overlay(&ctx, window);
         if self.confirm_reset {
@@ -763,6 +780,7 @@ const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
     ("Window", &[
         ("F", "Fullscreen"),
         ("T", "Keep on top of other windows"),
+        ("Shift+T", "Mini player: a small window kept on top"),
         ("C / F12", "Take screenshot"),
         ("Esc", "Clear selection, leave fullscreen"),
         ("E", "Settings"),
@@ -830,7 +848,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::PICTURE_IN_PICTURE, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

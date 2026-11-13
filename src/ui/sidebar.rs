@@ -94,7 +94,7 @@ impl App {
     /// Whether the playlist sits beside the video. Unpinned (and in fullscreen)
     /// it slides out over the video instead.
     pub(crate) fn sidebar_docked(&self) -> bool {
-        self.store.sidebar_pinned && !self.fullscreen
+        self.store.sidebar_pinned && !self.controls_overlay()
     }
 
     /// The unpinned playlist: it slides out over the video when the pointer
@@ -106,8 +106,9 @@ impl App {
         let at_edge = pointer.is_some_and(|p| {
             video.contains(p) && if right { p.x > video.right() - EDGE_WIDTH } else { p.x < video.left() + EDGE_WIDTH }
         });
-        // Not for a single video, whose playlist only comes out with B.
-        if self.peek.is_none() && at_edge && !self.single_video() && !ctx.input(|i| i.pointer.any_down()) {
+        // Not for a single video, whose playlist only comes out with B, nor
+        // in the mini player, whose edges resize it.
+        if self.peek.is_none() && at_edge && !self.single_video() && !self.mini() && !ctx.input(|i| i.pointer.any_down()) {
             self.peek = Some(Peek { entered: true, left_at: None });
         }
         if self.peek.is_none() {

@@ -221,6 +221,8 @@ pub struct Store {
     pub window: Option<WindowPlacement>,
     /// Whether the window stays on top of other windows.
     pub on_top: bool,
+    /// Where the mini player was, to open it there again.
+    pub mini_window: Option<WindowPlacement>,
     /// Watching stats, which outlast the progress of deleted videos.
     pub stats: Stats,
     /// Settings per folder of videos.
@@ -258,6 +260,7 @@ impl Default for Store {
             sidebar_pinned: true,
             window: None,
             on_top: false,
+            mini_window: None,
             stats: Stats::default(),
             folders: HashMap::new(),
             videos: HashMap::new(),
@@ -799,6 +802,13 @@ impl Store {
     pub fn set_window(&mut self, window: WindowPlacement) {
         if self.window != Some(window) {
             self.window = Some(window);
+            self.dirty = true;
+        }
+    }
+
+    pub fn set_mini_window(&mut self, window: WindowPlacement) {
+        if self.mini_window != Some(window) {
+            self.mini_window = Some(window);
             self.dirty = true;
         }
     }

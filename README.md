@@ -30,6 +30,8 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
 - **Stats**: time watched, streaks, the last 30 days, most watched series and recent movies.
 - **Screenshots** (C or F12): the current frame, with its subtitles, is copied to the clipboard
   and saved as a PNG in `Pictures\Afterglow`.
+- **Mini player** (Shift+T): a small borderless window kept on top in a corner of the screen,
+  to watch while doing something else. T keeps the normal window on top instead.
 - **Everything at hand**: a command palette (Ctrl+K), single-key shortcuts, a right-click menu
   on the video, seek bar previews, media keys and an option to even out the volume.
 

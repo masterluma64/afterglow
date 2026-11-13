@@ -29,6 +29,10 @@ impl App {
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let more = egui::Button::new(RichText::new(icons::MORE).size(ICON_SIZE)).frame_when_inactive(false);
+                let mini = icon_button(ui, icons::PICTURE_IN_PICTURE, "Mini player: a small window kept on top (Shift+T)");
+                if mini.clicked() {
+                    self.actions.push(Action::ToggleMiniPlayer);
+                }
                 let (response, _) = ui::menu_button(more).ui(ui, |ui| ui::fit_to_window(ui, None, |ui| {
                     let recent = self.store.recent_folders.clone();
                     let recent_videos = self.store.recent_videos.clone();
@@ -99,22 +103,33 @@ impl App {
             ui.monospace(format_time(if self.loaded { position } else { 0.0 }));
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let (fs_icon, fs_tip) = if self.fullscreen {
-                    (icons::CORNERS_IN, "Exit fullscreen (F or Esc)")
+                // The mini player has room for less: the tracks, the speed and
+                // the volume slider are left to the keys and the right-click
+                // menu, so the seek bar stays long enough to use.
+                let mini = self.mini();
+                if mini {
+                    if icon_button(ui, icons::PICTURE_IN_PICTURE, "Back to the full window (Shift+T or Esc)").clicked() {
+                        self.actions.push(Action::ToggleMiniPlayer);
+                    }
                 } else {
-                    (icons::CORNERS_OUT, "Fullscreen (F)")
-                };
-                if icon_button(ui, fs_icon, fs_tip).clicked() {
-                    self.actions.push(Action::ToggleFullscreen);
+                    let (fs_icon, fs_tip) = if self.fullscreen {
+                        (icons::CORNERS_IN, "Exit fullscreen (F or Esc)")
+                    } else {
+                        (icons::CORNERS_OUT, "Fullscreen (F)")
+                    };
+                    if icon_button(ui, fs_icon, fs_tip).clicked() {
+                        self.actions.push(Action::ToggleFullscreen);
+                    }
                 }
-                self.track_menu(ui, "sub");
-                self.track_menu(ui, "audio");
-                self.speed_menu(ui);
-
                 let mut volume = volume;
-                let slider = egui::Slider::new(&mut volume, 0.0..=150.0).show_value(false);
-                if ui.add_sized([80.0, 18.0], slider).on_hover_text(format!("Volume {volume:.0}% (Up/Down)")).changed() {
-                    self.actions.push(Action::SetVolume(volume));
+                if !mini {
+                    self.track_menu(ui, "sub");
+                    self.track_menu(ui, "audio");
+                    self.speed_menu(ui);
+                    let slider = egui::Slider::new(&mut volume, 0.0..=150.0).show_value(false);
+                    if ui.add_sized([80.0, 18.0], slider).on_hover_text(format!("Volume {volume:.0}% (Up/Down)")).changed() {
+                        self.actions.push(Action::SetVolume(volume));
+                    }
                 }
                 let speaker = match () {
                     _ if muted || volume == 0.0 => icons::SPEAKER_X,

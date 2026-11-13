@@ -79,6 +79,8 @@ pub(crate) enum Action {
     ExitFullscreen,
     /// Keeps the window on top of other windows, or stops doing so.
     ToggleOnTop,
+    /// Turns the window into the mini player, or back.
+    ToggleMiniPlayer,
     ToggleSidebar,
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
@@ -103,7 +105,8 @@ pub(crate) enum Action {
     /// Marks the playing video as watched, or unwatched if it is.
     ToggleWatched,
     /// Clears the selection, cancels the next video's countdown, hides the
-    /// slid-out playlist or leaves fullscreen, whichever applies first.
+    /// slid-out playlist, leaves fullscreen or the mini player, whichever
+    /// applies first.
     Escape,
     LoadSubtitle,
     AdjustSubDelay(f64),
@@ -197,6 +200,7 @@ impl App {
                 (M::NONE, Key::K, Action::TogglePause),
                 (M::NONE, Key::F11, Action::ToggleFullscreen),
                 (M::NONE, Key::F, Action::ToggleFullscreen),
+                (M::SHIFT, Key::T, Action::ToggleMiniPlayer),
                 (M::NONE, Key::T, Action::ToggleOnTop),
                 (M::NONE, Key::F12, Action::Screenshot),
                 (M::NONE, Key::C, Action::Screenshot),
@@ -572,6 +576,15 @@ impl App {
                     None => {}
                 }
             }
+            Action::ToggleMiniPlayer if self.mini() => self.exit_mini(ctx),
+            Action::ToggleMiniPlayer => self.enter_mini(ctx),
+            // Fullscreen from the mini player goes by the window it came from.
+            Action::ToggleFullscreen if self.mini() => {
+                self.exit_mini(ctx);
+                if !self.fullscreen {
+                    self.apply(Action::ToggleFullscreen, ctx);
+                }
+            }
             Action::ToggleFullscreen | Action::ExitFullscreen => {
                 let fullscreen = matches!(action, Action::ToggleFullscreen) && !self.fullscreen;
                 if fullscreen != self.fullscreen {
@@ -584,7 +597,10 @@ impl App {
                 let on_top = !self.store.on_top;
                 self.store.set_on_top(on_top);
                 self.store.save();
-                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(window_level(on_top)));
+                // The mini player stays on top either way.
+                if !self.mini() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(window_level(on_top)));
+                }
                 self.notify(if on_top { "Kept on top of other windows" } else { "No longer kept on top" });
             }
             Action::ToggleSidebar if self.sidebar_docked() => self.show_sidebar = !self.show_sidebar,
@@ -598,6 +614,8 @@ impl App {
                     self.peek = None;
                 } else if self.fullscreen {
                     self.apply(Action::ExitFullscreen, ctx);
+                } else if self.mini() {
+                    self.exit_mini(ctx);
                 }
             }
             Action::Screenshot => self.screenshot(),

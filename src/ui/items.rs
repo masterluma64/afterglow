@@ -154,6 +154,8 @@ impl App {
             Action::ToggleFullscreen if self.fullscreen => item(icons::CORNERS_IN, "Exit fullscreen", "F"),
             Action::ToggleFullscreen => item(icons::CORNERS_OUT, "Fullscreen", "F"),
             Action::ToggleOnTop => item(icons::STACK, "Keep on top", "T").on(self.store.on_top),
+            Action::ToggleMiniPlayer if self.mini() => item(icons::PICTURE_IN_PICTURE, "Exit mini player", "Shift+T"),
+            Action::ToggleMiniPlayer => item(icons::PICTURE_IN_PICTURE, "Mini player", "Shift+T"),
             Action::Skip => {
                 let label = match self.skip_now() {
                     Some((progress::Skip::Ending, ..)) => "Skip ending",

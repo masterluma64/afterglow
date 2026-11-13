@@ -7,6 +7,7 @@ pub(crate) mod dialogs;
 pub(crate) mod folder;
 pub(crate) mod icons;
 pub(crate) mod items;
+pub(crate) mod mini;
 pub(crate) mod sidebar;
 pub(crate) mod video;
 

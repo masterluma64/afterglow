@@ -19,12 +19,17 @@ pub(crate) fn video_visuals(accent: Option<[u8; 3]>) -> egui::Visuals {
 impl App {
     pub(crate) fn video_area(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
-        let resp = ui.interact(rect, egui::Id::unique("video"), Sense::click());
+        // The borderless mini player is moved by dragging the video.
+        let sense = if self.mini() { Sense::click_and_drag() } else { Sense::click() };
+        let resp = ui.interact(rect, egui::Id::unique("video"), sense);
+        if resp.drag_started() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        }
         if self.loaded {
             self.paint_frame(ui, rect);
             self.skip_button(ui, rect);
             if resp.double_clicked() {
-                self.actions.push(Action::ToggleFullscreen);
+                self.actions.push(if self.mini() { Action::ToggleMiniPlayer } else { Action::ToggleFullscreen });
             }
             if resp.middle_clicked() {
                 self.actions.push(Action::TogglePause);
@@ -75,7 +80,7 @@ impl App {
         }
         // Above the controls, where they float over the video.
         let bottom = match self.controls_rect {
-            Some(controls) if self.fullscreen => controls.top(),
+            Some(controls) if self.controls_overlay() => controls.top(),
             _ => rect.bottom(),
         };
         let label = if skip == progress::Skip::Opening { "Skip opening" } else { "Skip ending" };
