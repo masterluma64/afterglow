@@ -301,65 +301,101 @@ fn key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// Where the app keeps its data: a `data` folder next to the executable, so
-/// the app is portable, or Afterglow's folder in the local AppData. Whichever
-/// holds the progress file wins; the first start is portable, unless the
-/// executable's folder can't be written to (Program Files, say).
-/// `AFTERGLOW_DATA_DIR` overrides both, e.g. for testing.
+/// Where the app keeps its data: Afterglow's folder in the local AppData.
+/// `AFTERGLOW_DATA_DIR` overrides it, e.g. for testing. Earlier versions could
+/// keep it next to the executable instead (portable mode); the first start
+/// moves it here (see `move_portable`).
 pub fn data_dir() -> Option<PathBuf> {
     static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
             return Some(PathBuf::from(dir));
         }
-        choose_data_dir(data_dir_for(true), data_dir_for(false))
+        let appdata = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("afterglow");
+        Some(match old_portable_dir() {
+            Some(old) => move_portable(&old, &appdata),
+            None => appdata,
+        })
     })
     .clone()
 }
 
-/// `data_dir` between the portable folder and the one in AppData.
-fn choose_data_dir(portable: Option<PathBuf>, appdata: Option<PathBuf>) -> Option<PathBuf> {
-    let has_progress = |dir: &Option<PathBuf>| dir.as_ref().is_some_and(|dir| dir.join(FILE_NAME).is_file());
-    if has_progress(&portable) {
-        return portable;
-    }
-    if has_progress(&appdata) {
-        return appdata;
-    }
-    match portable {
-        Some(dir) if writable(&dir) => Some(dir),
-        _ => appdata,
-    }
+/// Where earlier versions kept the data in portable mode: a `data` folder
+/// next to the executable.
+pub fn old_portable_dir() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join("data"))
 }
 
-/// Whether the data folder can be next to the executable, checked once.
-pub fn portable_possible() -> bool {
-    static POSSIBLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *POSSIBLE.get_or_init(|| data_dir_for(true).is_some_and(|dir| writable(&dir)))
-}
-
-/// Whether files can be saved in `dir`, creating it if needed: tried by
-/// writing a file, since folder permissions don't tell the whole story.
-pub fn writable(dir: &Path) -> bool {
-    let probe = dir.join(".afterglow-write-test");
-    let ok = std::fs::create_dir_all(dir).is_ok() && std::fs::write(&probe, b"").is_ok();
-    let _ = std::fs::remove_file(&probe);
-    ok
-}
-
-/// The data folder when portable, or when not.
-pub fn data_dir_for(portable: bool) -> Option<PathBuf> {
-    if portable {
-        Some(std::env::current_exe().ok()?.parent()?.join("data"))
-    } else {
-        Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("afterglow"))
-    }
-}
-
-/// Whether the data folder is chosen with `AFTERGLOW_DATA_DIR`, so it can't
-/// be moved.
+/// Whether the data folder is chosen with `AFTERGLOW_DATA_DIR`.
+#[cfg_attr(not(packed_mpv), allow(dead_code))]
 pub fn data_dir_fixed() -> bool {
     std::env::var_os("AFTERGLOW_DATA_DIR").is_some()
+}
+
+/// What moving the data out of portable mode did, to tell once it's done.
+static MOVED: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Says where the progress went, if this start moved it out of portable mode.
+pub fn moved_notice() -> Option<String> {
+    MOVED.get().cloned()
+}
+
+/// Moves the progress kept in portable mode (in `old`) to `new`, returning
+/// the folder to use. When `new` has progress too, the one saved last is
+/// used, and the other is kept beside it in `new`. Nothing is removed from
+/// `old` before it is safely in `new`; if that fails, `old` is used as before,
+/// and the next start tries again.
+fn move_portable(old: &Path, new: &Path) -> PathBuf {
+    let from = old.join(FILE_NAME);
+    if !from.is_file() {
+        return new.to_path_buf();
+    }
+    let to = new.join(FILE_NAME);
+    let moved = (|| -> std::io::Result<String> {
+        std::fs::create_dir_all(new)?;
+        let saved = |path: &Path| std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let older_portable = to.is_file() && saved(&from) < saved(&to);
+        let (keep, kept_as) = if older_portable {
+            (None, "progress.portable.json")
+        } else {
+            (Some(&from), "progress.before-move.json")
+        };
+        match keep {
+            // The portable progress is newer (or the only one): it becomes
+            // the progress, and what was in AppData is kept aside.
+            Some(from) => {
+                if to.is_file() {
+                    std::fs::rename(&to, new.join(kept_as))?;
+                }
+                write_atomically(&to, &std::fs::read(from)?)?;
+            }
+            // What is in AppData was saved later: the portable one is kept aside.
+            None => write_atomically(&new.join(kept_as), &std::fs::read(&from)?)?,
+        }
+        std::fs::remove_file(&from)?;
+        // Backups of the progress go along.
+        for name in ["progress.bak.json", "progress.bad.json"] {
+            let (from, to) = (old.join(name), new.join(name));
+            if from.is_file() && !to.exists() && std::fs::copy(&from, &to).is_ok() {
+                let _ = std::fs::remove_file(&from);
+            }
+        }
+        Ok(if older_portable {
+            format!("Progress is now kept in {}; the older copy from next to afterglow.exe is kept there as {kept_as}", new.display())
+        } else {
+            format!("Progress moved from next to afterglow.exe to {}", new.display())
+        })
+    })();
+    match moved {
+        Ok(notice) => {
+            let _ = MOVED.set(notice);
+            new.to_path_buf()
+        }
+        Err(e) => {
+            eprintln!("could not move the progress from {} to {}: {e}", old.display(), new.display());
+            old.to_path_buf()
+        }
+    }
 }
 
 const FILE_NAME: &str = "progress.json";
@@ -453,32 +489,6 @@ impl Store {
             Some(saver) => saver.path.parent().map(Path::to_path_buf),
             None => data_dir(),
         }
-    }
-
-    /// Saves progress in `dir` from now on, and removes the progress file
-    /// from the folder it was in. One already in `dir` is kept as
-    /// `progress.bak.json`.
-    pub fn move_to(&mut self, dir: &Path) -> Result<(), String> {
-        if self.read_failed {
-            return Err("the progress file couldn't be read, so it stays where it is".into());
-        }
-        let old = self.folder().map(|folder| folder.join(FILE_NAME));
-        let new = dir.join(FILE_NAME);
-        if old.as_ref() == Some(&new) {
-            return Ok(());
-        }
-        let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        if new.is_file() {
-            std::fs::rename(&new, dir.join("progress.bak.json")).map_err(|e| e.to_string())?;
-        }
-        write_atomically(&new, &bytes).map_err(|e| e.to_string())?;
-        // Replacing the saver waits for writes still on their way to the old file.
-        self.saver = Some(Saver::new(new));
-        self.dirty = false;
-        if let Some(old) = old {
-            let _ = std::fs::remove_file(old);
-        }
-        Ok(())
     }
 
     #[cfg(test)]
@@ -1345,44 +1355,52 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_appdata_where_the_exe_folder_is_read_only() {
-        let root = std::env::temp_dir().join(format!("afterglow-datadir-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let (portable, appdata) = (root.join("portable"), root.join("appdata"));
-        // A file where a folder should be: nothing can be saved under it.
-        std::fs::write(root.join("file"), b"").unwrap();
-        let read_only = root.join("file").join("data");
-        let choose = |p: &Path, a: &Path| choose_data_dir(Some(p.to_path_buf()), Some(a.to_path_buf()));
-
-        assert_eq!(choose(&portable, &appdata), Some(portable.clone()), "first start: portable");
-        assert_eq!(choose(&read_only, &appdata), Some(appdata.clone()), "unless that can't be written to");
-        std::fs::create_dir_all(&appdata).unwrap();
-        std::fs::write(appdata.join(FILE_NAME), b"{}").unwrap();
-        assert_eq!(choose(&portable, &appdata), Some(appdata.clone()), "progress in AppData is used");
-        std::fs::write(portable.join(FILE_NAME), b"{}").unwrap();
-        assert_eq!(choose(&portable, &appdata), Some(portable.clone()), "progress next to the exe wins");
-        assert!(!portable.join(".afterglow-write-test").exists(), "the test file is cleaned up");
-        std::fs::remove_dir_all(&root).unwrap();
-    }
-
-    #[test]
-    fn moves_the_progress_file() {
+    fn moves_progress_out_of_portable_mode() {
         let root = std::env::temp_dir().join(format!("afterglow-move-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let (from, to) = (root.join("from"), root.join("to"));
-        let mut store = Store { volume: 42.0, saver: Some(Saver::new(from.join(FILE_NAME))), ..Store::default() };
-        store.dirty = true;
-        store.save();
-        std::fs::create_dir_all(&to).unwrap();
-        std::fs::write(to.join(FILE_NAME), b"older").unwrap();
-        store.move_to(&to).unwrap();
-        assert_eq!(store.folder().as_deref(), Some(to.as_path()));
-        assert!(!from.join(FILE_NAME).exists(), "gone from where it was");
-        assert_eq!(std::fs::read(to.join("progress.bak.json")).unwrap(), b"older");
-        let (moved, _) = Store::load_from(&to.join(FILE_NAME));
-        assert_eq!(moved.volume, 42.0);
-        drop(store);
-        let _ = std::fs::remove_dir_all(&root);
+        let (old, new) = (root.join("portable"), root.join("appdata"));
+        let write = |dir: &Path, name: &str, text: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join(name), text).unwrap();
+        };
+        let read = |path: PathBuf| std::fs::read_to_string(path).ok();
+
+        // Nothing portable: AppData, untouched.
+        assert_eq!(move_portable(&old, &new), new);
+        assert!(!new.exists());
+
+        // Only portable progress: moved, with its backup.
+        write(&old, FILE_NAME, "portable");
+        write(&old, "progress.bak.json", "backup");
+        assert_eq!(move_portable(&old, &new), new);
+        assert_eq!(read(new.join(FILE_NAME)).as_deref(), Some("portable"));
+        assert_eq!(read(new.join("progress.bak.json")).as_deref(), Some("backup"));
+        assert!(!old.join(FILE_NAME).exists() && !old.join("progress.bak.json").exists());
+        assert_eq!(move_portable(&old, &new), new, "moved once: nothing more to do");
+
+        // Both, the portable one saved last: it wins, the other is kept aside.
+        write(&old, FILE_NAME, "newer portable");
+        let hour_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::File::options().write(true).open(new.join(FILE_NAME)).unwrap().set_modified(hour_ago).unwrap();
+        assert_eq!(move_portable(&old, &new), new);
+        assert_eq!(read(new.join(FILE_NAME)).as_deref(), Some("newer portable"));
+        assert_eq!(read(new.join("progress.before-move.json")).as_deref(), Some("portable"));
+
+        // Both, AppData's saved last: it stays, the portable one is kept aside.
+        write(&old, FILE_NAME, "older portable");
+        std::fs::File::options().write(true).open(old.join(FILE_NAME)).unwrap().set_modified(hour_ago).unwrap();
+        assert_eq!(move_portable(&old, &new), new);
+        assert_eq!(read(new.join(FILE_NAME)).as_deref(), Some("newer portable"));
+        assert_eq!(read(new.join("progress.portable.json")).as_deref(), Some("older portable"));
+        assert!(!old.join(FILE_NAME).exists());
+
+        // AppData can't be written to (a file is in the way): the portable
+        // progress stays where it is, and is used.
+        write(&old, FILE_NAME, "stuck");
+        std::fs::write(root.join("blocked"), b"").unwrap();
+        let blocked = root.join("blocked").join("afterglow");
+        assert_eq!(move_portable(&old, &blocked), old);
+        assert_eq!(read(old.join(FILE_NAME)).as_deref(), Some("stuck"));
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

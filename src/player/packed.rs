@@ -65,17 +65,16 @@ fn remove_unpacked(dir: &std::path::Path, keep: Option<&str>) {
     }
 }
 
-/// After the data folder moved (portable or not), the copy of libmpv left in
-/// the old one is removed, and the folder too if nothing else is in it.
+/// Once the data moved out of portable mode (see `progress::data_dir`), the
+/// copy of libmpv left next to the executable is removed, and its folder too
+/// if nothing else is in it.
 #[cfg(packed_mpv)]
 fn tidy_other_data_dir(dir: &std::path::Path) {
     if crate::progress::data_dir_fixed() {
         return;
     }
-    for other in [true, false].into_iter().filter_map(crate::progress::data_dir_for) {
-        if other != dir {
-            remove_unpacked(&other, None);
-            let _ = std::fs::remove_dir(&other);
-        }
+    if let Some(old) = crate::progress::old_portable_dir().filter(|old| old != dir) {
+        remove_unpacked(&old, None);
+        let _ = std::fs::remove_dir(&old);
     }
 }

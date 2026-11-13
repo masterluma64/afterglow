@@ -424,6 +424,10 @@ impl App {
         app.find_gone(ctx);
         app.check_recent(ctx);
         app.sync_watch();
+        // Long enough to read, as a warning is.
+        if let Some(text) = progress::moved_notice() {
+            app.notice = Some(Notice { text, warning: false, until: Instant::now() + WARNING_DURATION });
+        }
         if let Some(warning) = load_warning {
             app.warn(warning);
         }

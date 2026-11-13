@@ -184,23 +184,8 @@ impl App {
                 ui.add_space(8.0);
                 card(ui, "Data", |ui| {
                     grid("settings-data").show(ui, |ui| {
-                        let folder = self.store.folder();
-                        let fixed = progress::data_dir_fixed();
-                        let portable = folder.is_some() && folder == progress::data_dir_for(true);
-                        ui.label("Save progress");
-                        ui.horizontal(|ui| {
-                            for (choice, label) in [(true, "Next to afterglow.exe"), (false, "In AppData")] {
-                                let possible = !choice || progress::portable_possible();
-                                let option = ui.add_enabled(!fixed && possible, egui::Button::selectable(!fixed && portable == choice, label));
-                                let why = if fixed { "Chosen with AFTERGLOW_DATA_DIR" } else { "afterglow.exe's folder can't be written to (Program Files, say)" };
-                                if option.on_disabled_hover_text(why).clicked() && portable != choice {
-                                    self.actions.push(Action::SetPortable(choice));
-                                }
-                            }
-                        });
-                        ui.end_row();
-                        if let Some(folder) = folder {
-                            ui.label("");
+                        if let Some(folder) = self.store.folder() {
+                            ui.label("Progress and settings");
                             let open = ui.add_enabled(folder.is_dir(), egui::Button::new("Open folder"));
                             if open.on_hover_text(folder.display().to_string()).clicked() {
                                 let _ = std::process::Command::new("explorer").arg(&folder).spawn();

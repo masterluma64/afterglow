@@ -40,9 +40,9 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
   on the video, seek bar previews, media keys, progress on the taskbar button and an option to
   even out the volume.
 
-Progress and settings are saved in `data\progress.json` next to `afterglow.exe`, so the folder
-is portable; Settings can move it to `%LOCALAPPDATA%\afterglow` instead. `AFTERGLOW_DATA_DIR`
-overrides both (for testing).
+Progress and settings are saved in `%LOCALAPPDATA%fterglow\progress.json`. Copies from before
+portable mode was removed move theirs there on their first start. `AFTERGLOW_DATA_DIR` overrides
+the folder (for testing).
 
 ## Building
 
@@ -57,8 +57,8 @@ cargo run --release
 cargo run --release -- "D:\Shows\Foo"    # play a folder
 ```
 
-The release exe (about 43 MB) has libmpv packed in and unpacks it into its `data` folder on
-the first start, so it needs a folder it can write to.
+The release exe (about 43 MB) has libmpv packed in and unpacks it into the data folder on the
+first start.
 
 ## License
 

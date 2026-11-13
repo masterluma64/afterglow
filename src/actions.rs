@@ -55,8 +55,6 @@ pub(crate) enum Action {
     /// Puts a shortcut to Afterglow on the desktop or in the Start menu, or
     /// removes it.
     SetShortcut(shortcut::Place, bool),
-    /// Moves the progress file next to afterglow.exe, or into AppData.
-    SetPortable(bool),
     SetIncludeSubfolders(bool),
     SetWatched(PathBuf, bool),
     /// Marks several videos watched (or unwatched), such as the selected ones.
@@ -360,19 +358,6 @@ impl App {
                 match result {
                     Ok(()) => self.notify(if on { format!("Shortcut added to {name}") } else { format!("Shortcut removed from {name}") }),
                     Err(e) => self.warn(format!("Couldn't change {name} shortcut: {e}")),
-                }
-            }
-            Action::SetPortable(portable) => {
-                let Some(dir) = progress::data_dir_for(portable) else { return };
-                match self.store.move_to(&dir) {
-                    // Later starts look for this Afterglow by its data folder.
-                    Ok(()) => {
-                        if let instance::Claim::First(listener) = instance::claim(&instance::pipe_name(&dir)) {
-                            self.other_starts.push(listener.listen(ctx.clone()));
-                        }
-                        self.notify(if portable { "Progress is now saved next to afterglow.exe" } else { "Progress is now saved in AppData" });
-                    }
-                    Err(e) => self.warn(format!("Couldn't move progress: {e}")),
                 }
             }
             Action::OpenPalette => {
