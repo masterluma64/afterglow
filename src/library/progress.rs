@@ -303,7 +303,8 @@ fn key(path: &Path) -> String {
 
 /// Where the app keeps its data: a `data` folder next to the executable, so
 /// the app is portable, or Afterglow's folder in the local AppData. Whichever
-/// holds the progress file wins; the first start is portable.
+/// holds the progress file wins; the first start is portable, unless the
+/// executable's folder can't be written to (Program Files, say).
 /// `AFTERGLOW_DATA_DIR` overrides both, e.g. for testing.
 pub fn data_dir() -> Option<PathBuf> {
     static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
@@ -311,14 +312,39 @@ pub fn data_dir() -> Option<PathBuf> {
         if let Some(dir) = std::env::var_os("AFTERGLOW_DATA_DIR") {
             return Some(PathBuf::from(dir));
         }
-        let portable = data_dir_for(true);
-        let has_progress = |dir: &Option<PathBuf>| dir.as_ref().is_some_and(|dir| dir.join(FILE_NAME).is_file());
-        match data_dir_for(false) {
-            appdata if !has_progress(&portable) && has_progress(&appdata) => appdata,
-            _ => portable,
-        }
+        choose_data_dir(data_dir_for(true), data_dir_for(false))
     })
     .clone()
+}
+
+/// `data_dir` between the portable folder and the one in AppData.
+fn choose_data_dir(portable: Option<PathBuf>, appdata: Option<PathBuf>) -> Option<PathBuf> {
+    let has_progress = |dir: &Option<PathBuf>| dir.as_ref().is_some_and(|dir| dir.join(FILE_NAME).is_file());
+    if has_progress(&portable) {
+        return portable;
+    }
+    if has_progress(&appdata) {
+        return appdata;
+    }
+    match portable {
+        Some(dir) if writable(&dir) => Some(dir),
+        _ => appdata,
+    }
+}
+
+/// Whether the data folder can be next to the executable, checked once.
+pub fn portable_possible() -> bool {
+    static POSSIBLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *POSSIBLE.get_or_init(|| data_dir_for(true).is_some_and(|dir| writable(&dir)))
+}
+
+/// Whether files can be saved in `dir`, creating it if needed: tried by
+/// writing a file, since folder permissions don't tell the whole story.
+pub fn writable(dir: &Path) -> bool {
+    let probe = dir.join(".afterglow-write-test");
+    let ok = std::fs::create_dir_all(dir).is_ok() && std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
 }
 
 /// The data folder when portable, or when not.
@@ -1316,6 +1342,28 @@ mod tests {
     fn loads_files_saved_before_folder_settings() {
         let store: Store = serde_json::from_slice(br#"{"volume": 80.0, "playlist": []}"#).unwrap();
         assert!(store.folders.is_empty());
+    }
+
+    #[test]
+    fn falls_back_to_appdata_where_the_exe_folder_is_read_only() {
+        let root = std::env::temp_dir().join(format!("afterglow-datadir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let (portable, appdata) = (root.join("portable"), root.join("appdata"));
+        // A file where a folder should be: nothing can be saved under it.
+        std::fs::write(root.join("file"), b"").unwrap();
+        let read_only = root.join("file").join("data");
+        let choose = |p: &Path, a: &Path| choose_data_dir(Some(p.to_path_buf()), Some(a.to_path_buf()));
+
+        assert_eq!(choose(&portable, &appdata), Some(portable.clone()), "first start: portable");
+        assert_eq!(choose(&read_only, &appdata), Some(appdata.clone()), "unless that can't be written to");
+        std::fs::create_dir_all(&appdata).unwrap();
+        std::fs::write(appdata.join(FILE_NAME), b"{}").unwrap();
+        assert_eq!(choose(&portable, &appdata), Some(appdata.clone()), "progress in AppData is used");
+        std::fs::write(portable.join(FILE_NAME), b"{}").unwrap();
+        assert_eq!(choose(&portable, &appdata), Some(portable.clone()), "progress next to the exe wins");
+        assert!(!portable.join(".afterglow-write-test").exists(), "the test file is cleaned up");
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

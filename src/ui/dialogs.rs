@@ -190,8 +190,10 @@ impl App {
                         ui.label("Save progress");
                         ui.horizontal(|ui| {
                             for (choice, label) in [(true, "Next to afterglow.exe"), (false, "In AppData")] {
-                                let option = ui.add_enabled(!fixed, egui::Button::selectable(!fixed && portable == choice, label));
-                                if option.on_disabled_hover_text("Chosen with AFTERGLOW_DATA_DIR").clicked() && portable != choice {
+                                let possible = !choice || progress::portable_possible();
+                                let option = ui.add_enabled(!fixed && possible, egui::Button::selectable(!fixed && portable == choice, label));
+                                let why = if fixed { "Chosen with AFTERGLOW_DATA_DIR" } else { "afterglow.exe's folder can't be written to (Program Files, say)" };
+                                if option.on_disabled_hover_text(why).clicked() && portable != choice {
                                     self.actions.push(Action::SetPortable(choice));
                                 }
                             }
