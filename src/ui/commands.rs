@@ -236,8 +236,6 @@ impl App {
             self.command(Action::OpenScreenshotFolder, "snapshot pictures images"),
             self.command(Action::ToggleSidebar, "sidebar"),
             self.command(Action::TogglePin, "sidebar dock"),
-            self.command(Action::CheckForUpdates, "update upgrade new version release download"),
-            self.command(Action::InstallUpdate, "update upgrade new version release restart install"),
             self.command(Action::ShowStats, "statistics hours watched time streak history"),
             self.command(Action::OpenSettings, "preferences options"),
             self.command(Action::ShowHelp, "help keys"),

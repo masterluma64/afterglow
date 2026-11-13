@@ -25,14 +25,15 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    7z a -t7z -mx=9 afterglow-X.Y.Z-windows-x64.7z afterglow-X.Y.Z-windows-x64.exe
    ```
 
-6. Sign the archive, so copies that update themselves accept it (see `docs/updates.md`):
+6. Sign the archive, so a future updater can check that a release came from you:
 
    ```sh
    cargo run --example sign_release -- afterglow-X.Y.Z-windows-x64.7z
    ```
 
    This writes `afterglow-X.Y.Z-windows-x64.7z.sig`, using the key in
-   `%APPDATA%\afterglow-release\signing.key`.
+   `%APPDATA%\afterglow-release\signing.key` (keep a copy of it somewhere safe). Its public
+   half is `a34ddcca28d3d5f373a15ce82e5b9ffa4f73004ecdcf9b898feae8f18b892f8c`.
 
 7. Create the release with the archive and its signature. Upload only the `.7z` and its
    `.sig`, never the bare exe:
@@ -42,5 +43,4 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    ```
 
    The notes are a bullet list of what changed since the last release, from
-   `git log vPREVIOUS..vX.Y.Z --oneline`, written for someone using the app. Updated copies
-   show them after restarting, under "Updated to Afterglow X.Y.Z".
+   `git log vPREVIOUS..vX.Y.Z --oneline`, written for someone using the app.

@@ -1,5 +1,5 @@
-//! Signs release archives, so afterglow only installs updates that came from
-//! the owner (see docs/updates.md).
+//! Signs release archives, so that once afterglow updates itself from GitHub
+//! releases, it can tell an update really came from its maintainer.
 //!
 //! ```sh
 //! cargo run --example sign_release -- new-key       # once: makes the key
@@ -8,7 +8,7 @@
 //!
 //! The private key is kept in `%APPDATA%\afterglow-release\signing.key`,
 //! outside the repo; `AFTERGLOW_SIGNING_KEY` points elsewhere. Its public half
-//! goes in `PUBLIC_KEY` in src/update.rs.
+//! is in docs/releasing.md, for the updater to check against.
 
 use std::path::PathBuf;
 
@@ -48,7 +48,7 @@ fn main() {
         std::fs::write(&path, hex(&seed)).expect("could not save the key");
         let public = SigningKey::from_bytes(&seed).verifying_key();
         println!("Saved the signing key in {}. Keep a copy somewhere safe.", path.display());
-        println!("Public key, for PUBLIC_KEY in src/update.rs:\n{}", hex(public.as_bytes()));
+        println!("Public key, for docs/releasing.md:\n{}", hex(public.as_bytes()));
         return;
     }
     let seed = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()));

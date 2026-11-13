@@ -156,8 +156,6 @@ impl App {
             Action::ToggleFullscreen if self.fullscreen => item(icons::CORNERS_IN, "Exit fullscreen", "F"),
             Action::ToggleFullscreen => item(icons::CORNERS_OUT, "Fullscreen", "F"),
             Action::ToggleOnTop => item(icons::STACK, "Keep on top", "T").on(self.store.on_top),
-            Action::CheckForUpdates => item(icons::DOWNLOAD, "Check for updates", "").enabled(!self.store.settings.update_server.trim().is_empty()),
-            Action::InstallUpdate => item(icons::DOWNLOAD, "Restart to update", "").enabled(matches!(self.updater.state, update::State::Ready { .. })),
             Action::ToggleMiniPlayer if self.mini() => item(icons::PICTURE_IN_PICTURE, "Exit mini player", "Shift+T"),
             Action::ToggleMiniPlayer => item(icons::PICTURE_IN_PICTURE, "Mini player", "Shift+T"),
             Action::Skip => {
