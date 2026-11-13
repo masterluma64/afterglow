@@ -110,6 +110,11 @@ pub(crate) enum Action {
     SubStep(i32),
     /// Stretches subtitle timing, for subtitles made for another frame rate.
     SetSubSpeed(f64),
+    /// Shifts the sound later (or earlier, when negative) by this many seconds.
+    AdjustAudioDelay(f64),
+    SetAudioDelay(f64),
+    /// Makes the playing video's audio delay its folder's.
+    UseAudioDelayForFolder,
     FrameStep { forward: bool },
     SetSpeed(f64),
     /// Jumps to the next chapter, or back to the start of this or the previous one.
@@ -208,6 +213,10 @@ impl App {
                 (M::SHIFT, Key::X, Action::AdjustSubDelay(1.0)),
                 (M::NONE, Key::Z, Action::AdjustSubDelay(-0.1)),
                 (M::NONE, Key::X, Action::AdjustSubDelay(0.1)),
+                (M::SHIFT, Key::G, Action::AdjustAudioDelay(-1.0)),
+                (M::SHIFT, Key::H, Action::AdjustAudioDelay(1.0)),
+                (M::NONE, Key::G, Action::AdjustAudioDelay(-0.1)),
+                (M::NONE, Key::H, Action::AdjustAudioDelay(0.1)),
                 (M::NONE, Key::OpenBracket, Action::SetSpeed(step_speed(speed, false))),
                 (M::NONE, Key::CloseBracket, Action::SetSpeed(step_speed(speed, true))),
                 (M::NONE, Key::Backspace, Action::SetSpeed(1.0)),
@@ -367,6 +376,15 @@ impl App {
                     self.apply(Action::SetFolderSettings(video, folder), ctx);
                     self.store.save();
                     self.notify("Subtitle timing saved for this folder");
+                }
+            }
+            Action::UseAudioDelayForFolder => {
+                if let Some((video, mut folder)) = self.playing_folder() {
+                    let delay = self.playback.audio_delay;
+                    folder.audio_delay = (delay != 0.0).then_some(delay);
+                    self.apply(Action::SetFolderSettings(video, folder), ctx);
+                    self.store.save();
+                    self.notify("Audio delay saved for this folder");
                 }
             }
             Action::Skip => {
@@ -618,6 +636,8 @@ impl App {
                         | Action::SetSubDelay(_)
                         | Action::SubStep(_)
                         | Action::SetSubSpeed(_)
+                        | Action::AdjustAudioDelay(_)
+                        | Action::SetAudioDelay(_)
                 );
                 // They are saved once mpv reports them (see `property_changed`).
                 self.tracks_changed_by_user |= changes_tracks;
@@ -719,6 +739,14 @@ impl App {
                     None => format!("Subtitle speed {speed:.4}"),
                 });
             }
+            Action::AdjustAudioDelay(by) if self.loaded => {
+                mpv.send(&["add", "audio-delay", &by.to_string()]);
+                self.notify(audio_delay_notice(self.playback.audio_delay + by));
+            }
+            Action::SetAudioDelay(delay) if self.loaded => {
+                mpv.set("audio-delay", &delay.to_string());
+                self.notify(audio_delay_notice(delay));
+            }
             Action::Chapter { forward } if self.loaded => {
                 if self.chapters.is_empty() {
                     return self.notify("This video has no chapters");
@@ -780,6 +808,17 @@ impl App {
         } else {
             self.save_current_progress();
         }
+    }
+}
+
+/// "Audio delay +0.2 s (sound later)".
+fn audio_delay_notice(delay: f64) -> String {
+    // Rounded, so steps of 0.1 adding up to nothing don't show as −0.0.
+    let delay = (delay * 10.0).round() / 10.0;
+    match delay {
+        d if d > 0.0 => format!("Audio delay {d:+.1} s (sound later)"),
+        d if d < 0.0 => format!("Audio delay {d:+.1} s (sound earlier)"),
+        _ => "Audio delay 0.0 s".into(),
     }
 }
 

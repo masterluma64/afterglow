@@ -173,6 +173,10 @@ impl App {
             list.push(self.command_named(format!("Audio: {}", t.label), Action::SetTrack { kind: "audio", id: Some(t.id) }, "track language"));
         }
         list.extend([
+            self.command(Action::AdjustAudioDelay(-0.1), "audio sound delay sync lip out of sync bluetooth"),
+            self.command(Action::AdjustAudioDelay(0.1), "audio sound delay sync lip out of sync bluetooth"),
+            self.command(Action::SetAudioDelay(0.0), "audio sound delay sync lip"),
+            self.command(Action::UseAudioDelayForFolder, "audio sound delay sync series show default"),
             self.command(Action::ToggleLevelVolume, "level normalize loudness night mode quiet loud dialogue compress"),
             self.command(Action::CycleSubtitles, "captions cycle"),
             self.command_named("Subtitles: Off", Action::SetTrack { kind: "sub", id: None }, "captions hide"),

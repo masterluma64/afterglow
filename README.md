@@ -22,7 +22,8 @@ a movie, and it plays just that. Written in Rust with [egui](https://github.com/
   end screen offers what to do once nothing is left.
 - **Subtitles and audio**: embedded and matching external subtitles are picked up, with
   preferred languages. Shift the timing, sync to the line you just heard, or fix subtitles made
-  for another frame rate. Track choices are remembered per video.
+  for another frame rate. Sound that is out of sync with the picture can be delayed or brought
+  forward (G / H). Track choices and delays are remembered per video.
 - **Folder settings**: skip a show's opening and ending, and give a folder its own languages,
   subtitle timing, speed and more.
 - **Titles**: videos are shown by the title stored in the file when it tells them apart.

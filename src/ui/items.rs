@@ -87,6 +87,21 @@ impl App {
                 };
                 item(icon, label, key).enabled(loaded)
             }
+            Action::AdjustAudioDelay(by) => {
+                let label = if *by < 0.0 { "Play sound earlier" } else { "Play sound later" };
+                let key = match by {
+                    b if *b <= -1.0 => "Shift+G",
+                    b if *b < 0.0 => "G",
+                    b if *b >= 1.0 => "Shift+H",
+                    _ => "H",
+                };
+                item(icons::TIMER, label, key).enabled(loaded)
+            }
+            Action::SetAudioDelay(_) => item(icons::RESET, "Reset audio delay", "").enabled(loaded && self.playback.audio_delay != 0.0),
+            Action::UseAudioDelayForFolder => {
+                let movie = self.current_path().is_some_and(|p| self.store.is_movie(p));
+                item(icons::SLIDERS, "Use this delay for whole folder", "").enabled(loaded && !movie)
+            }
             Action::SetSubSpeed(speed) => {
                 let name = SUB_TIMINGS.iter().find(|(s, _)| (s - speed).abs() < 1e-6).map_or("custom", |(_, name)| *name);
                 item(icons::TIMER, format!("Subtitle timing: {name}"), "").enabled(loaded)

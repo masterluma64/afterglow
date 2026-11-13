@@ -144,6 +144,9 @@ pub struct FolderSettings {
     /// until it is changed for that video.
     pub sub_delay: Option<f64>,
     pub sub_speed: Option<f64>,
+    /// Where the audio delay starts for a video in the folder, until it is
+    /// changed for that video.
+    pub audio_delay: Option<f64>,
     pub watched_percent: Option<f64>,
     pub autoplay_next: Option<bool>,
     pub level_volume: Option<bool>,
@@ -181,6 +184,8 @@ pub struct TrackPrefs {
     pub sub_delay: f64,
     /// Factor subtitle timing is stretched by, if not 1.
     pub sub_speed: Option<f64>,
+    /// Seconds the sound is shifted by, later when positive.
+    pub audio_delay: f64,
     /// Subtitle files loaded by hand, in the order they were added.
     pub sub_files: Vec<PathBuf>,
 }

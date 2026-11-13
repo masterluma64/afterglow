@@ -256,6 +256,15 @@ impl App {
         if kind == "audio" {
             ui.separator();
             self.menu_item(ui, Action::ToggleLevelVolume).on_hover_text("Night mode: quiet dialogue gets louder and loud scenes quieter");
+            ui.separator();
+            ui.label(RichText::new("Timing").bold());
+            let delay = self.playback.audio_delay;
+            ui.horizontal(|ui| {
+                ui.label(format!("Delay {delay:+.1} s")).on_hover_text("For sound out of sync with the picture: more plays it later");
+                self.delay_buttons(ui, [Action::AdjustAudioDelay(-0.1), Action::AdjustAudioDelay(0.1), Action::SetAudioDelay(0.0)]);
+            });
+            self.menu_item(ui, Action::UseAudioDelayForFolder)
+                .on_hover_text("Videos in this folder start with this delay, unless you set it for one of them");
         }
         if kind == "sub" {
             ui.separator();
@@ -264,14 +273,7 @@ impl App {
             ui.label(RichText::new("Timing").bold());
             ui.horizontal(|ui| {
                 ui.label(format!("Delay {:+.1} s", self.playback.sub_delay));
-                // Small buttons, named on hover as the actions are elsewhere.
-                for (icon, action) in [(icons::MINUS, Action::AdjustSubDelay(-0.1)), (icons::PLUS, Action::AdjustSubDelay(0.1)), (icons::RESET, Action::SetSubDelay(0.0))] {
-                    let item = self.item(&action);
-                    let tip = if item.key.is_empty() { item.label.clone() } else { format!("{} ({})", item.label, item.key) };
-                    if ui.add_enabled(item.enabled, egui::Button::new(icon).small()).on_hover_text(tip).clicked() {
-                        self.actions.push(action);
-                    }
-                }
+                self.delay_buttons(ui, [Action::AdjustSubDelay(-0.1), Action::AdjustSubDelay(0.1), Action::SetSubDelay(0.0)]);
             });
             // Syncing by ear: when a line is heard, its subtitle is shown now.
             self.menu_item(ui, Action::SubStep(-1)).on_hover_text("For a line whose subtitle already went by");
@@ -288,6 +290,18 @@ impl App {
             }
             self.menu_item(ui, Action::UseSubTimingForFolder)
                 .on_hover_text("Videos in this folder start with this delay and timing, unless you set it for one of them");
+        }
+    }
+
+    /// Small −, + and reset buttons for a delay, named on hover as the
+    /// actions are elsewhere.
+    fn delay_buttons(&mut self, ui: &mut egui::Ui, actions: [Action; 3]) {
+        for (icon, action) in [icons::MINUS, icons::PLUS, icons::RESET].into_iter().zip(actions) {
+            let item = self.item(&action);
+            let tip = if item.key.is_empty() { item.label.clone() } else { format!("{} ({})", item.label, item.key) };
+            if ui.add_enabled(item.enabled, egui::Button::new(icon).small()).on_hover_text(tip).clicked() {
+                self.actions.push(action);
+            }
         }
     }
 

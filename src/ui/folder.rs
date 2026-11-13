@@ -78,6 +78,11 @@ impl App {
                             ui.add(egui::DragValue::new(v).range(-600.0..=600.0).speed(0.05).fixed_decimals(1).suffix(" s"));
                         });
                         ui.end_row();
+                        ui.label("Audio delay").on_hover_text("Where each video starts, until you change it for that video. More plays the sound later.");
+                        custom_field(ui, &mut folder.audio_delay, 0.0, |v| format!("{v:+.1} s"), |ui, v| {
+                            ui.add(egui::DragValue::new(v).range(-10.0..=10.0).speed(0.01).fixed_decimals(1).suffix(" s"));
+                        });
+                        ui.end_row();
                         ui.label("Subtitle timing").on_hover_text("For subtitles that drift further off over time");
                         custom_field(ui, &mut folder.sub_speed, 1.0, |v| sub_timing_name(*v), |ui, v| {
                             egui::ComboBox::from_id_salt("folder-sub-timing").selected_text(sub_timing_name(*v)).show_ui(ui, |ui| {

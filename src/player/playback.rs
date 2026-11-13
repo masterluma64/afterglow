@@ -255,15 +255,16 @@ impl App {
         self.open_for_preview();
         let Ok(mpv) = &self.mpv else { return };
         self.loaded = true;
-        // Restore this video's track choices. The subtitle delay is global in
-        // mpv, so it is always set: to the folder's if nothing was chosen for
-        // the video, else back to 0.
+        // Restore this video's track choices. The subtitle and audio delays
+        // are global in mpv, so they are always set: to the folder's if
+        // nothing was chosen for the video, else back to 0.
         let prefs = match self.current_path() {
             Some(path) => self.store.tracks(path).cloned().unwrap_or_else(|| self.folder_track_prefs(path)),
             None => Default::default(),
         };
         mpv.set("sub-delay", &prefs.sub_delay.to_string());
         mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
+        mpv.set("audio-delay", &prefs.audio_delay.to_string());
         // Subtitle files load in the background when sent without waiting, so
         // the saved tracks are selected once they have all been added.
         let files: Vec<PathBuf> = prefs.sub_files.iter().filter(|f| f.is_file()).cloned().collect();
@@ -309,6 +310,7 @@ impl App {
             "speed" => p.speed = value.as_f64().unwrap_or(1.0),
             "sub-delay" => p.sub_delay = value.as_f64().unwrap_or(0.0),
             "sub-speed" => p.sub_speed = value.as_f64().unwrap_or(1.0),
+            "audio-delay" => p.audio_delay = value.as_f64().unwrap_or(0.0),
             "chapter-list" => self.chapters = mpv::Chapter::list(&value),
             // Only once the video is open, so a late report about the one
             // before it can't name this one. A video without a title is left
@@ -332,7 +334,7 @@ impl App {
             }
             _ => {}
         }
-        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed") {
+        if self.tracks_changed_by_user && matches!(name, "track-list" | "sub-delay" | "sub-speed" | "audio-delay") {
             self.remember_tracks();
         }
     }
@@ -351,8 +353,9 @@ impl App {
         // In mpv's terms: a track id, or "no" for none.
         let selected = |kind| self.tracks(kind).find(|t| t.selected).map_or("no".to_string(), |t| t.id.to_string());
         let (audio, subtitle) = (selected("audio"), selected("sub"));
-        let Playback { sub_delay, sub_speed, .. } = self.playback;
+        let Playback { sub_delay, sub_speed, audio_delay, .. } = self.playback;
         let prefs = self.store.tracks_mut(&path);
+        prefs.audio_delay = audio_delay;
         prefs.audio = Some(audio);
         prefs.subtitle = Some(subtitle);
         prefs.sub_delay = sub_delay;
@@ -477,13 +480,14 @@ impl App {
         self.folder_speed = speed;
     }
 
-    /// The subtitle timing a video starts with when none was chosen for it:
-    /// its folder's.
+    /// The subtitle timing and audio delay a video starts with when none
+    /// were chosen for it: its folder's.
     pub(crate) fn folder_track_prefs(&self, video: &Path) -> progress::TrackPrefs {
         let folder = self.store.folder_settings(video).map(|(_, f)| f);
         progress::TrackPrefs {
             sub_delay: folder.and_then(|f| f.sub_delay).unwrap_or(0.0),
             sub_speed: folder.and_then(|f| f.sub_speed),
+            audio_delay: folder.and_then(|f| f.audio_delay).unwrap_or(0.0),
             ..Default::default()
         }
     }
