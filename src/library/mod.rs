@@ -22,13 +22,25 @@ pub fn is_video(path: &Path) -> bool {
 
 /// The videos in a folder, optionally including its subfolders, in natural
 /// order of their paths ("Part 2" before "Part 10", and each subfolder's
-/// videos kept together after the folder's own).
+/// videos kept together after the folder's own). A folder with no videos of
+/// its own always includes its subfolders: it's a show with a folder per
+/// season.
 pub fn scan_folder(dir: &Path, include_subfolders: bool) -> std::io::Result<Vec<PathBuf>> {
     std::fs::read_dir(dir)?;
     let mut videos = Vec::new();
     collect(dir, include_subfolders, &mut HashSet::new(), &mut videos);
+    if videos.is_empty() && !include_subfolders {
+        collect(dir, true, &mut HashSet::new(), &mut videos);
+    }
     sort_in_folder(dir, &mut videos);
     Ok(videos)
+}
+
+/// The folder a video is in, relative to the opened folder `dir`: its
+/// season, when `dir` is a show with a folder per season. `None` for a
+/// video outside `dir`, and an empty path for one directly in it.
+pub fn season_of<'a>(dir: &Path, video: &'a Path) -> Option<&'a Path> {
+    video.parent()?.strip_prefix(dir).ok()
 }
 
 /// Puts videos in a folder in the order opening it plays them: the folder's
@@ -139,6 +151,25 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(flat, ["b 2.mp4", "b 10.mkv"]);
         assert_eq!(nested, ["b 2.mp4", "b 10.mkv", "Part 2/y.mkv", "Part 10/x.mkv"]);
+    }
+
+    /// A show with a folder per season opens with all of them, even with
+    /// subfolders turned off.
+    #[test]
+    fn opens_seasons() {
+        let root = std::env::temp_dir().join(format!("afterglow-seasons-{}", std::process::id()));
+        for f in ["Season 10/01.mkv", "Season 2/02.mkv", "Season 2/01.mkv", "cover.jpg"] {
+            let path = root.join(f);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"").unwrap();
+        }
+        let found = scan_folder(&root, false).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+        let names: Vec<String> = found.iter().map(|p| p.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/")).collect();
+        assert_eq!(names, ["Season 2/01.mkv", "Season 2/02.mkv", "Season 10/01.mkv"]);
+        assert_eq!(season_of(&root, &found[2]), Some(Path::new("Season 10")));
+        assert_eq!(season_of(&root, &root.join("a.mkv")), Some(Path::new("")));
+        assert_eq!(season_of(&root, Path::new(r"D:\elsewhere\a.mkv")), None);
     }
 
     /// A link back up the tree is followed once, not forever.

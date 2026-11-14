@@ -140,6 +140,39 @@ fn still_row(ui: &mut egui::Ui, entry: &progress::Entry, name: &str, playing: bo
     resp
 }
 
+/// A playlist entry's display name, and its season.
+pub(crate) struct RowName {
+    /// With the season it is from, when it isn't directly in the opened folder.
+    pub(crate) name: String,
+    /// Without the season.
+    pub(crate) short: String,
+    /// `name` in lowercase, for the search.
+    pub(crate) lower: String,
+    /// An index into `App::seasons`, if the playlist has seasons and this
+    /// video is in the opened folder.
+    pub(crate) season: Option<usize>,
+}
+
+/// Which season the playlist shows, when it is a show with a folder per season.
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) enum SeasonPick {
+    /// The playing video's, following it into the next season.
+    Playing,
+    All,
+    /// This one (its folder, relative to the opened folder).
+    Only(PathBuf),
+}
+
+/// A season's name: its folder ("Season 2"), or for one deeper in, its
+/// folders ("Season 2 / Extras"). Videos directly in the show's `folder`
+/// go by its name.
+pub(crate) fn season_name(folder: &Path, season: &Path) -> String {
+    if season.as_os_str().is_empty() {
+        return display_name(folder);
+    }
+    season.to_string_lossy().replace(std::path::MAIN_SEPARATOR, " / ")
+}
+
 /// The "Include subfolders" switch in the playlist's right-click menus.
 pub(crate) fn subfolder_option(ui: &mut egui::Ui, app: &App, picked: &mut Vec<Action>) {
     let tip = "Also play videos in subfolders when opening a folder (rescans the opened folder now)";
@@ -304,10 +337,17 @@ impl App {
         }
         let query = self.search.trim().to_lowercase();
         self.refresh_names();
-        // Indices of the entries to list, filtered by the search.
-        let visible: Vec<usize> =
-            (0..self.playlist.len()).filter(|&i| query.is_empty() || self.names[i].1.contains(&query)).collect();
+        // The search looks through every season.
+        let season = if query.is_empty() { self.shown_season() } else { None };
+        // Indices of the entries to list, filtered by the search or season.
+        let visible: Vec<usize> = (0..self.playlist.len())
+            .filter(|&i| query.is_empty() || self.names[i].lower.contains(&query))
+            .filter(|&i| season.is_none() || self.names[i].season == season)
+            .collect();
         self.search_box(ui, &visible);
+        if query.is_empty() && !self.seasons.is_empty() {
+            self.season_picker(ui, season);
+        }
         if visible.is_empty() {
             ui.add_space(4.0);
             ui.weak(format!("No videos match \"{}\".", self.search.trim()));
@@ -332,7 +372,9 @@ impl App {
             let mut rows = Vec::new();
             for &index in &visible[range] {
                 let path = &self.playlist[index];
-                let name = &self.names[index].0;
+                // Within a season, the season's name needn't be on every row.
+                let row = &self.names[index];
+                let name = if season.is_some() { &row.short } else { &row.name };
                 let selected = self.selected.contains(path).then_some(selection.as_slice());
                 let still = stills.then(|| self.stills.get(path));
                 let mut chosen = Vec::new();
@@ -401,27 +443,96 @@ impl App {
         for title in self.playlist.iter().filter_map(|p| self.store.title(p)) {
             *titles.entry(title).or_default() += 1;
         }
+        let mut seasons: Vec<PathBuf> = Vec::new();
         let names = self
             .playlist
             .iter()
             .map(|path| {
-                let name = match self.store.title(path) {
+                let short = match self.store.title(path) {
                     Some(title) if titles[title] == 1 => title.to_string(),
                     _ => display_name(path),
                 };
                 // Videos from a subfolder of the opened folder show where they're from.
-                let subfolder = folder.and_then(|f| path.parent()?.strip_prefix(f).ok());
-                let name = match subfolder {
-                    Some(sub) if !sub.as_os_str().is_empty() => {
-                        format!("{} / {name}", sub.to_string_lossy().replace(std::path::MAIN_SEPARATOR, " / "))
-                    }
-                    _ => name,
+                let subfolder = folder.and_then(|f| library::season_of(f, path));
+                let name = match (folder, subfolder) {
+                    (Some(folder), Some(sub)) if !sub.as_os_str().is_empty() => format!("{} / {short}", season_name(folder, sub)),
+                    _ => short.clone(),
                 };
+                let season = subfolder.map(|sub| match seasons.iter().position(|s| s == sub) {
+                    Some(i) => i,
+                    None => {
+                        seasons.push(sub.to_path_buf());
+                        seasons.len() - 1
+                    }
+                });
                 let lower = name.to_lowercase();
-                (name, lower)
+                RowName { name, short, lower, season }
             })
             .collect();
         self.names = names;
+        // Only a show with more than one season gets to pick one.
+        if seasons.len() < 2 {
+            seasons.clear();
+            for row in &mut self.names {
+                row.season = None;
+            }
+        }
+        self.seasons = seasons;
+    }
+
+    /// The season the playlist shows (an index into `seasons`), or `None`
+    /// for all of them.
+    pub(crate) fn shown_season(&self) -> Option<usize> {
+        if self.seasons.is_empty() {
+            return None;
+        }
+        let of = |index: usize| self.names.get(index).and_then(|row| row.season);
+        match &self.season_pick {
+            SeasonPick::All => None,
+            SeasonPick::Only(season) => self.seasons.iter().position(|s| s == season),
+            // The playing video's, or else the one to carry on with.
+            SeasonPick::Playing => self.current.or_else(|| self.continue_target()).and_then(of).or(Some(0)),
+        }
+    }
+
+    /// Picks the season the playlist shows, with how much of each is watched.
+    fn season_picker(&mut self, ui: &mut egui::Ui, shown: Option<usize>) {
+        let playing = self.current.and_then(|i| self.names.get(i)?.season);
+        let folder = self.store.folder.clone().unwrap_or_default();
+        let label = |i: Option<usize>| match i {
+            Some(i) => season_name(&folder, &self.seasons[i]),
+            None => "All seasons".to_string(),
+        };
+        let watched = |season: usize| {
+            let rows = self.names.iter().zip(&self.playlist).filter(|(row, _)| row.season == Some(season));
+            let (count, done) = rows.fold((0, 0), |(n, w), (_, p)| (n + 1, w + usize::from(self.store.get(p).watched)));
+            format!("{done} of {count} watched")
+        };
+        let mut pick = None;
+        egui::ComboBox::from_id_salt("season-picker")
+            .width(ui.available_width())
+            .selected_text(label(shown))
+            .show_ui(ui, |ui| {
+                for i in (0..self.seasons.len()).map(Some).chain([None]) {
+                    let text = match i {
+                        Some(i) if playing == Some(i) => format!("{}  {}", label(Some(i)), icons::PLAY),
+                        _ => label(i),
+                    };
+                    let hover = i.map(watched).unwrap_or_else(|| format!("Every video, {} seasons", self.seasons.len()));
+                    if ui.selectable_label(shown == i, text).on_hover_text(hover).clicked() {
+                        pick = Some(i);
+                    }
+                }
+            });
+        if let Some(i) = pick {
+            // The playing video's season goes along when the next season starts.
+            self.season_pick = match i {
+                None => SeasonPick::All,
+                Some(i) if playing.is_none_or(|p| p == i) => SeasonPick::Playing,
+                Some(i) => SeasonPick::Only(self.seasons[i].clone()),
+            };
+        }
+        ui.add_space(2.0);
     }
 
     /// The name a video is shown by: the title stored in its file, unless it

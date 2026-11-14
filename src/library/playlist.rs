@@ -277,8 +277,8 @@ impl App {
         }
         list.extend(videos);
         if list.is_empty() {
-            let hint = if self.store.include_subfolders { "" } else { " (subfolders are not included)" };
-            self.warn(format!("No videos found in {}{hint}", display_name(&folders[0].0)));
+            // Without videos of its own, its subfolders were looked in too.
+            self.warn(format!("No videos found in {}", display_name(&folders[0].0)));
             return;
         }
         // Remember a single opened folder, so the subfolder setting can rescan it.
@@ -334,6 +334,7 @@ impl App {
     pub(crate) fn replace_playlist(&mut self, list: Vec<PathBuf>, ctx: &egui::Context) {
         self.stop(ctx);
         self.playlist = list;
+        self.season_pick = ui::sidebar::SeasonPick::Playing;
         self.save_playlist();
         // Another single video keeps it hidden.
         self.show_sidebar = !self.single_video();

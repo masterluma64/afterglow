@@ -39,7 +39,8 @@ Afterglow isn't code-signed, so Windows SmartScreen may warn you the first time.
   still of what's next; one click carries on.
 - **Plays a show in order.** Open a folder and its episodes become the playlist, each with a
   still and how much is left. The next one starts after a short countdown. New episodes
-  added to the folder show up by themselves.
+  added to the folder show up by themselves. A show with a folder per season opens whole,
+  with a picker for the season.
 - **Skips openings and endings,** found from chapter names or set once for a whole show.
 - **Gets subtitles and sound in sync.** Shift the subtitles, sync them to the line you just
   heard, or fix ones made for another frame rate. Delay or advance the sound for audio that's

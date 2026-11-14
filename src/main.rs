@@ -269,8 +269,13 @@ struct App {
     scroll_to_pick: Option<usize>,
     /// What the window's title says now.
     window_title: String,
-    /// Display names of the playlist entries, and their lowercase forms.
-    names: Vec<(String, String)>,
+    /// Display names of the playlist entries, and their seasons.
+    names: Vec<ui::sidebar::RowName>,
+    /// The seasons in the playlist (see `refresh_names`), when it is a show
+    /// with a folder per season.
+    seasons: Vec<PathBuf>,
+    /// Which season the playlist shows.
+    season_pick: ui::sidebar::SeasonPick,
     /// When the playlist summary was added up: total and watched seconds, and
     /// how many lengths are unknown.
     summary: Option<(Instant, f64, f64, usize)>,
@@ -410,6 +415,8 @@ impl App {
             scroll_to_pick: None,
             window_title: APP_NAME.to_string(),
             names: Vec::new(),
+            seasons: Vec::new(),
+            season_pick: ui::sidebar::SeasonPick::Playing,
             summary: None,
             confirm_reset: false,
             confirm_clear_stats: false,
