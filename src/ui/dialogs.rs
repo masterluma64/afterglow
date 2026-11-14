@@ -389,7 +389,7 @@ impl App {
             });
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Press ? or Esc to close.").weak());
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = ui.button("Close").clicked());
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = gradient::button(ui, "Close").clicked());
             });
         });
         if close || modal.should_close() {
@@ -513,7 +513,7 @@ impl App {
                 ui.add_space(6.0);
             }
             ui.allocate_ui_with_layout(vec2(ui.available_width(), ui.spacing().interact_size.y), Layout::right_to_left(Align::Center), |ui| {
-                close = ui.button("Close").clicked();
+                close = gradient::button(ui, "Close").clicked();
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| self.menu_item(ui, Action::ConfirmClearStats));
             });
         });
