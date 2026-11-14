@@ -59,6 +59,14 @@ impl App {
                     ui.add_space(2.0);
                     ui.weak("While it plays, a Skip button shows in the bottom-right corner of the video (Enter skips).");
                     ui.weak("Without a time here, chapters named like Intro, Opening, Credits or Ending are used.");
+                    if global.listen_for_openings {
+                        let heard = match self.store.heard_opening(&video) {
+                            Some(Some((start, end))) => format!(" In this video, it heard one from {} to {}.", format_time(start), format_time(end)),
+                            Some(None) => " It heard none in this video.".to_string(),
+                            None => String::new(),
+                        };
+                        ui.weak(format!("Without those, Afterglow listens for the theme song episodes share.{heard}"));
+                    }
                 });
                 ui.add_space(8.0);
                 card(ui, "Subtitles and audio", |ui| {

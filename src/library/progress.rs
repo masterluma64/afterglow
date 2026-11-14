@@ -68,6 +68,9 @@ pub struct Settings {
     /// Whether to look for a new release on GitHub when Afterglow starts,
     /// and twice a day while it runs.
     pub check_for_updates: bool,
+    /// Whether to find the opening of an episode with no chapters for it by
+    /// listening for the sound it shares with the next one.
+    pub listen_for_openings: bool,
 }
 
 impl Default for Settings {
@@ -89,6 +92,7 @@ impl Default for Settings {
             show_remaining: true,
             playlist_stills: true,
             check_for_updates: true,
+            listen_for_openings: true,
         }
     }
 }
@@ -214,6 +218,9 @@ pub struct Store {
     /// The title stored in each video's file, once read: "" when it has none
     /// worth showing (see `set_title`).
     pub titles: HashMap<String, String>,
+    /// The opening of each video listened to, in seconds from its start
+    /// (see `player::listen`): `None` if none was found.
+    pub openings: HashMap<String, Option<(f64, f64)>>,
     /// The playlist, in play order.
     pub playlist: Vec<PathBuf>,
     /// The playlist entry that was playing last.
@@ -266,6 +273,7 @@ impl Default for Store {
             entries: HashMap::new(),
             tracks: HashMap::new(),
             titles: HashMap::new(),
+            openings: HashMap::new(),
             playlist: Vec::new(),
             current: None,
             folder: None,
@@ -522,6 +530,17 @@ impl Store {
         self.titles.get(&key(path)).map(String::as_str).filter(|t| !t.is_empty())
     }
 
+    /// The opening heard in a video: `Some(None)` if it was listened to, but
+    /// none was found, and `None` if it wasn't listened to yet.
+    pub fn heard_opening(&self, path: &Path) -> Option<Option<(f64, f64)>> {
+        self.openings.get(&key(path)).copied()
+    }
+
+    pub fn set_heard_opening(&mut self, path: &Path, opening: Option<(f64, f64)>) {
+        self.openings.insert(key(path), opening);
+        self.dirty = true;
+    }
+
     /// Whether a video's file was read for its title yet.
     pub fn title_known(&self, path: &Path) -> bool {
         self.titles.contains_key(&key(path))
@@ -757,6 +776,7 @@ impl Store {
             .keys()
             .chain(self.tracks.keys())
             .chain(self.titles.keys())
+            .chain(self.openings.keys())
             .chain(self.videos.keys())
             .chain(self.folders.keys())
             .cloned()
@@ -774,8 +794,9 @@ impl Store {
             let entry = self.entries.remove(k).is_some();
             let tracks = self.tracks.remove(k).is_some();
             let title = self.titles.remove(k).is_some();
+            let opening = self.openings.remove(k).is_some();
             let settings = self.videos.remove(k).is_some() | self.folders.remove(k).is_some();
-            forgotten += usize::from(entry || tracks || title || settings);
+            forgotten += usize::from(entry || tracks || title || opening || settings);
         }
         if forgotten > 0 {
             self.dirty = true;

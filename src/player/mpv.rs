@@ -1083,6 +1083,67 @@ impl Drop for Prober {
     }
 }
 
+/// Decodes the first `seconds` of a video's sound as mono samples at
+/// `rate` Hz, from -1 to 1. A silent mpv of its own writes them to a
+/// temporary file as fast as it can decode them. `None` if the video has no
+/// sound, or it can't be read within `timeout`.
+pub fn decode_audio(path: &Path, seconds: f64, rate: u32, timeout: std::time::Duration) -> Option<Vec<f32>> {
+    static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let out = std::env::temp_dir().join(format!("afterglow-listen-{}-{n}.pcm", std::process::id()));
+    let api = Api::load().ok()?;
+    let handle = unsafe { (api.create)() };
+    if handle.is_null() {
+        return None;
+    }
+    let (file, end, rate) = (out.to_string_lossy().into_owned(), format!("{seconds}"), rate.to_string());
+    let options = [
+        ("vid", "no"),
+        ("vo", "null"),
+        ("sid", "no"),
+        ("sub-auto", "no"),
+        ("ao", "pcm"),
+        ("ao-pcm-file", file.as_str()),
+        ("ao-pcm-waveheader", "no"),
+        ("audio-format", "s16"),
+        ("audio-channels", "mono"),
+        ("audio-samplerate", rate.as_str()),
+        ("end", end.as_str()),
+        ("idle", "yes"),
+        ("ytdl", "no"),
+        ("input-default-bindings", "no"),
+        ("config", "no"),
+        ("load-scripts", "no"),
+        NO_REFERENCES,
+    ];
+    for (k, v) in options {
+        let (k, v) = (cstr(k), cstr(v));
+        unsafe { (api.set_option_string)(handle, k.as_ptr(), v.as_ptr()) };
+    }
+    let finished = (|| {
+        api.check(unsafe { (api.initialize)(handle) }).ok()?;
+        let (cmd, video) = (cstr("loadfile"), cstr(&path.to_string_lossy()));
+        let mut args = [cmd.as_ptr(), video.as_ptr(), std::ptr::null()];
+        api.check(unsafe { (api.command)(handle, args.as_mut_ptr()) }).ok()?;
+        let deadline = std::time::Instant::now() + timeout;
+        while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+            let ev = unsafe { &*(api.wait_event)(handle, left.as_secs_f64()) };
+            if ev.event_id == MPV_EVENT_END_FILE {
+                let end = unsafe { &*(ev.data as *const RawEndFile) };
+                return (end.reason != MPV_END_FILE_REASON_ERROR).then_some(());
+            }
+        }
+        None
+    })();
+    // Closes the file, so it can be read whole and removed.
+    unsafe { (api.terminate_destroy)(handle) };
+    let bytes = std::fs::read(&out).ok();
+    let _ = std::fs::remove_file(&out);
+    finished?;
+    let samples: Vec<f32> = bytes?.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b) as f32 / 32768.0).collect();
+    (!samples.is_empty()).then_some(samples)
+}
+
 /// 64-byte aligned storage, as recommended for mpv's software renderer.
 #[derive(Clone, Copy)]
 #[repr(C, align(64))]
@@ -1610,5 +1671,21 @@ mod screenshot_tests {
         // The video's own size, not the window's.
         assert_eq!(image.size, [640, 360]);
         assert!(image.pixels.iter().any(|p| *p != Color32::BLACK), "not blank");
+    }
+
+    /// The sound comes out at the rate asked for, much faster than it plays.
+    #[test]
+    fn decodes_sound() {
+        use_built_dll();
+        let started = Instant::now();
+        let tone = Path::new("av://lavfi:sine=frequency=1000:duration=600");
+        let samples = decode_audio(tone, 420.0, 11025, Duration::from_secs(60)).expect("decoded");
+        assert!(started.elapsed() < Duration::from_secs(30), "took {:?}", started.elapsed());
+        assert!((samples.len() as f64 - 420.0 * 11025.0).abs() < 11025.0, "{} samples", samples.len());
+        // 1000 Hz: 11.025 samples per wave, so the sign changes about 2000 times a second.
+        let second = &samples[11025..22050];
+        let crossings = second.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
+        assert!((1900..2100).contains(&crossings), "{crossings} crossings");
+        assert!(decode_audio(Path::new(r"D:\no such video.mkv"), 10.0, 11025, Duration::from_secs(10)).is_none());
     }
 }

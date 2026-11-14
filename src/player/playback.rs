@@ -493,7 +493,8 @@ impl App {
     }
 
     /// The opening and ending of the loaded video, in seconds from its
-    /// start: from its folder settings, or else from its chapter titles.
+    /// start: from its folder settings, or else from its chapter titles, or
+    /// else the opening heard by listening.
     pub(crate) fn skips(&self) -> Vec<(progress::Skip, f64, f64)> {
         if !self.loaded {
             return Vec::new();
@@ -502,10 +503,57 @@ impl App {
         let folder = self.current_path().and_then(|p| self.store.folder_settings(p));
         let set = folder.map(|(_, folder)| folder.skips(duration)).unwrap_or_default();
         let found = chapter_skips(&self.chapters, duration);
+        let heard = self.heard_opening().map(|(start, end)| (progress::Skip::Opening, start, end));
         [progress::Skip::Opening, progress::Skip::Ending]
             .into_iter()
-            .filter_map(|kind| set.iter().chain(&found).find(|s| s.0 == kind).copied())
+            .filter_map(|kind| set.iter().chain(&found).chain(&heard).find(|s| s.0 == kind).copied())
             .collect()
+    }
+
+    /// The opening of the loaded video heard by listening, if listening is on.
+    pub(crate) fn heard_opening(&self) -> Option<(f64, f64)> {
+        let path = self.current_path().filter(|_| self.store.settings.listen_for_openings)?;
+        let (start, end) = self.store.heard_opening(path)??;
+        // Within the first half, as for an opening found from chapters.
+        (end > start && start < self.playback.duration / 2.0 && end <= self.playback.duration).then_some((start, end))
+    }
+
+    /// Asks for the playing episode's opening to be found by listening, if
+    /// its folder settings and chapters don't have one, and it wasn't
+    /// listened to yet. It's compared with other episodes in its folder.
+    pub(crate) fn listen_for_opening(&mut self) {
+        // Its length and chapters are known by the time it's playing.
+        if !self.loaded || self.playback.position < 1.0 || !self.store.settings.listen_for_openings {
+            return;
+        }
+        let Some(index) = self.current else { return };
+        let path = self.playlist[index].clone();
+        if self.listen_asked.as_ref() == Some(&path) {
+            return;
+        }
+        self.listen_asked = Some(path.clone());
+        let has_opening = self.skips().iter().any(|s| s.0 == progress::Skip::Opening);
+        if has_opening || self.store.heard_opening(&path).is_some() || self.store.is_movie(&path) {
+            return;
+        }
+        let others = player::listen::neighbours(&self.playlist, index, 3);
+        if !others.is_empty() {
+            self.listener.ask(&path, others);
+        }
+    }
+
+    /// Takes in openings heard by listening.
+    pub(crate) fn receive_heard(&mut self) {
+        while let Ok(heard) = self.listener.heard.try_recv() {
+            // First the video asked for, then the one it shared its opening
+            // with, which keeps one it already had.
+            for (i, (path, opening)) in heard.into_iter().enumerate() {
+                let known = self.store.heard_opening(&path).flatten().is_some();
+                if i == 0 || !known {
+                    self.store.set_heard_opening(&path, opening);
+                }
+            }
+        }
     }
 
     /// The opening or ending playing now, which the Skip button skips.

@@ -247,6 +247,10 @@ struct App {
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
     /// A still of each video, for the playlist.
     stills: player::stills::Stills,
+    /// Listens for openings that have no chapter (see `listen_for_opening`).
+    listener: player::listen::Listener,
+    /// The video last looked at for listening, so it is only looked at once.
+    listen_asked: Option<PathBuf>,
     up_next: Option<UpNext>,
     /// The video that just played to its end, when no next video starts by
     /// itself: the video area shows what can be done next (see `end_screen`).
@@ -402,6 +406,8 @@ impl App {
             thumbnails: None,
             thumbnails_ready: Some(thumbnails::Thumbnails::start(ctx)),
             stills: player::stills::Stills::new(ctx.clone()),
+            listener: player::listen::Listener::new(ctx.clone()),
+            listen_asked: None,
             up_next: None,
             ended: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
@@ -638,6 +644,8 @@ impl eframe::App for App {
         self.sleep_blocker.set(self.loaded && !self.playback.paused);
         self.receive_durations();
         self.receive_disk(&ctx);
+        self.receive_heard();
+        self.listen_for_opening();
         let gone = self.recent.receive();
         self.store.forget_recent(&gone);
         self.receive_scans();
