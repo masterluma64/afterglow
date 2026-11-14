@@ -49,6 +49,11 @@ Afterglow isn't code-signed, so Windows SmartScreen may warn you the first time.
 - **Takes screenshots** (C), with subtitles, to the clipboard and `Pictures\Afterglow`.
 - **Has a key for everything.** Press `?` for the list, or Ctrl+K to find any command.
 
+<p>
+<img src="assets/stats.png" width="49%" alt="The stats: time watched, streaks, the last 30 days and the most watched shows">
+<img src="assets/palette.png" width="49%" alt="Ctrl+K finds any command, here the ones for subtitles">
+</p>
+
 | Key | Action |
 | --- | --- |
 | Space | Play / pause |
