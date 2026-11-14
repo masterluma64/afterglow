@@ -259,6 +259,8 @@ impl App {
     pub(crate) fn preview(&mut self, at: f64, duration: f64) -> Option<egui::TextureId> {
         let path = self.current_path()?.to_path_buf();
         let thumbnails = self.thumbnails.as_mut()?.as_mut().ok()?;
+        // The previewer reads the video too: listening waits.
+        self.last_seek = Instant::now();
         // About 300 distinct previews along the video, at most one per second.
         thumbnails.request(&path, at, (duration / 300.0).max(1.0));
         thumbnails.texture(&path).map(TextureHandle::id)

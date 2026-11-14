@@ -251,6 +251,9 @@ struct App {
     listener: player::listen::Listener,
     /// The video last looked at for listening, so it is only looked at once.
     listen_asked: Option<PathBuf>,
+    /// When the video last jumped (a seek, or a new video) or the seek bar
+    /// preview last moved: listening waits for playback to settle.
+    last_seek: Instant,
     up_next: Option<UpNext>,
     /// The video that just played to its end, when no next video starts by
     /// itself: the video area shows what can be done next (see `end_screen`).
@@ -408,6 +411,7 @@ impl App {
             stills: player::stills::Stills::new(ctx.clone()),
             listener: player::listen::Listener::new(ctx.clone()),
             listen_asked: None,
+            last_seek: Instant::now(),
             up_next: None,
             ended: None,
             watch: watch::FolderWatch::new(ctx.clone(), None),
@@ -645,7 +649,7 @@ impl eframe::App for App {
         self.receive_durations();
         self.receive_disk(&ctx);
         self.receive_heard();
-        self.listen_for_opening();
+        self.listen_for_opening(&ctx);
         let gone = self.recent.receive();
         self.store.forget_recent(&gone);
         self.receive_scans();

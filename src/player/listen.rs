@@ -11,6 +11,8 @@
 //! volume, and little with how the sound was encoded.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
 
@@ -211,19 +213,24 @@ pub struct Listener {
     /// What was heard: the video asked for, and the others whose opening
     /// was found along the way.
     pub heard: Receiver<Vec<(PathBuf, Opening)>>,
+    /// Set to pause listening, so it doesn't compete with playback for the
+    /// disk (see `hold`).
+    holding: Arc<AtomicBool>,
 }
 
 impl Listener {
     pub fn new(ctx: egui::Context) -> Self {
         let (asks, ask_rx) = mpsc::channel::<(PathBuf, Vec<PathBuf>)>();
         let (heard_tx, heard) = mpsc::channel();
+        let holding = Arc::new(AtomicBool::new(false));
+        let hold = holding.clone();
         let spawned = std::thread::Builder::new().name("listen".into()).spawn(move || {
             let mut prints: Vec<(PathBuf, Option<Print>)> = Vec::new();
             let mut print_of = |path: &Path| -> Option<Print> {
                 if let Some((_, print)) = prints.iter().find(|(p, _)| p == path) {
                     return print.clone();
                 }
-                let print = mpv::decode_audio(path, LISTEN, RATE, TIMEOUT).map(|s| fingerprint(&s));
+                let print = mpv::decode_audio(path, LISTEN, RATE, TIMEOUT, &hold).map(|s| fingerprint(&s));
                 if prints.len() >= KEPT {
                     prints.remove(0);
                 }
@@ -241,7 +248,13 @@ impl Listener {
         if let Err(e) = spawned {
             eprintln!("could not start listening for openings: {e}");
         }
-        Self { asks, heard }
+        Self { asks, heard, holding }
+    }
+
+    /// Pauses listening (with `true`) while playback needs the disk, as
+    /// right after a seek, or goes on.
+    pub fn hold(&self, hold: bool) {
+        self.holding.store(hold, Ordering::Relaxed);
     }
 
     /// Listens for the opening of `video`, comparing it with `others`

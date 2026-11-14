@@ -2,6 +2,11 @@
 
 use crate::*;
 
+/// How long an episode plays without a seek before its opening is listened for.
+const LISTEN_WAIT: Duration = Duration::from_secs(20);
+/// How long listening pauses after a seek.
+const LISTEN_HOLD: Duration = Duration::from_secs(3);
+
 /// The chapter playing at `time`.
 pub(crate) fn chapter_at(chapters: &[mpv::Chapter], time: f64) -> Option<usize> {
     chapters.iter().rposition(|c| c.time <= time + 0.01)
@@ -371,6 +376,7 @@ impl App {
                     if let Ok(mpv) = &self.mpv {
                         mpv.show_frames();
                     }
+                    self.last_seek = Instant::now();
                 }
                 mpv::Event::Property { name, value } => self.property_changed(&name, value),
                 mpv::Event::CommandDone { tag: LOAD_TAG, ok, result } => {
@@ -518,9 +524,17 @@ impl App {
     /// Asks for the playing episode's opening to be found by listening, if
     /// its chapters don't have one, and it wasn't
     /// listened to yet. It's compared with other episodes in its folder.
-    pub(crate) fn listen_for_opening(&mut self) {
-        // Its length and chapters are known by the time it's playing.
-        if !self.loaded || self.playback.position < 1.0 || !self.store.settings.listen_for_openings {
+    /// Listening reads from the same disk as playback, so it waits until
+    /// the episode has played a while without a seek, and pauses for a
+    /// moment after each one.
+    pub(crate) fn listen_for_opening(&mut self, ctx: &egui::Context) {
+        let settling = self.last_seek.elapsed();
+        self.listener.hold(settling < LISTEN_HOLD);
+        if settling < LISTEN_HOLD {
+            // To go on once it has settled, even while paused.
+            ctx.request_repaint_after(LISTEN_HOLD - settling);
+        }
+        if !self.loaded || self.playback.paused || settling < LISTEN_WAIT || !self.store.settings.listen_for_openings {
             return;
         }
         let Some(index) = self.current else { return };

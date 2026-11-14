@@ -1085,9 +1085,16 @@ impl Drop for Prober {
 
 /// Decodes the first `seconds` of a video's sound as mono samples at
 /// `rate` Hz, from -1 to 1. A silent mpv of its own writes them to a
-/// temporary file as fast as it can decode them. `None` if the video has no
-/// sound, or it can't be read within `timeout`.
-pub fn decode_audio(path: &Path, seconds: f64, rate: u32, timeout: std::time::Duration) -> Option<Vec<f32>> {
+/// temporary file as fast as it can decode them, pausing while `hold` is
+/// set. `None` if the video has no sound, or it can't be read within
+/// `timeout` (not counting the pauses).
+pub fn decode_audio(
+    path: &Path,
+    seconds: f64,
+    rate: u32,
+    timeout: std::time::Duration,
+    hold: &std::sync::atomic::AtomicBool,
+) -> Option<Vec<f32>> {
     static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let out = std::env::temp_dir().join(format!("afterglow-listen-{}-{n}.pcm", std::process::id()));
@@ -1125,12 +1132,23 @@ pub fn decode_audio(path: &Path, seconds: f64, rate: u32, timeout: std::time::Du
         let (cmd, video) = (cstr("loadfile"), cstr(&path.to_string_lossy()));
         let mut args = [cmd.as_ptr(), video.as_ptr(), std::ptr::null()];
         api.check(unsafe { (api.command)(handle, args.as_mut_ptr()) }).ok()?;
-        let deadline = std::time::Instant::now() + timeout;
-        while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
-            let ev = unsafe { &*(api.wait_event)(handle, left.as_secs_f64()) };
+        let step = std::time::Duration::from_millis(100);
+        let (mut left, mut held) = (timeout, false);
+        while !left.is_zero() {
+            let now = hold.load(std::sync::atomic::Ordering::Relaxed);
+            if now != held {
+                held = now;
+                let (set, pause, value) = (cstr("set"), cstr("pause"), cstr(if held { "yes" } else { "no" }));
+                let mut args = [set.as_ptr(), pause.as_ptr(), value.as_ptr(), std::ptr::null()];
+                unsafe { (api.command)(handle, args.as_mut_ptr()) };
+            }
+            let ev = unsafe { &*(api.wait_event)(handle, step.as_secs_f64()) };
             if ev.event_id == MPV_EVENT_END_FILE {
                 let end = unsafe { &*(ev.data as *const RawEndFile) };
                 return (end.reason != MPV_END_FILE_REASON_ERROR).then_some(());
+            }
+            if !held {
+                left = left.saturating_sub(step);
             }
         }
         None
@@ -1679,13 +1697,25 @@ mod screenshot_tests {
         use_built_dll();
         let started = Instant::now();
         let tone = Path::new("av://lavfi:sine=frequency=1000:duration=600");
-        let samples = decode_audio(tone, 420.0, 11025, Duration::from_secs(60)).expect("decoded");
+        let free = std::sync::atomic::AtomicBool::new(false);
+        let samples = decode_audio(tone, 420.0, 11025, Duration::from_secs(60), &free).expect("decoded");
         assert!(started.elapsed() < Duration::from_secs(30), "took {:?}", started.elapsed());
         assert!((samples.len() as f64 - 420.0 * 11025.0).abs() < 11025.0, "{} samples", samples.len());
         // 1000 Hz: 11.025 samples per wave, so the sign changes about 2000 times a second.
         let second = &samples[11025..22050];
         let crossings = second.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
         assert!((1900..2100).contains(&crossings), "{crossings} crossings");
-        assert!(decode_audio(Path::new(r"D:\no such video.mkv"), 10.0, 11025, Duration::from_secs(10)).is_none());
+        assert!(decode_audio(Path::new(r"D:\no such video.mkv"), 10.0, 11025, Duration::from_secs(10), &free).is_none());
+        // Held, it waits; let go, it finishes.
+        let held = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let release = held.clone();
+        let letting_go = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            release.store(false, std::sync::atomic::Ordering::Relaxed);
+        });
+        let started = Instant::now();
+        assert!(decode_audio(tone, 60.0, 11025, Duration::from_secs(60), &held).is_some());
+        assert!(started.elapsed() >= Duration::from_millis(1400), "it didn't wait: {:?}", started.elapsed());
+        letting_go.join().unwrap();
     }
 }
