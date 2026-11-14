@@ -1,7 +1,7 @@
 # Releasing
 
-Releases are tagged `vX.Y.Z` and published as GitHub releases, with the
-exe packed in a 7z archive.
+Releases are tagged `vX.Y.Z` and published as GitHub releases, with a setup (the main
+download) and the bare exe packed in a 7z archive, for those who'd rather not install.
 
 Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
 [7-Zip](https://www.7-zip.org). If they aren't on PATH, they are at
@@ -10,7 +10,9 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
 ## Steps
 
 1. On `develop`, set the version in `Cargo.toml`, then run `cargo check` so `Cargo.lock`
-   follows. Commit both as "Version X.Y.Z" and push `develop`.
+   follows. If dependencies changed since the last release, run
+   `cargo run --example notices` to update `THIRD-PARTY-NOTICES.txt`. Commit as
+   "Version X.Y.Z" and push `develop`.
 2. Move `main` to the same commit: `git push origin develop:main`.
 3. Tag and push: `git tag -a vX.Y.Z -m "Version X.Y.Z"` and `git push origin vX.Y.Z`.
 4. Build from a clean tree, so the commit in Settings doesn't end in `-dirty`:
@@ -19,27 +21,41 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    cargo build --release
    ```
 
-5. Copy `target/release/afterglow.exe` to `afterglow-X.Y.Z-windows-x64.exe` and pack it:
+5. Build the setup, which has that exe, `LICENSE` and `THIRD-PARTY-NOTICES.txt` built in
+   (it refuses an exe of another version):
 
    ```sh
-   7z a -t7z -mx=9 afterglow-X.Y.Z-windows-x64.7z afterglow-X.Y.Z-windows-x64.exe
+   cargo build --release -p afterglow-setup
    ```
 
-6. Sign the archive, so a future updater can check that a release came from you:
+   Copy `target/release/afterglow-setup.exe` to `afterglow-X.Y.Z-windows-x64-setup.exe`. It
+   installs to `%LOCALAPPDATA%\Programs\afterglow` without administrator rights, and
+   updates an installed copy where it is; `--quiet` does that without asking anything. The
+   installed exe uninstalls itself from Settings › Apps (`src/platform/install.rs`).
+
+6. Copy `target/release/afterglow.exe` to `afterglow-X.Y.Z-windows-x64.exe` and pack it with
+   the license and notices:
 
    ```sh
+   7z a -t7z -mx=9 afterglow-X.Y.Z-windows-x64.7z afterglow-X.Y.Z-windows-x64.exe LICENSE THIRD-PARTY-NOTICES.txt
+   ```
+
+7. Sign both, so a future updater can check that a release came from you:
+
+   ```sh
+   cargo run --example sign_release -- afterglow-X.Y.Z-windows-x64-setup.exe
    cargo run --example sign_release -- afterglow-X.Y.Z-windows-x64.7z
    ```
 
-   This writes `afterglow-X.Y.Z-windows-x64.7z.sig`, using the key in
+   This writes a `.sig` next to each, using the key in
    `%APPDATA%\afterglow-release\signing.key` (keep a copy of it somewhere safe). Its public
    half is `a34ddcca28d3d5f373a15ce82e5b9ffa4f73004ecdcf9b898feae8f18b892f8c`.
 
-7. Create the release with the archive and its signature. Upload only the `.7z` and its
-   `.sig`, never the bare exe:
+8. Create the release with the setup, the archive and their signatures (not the bare
+   exe):
 
    ```sh
-   gh release create vX.Y.Z afterglow-X.Y.Z-windows-x64.7z afterglow-X.Y.Z-windows-x64.7z.sig --title "Afterglow X.Y.Z" --notes "..."
+   gh release create vX.Y.Z afterglow-X.Y.Z-windows-x64-setup.exe afterglow-X.Y.Z-windows-x64-setup.exe.sig afterglow-X.Y.Z-windows-x64.7z afterglow-X.Y.Z-windows-x64.7z.sig --title "Afterglow X.Y.Z" --notes "..."
    ```
 
    The notes are a bullet list of what changed since the last release, from

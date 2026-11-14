@@ -5,6 +5,12 @@ edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/masterluma64/afterglow"
 
+# The setup that installs afterglow.exe (setup/) is built on its own, after
+# the app: see docs/releasing.md.
+[workspace]
+members = [".", "setup"]
+default-members = ["."]
+
 [dependencies]
 # Without wgpu, Linux and web support: the UI is drawn with OpenGL only.
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "accesskit", "clipboard", "default_fonts", "links", "system_fonts"] }

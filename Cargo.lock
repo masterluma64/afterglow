@@ -136,6 +136,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "afterglow-setup"
+version = "0.0.0"
+dependencies = [
+ "embed-resource",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"

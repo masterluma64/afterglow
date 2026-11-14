@@ -18,9 +18,11 @@ use it, but expect rough edges, and features that come and go.
 
 ## Download
 
-Get the installer from the [latest release](https://github.com/masterluma64/afterglow/releases/latest).
-It needs 64-bit Windows 10 or 11, installs just for you (no administrator rights needed) and
-can add Afterglow to "Open with" for videos.
+Get the setup (`afterglow-…-setup.exe`) from the
+[latest release](https://github.com/masterluma64/afterglow/releases/latest). It needs 64-bit
+Windows 10 or 11, installs just for you (no administrator rights needed) and adds Afterglow to
+"Open with" for videos. Running a newer setup updates it; uninstall it from Settings › Apps.
+Rather not install? The `.7z` has the bare `afterglow.exe`, which runs from anywhere.
 
 Afterglow isn't code-signed, so Windows SmartScreen may warn you the first time. Choose
 **More info**, then **Run anyway**.
@@ -91,7 +93,7 @@ cargo run --release -- "D:\Shows\Foo"    # play a folder
 
 The release exe has libmpv packed in, and unpacks it into the data folder on its first start.
 `AFTERGLOW_DATA_DIR` sets another data folder, for testing. `docs/releasing.md` describes
-making a release, including the installer.
+making a release, including the setup.
 
 ## License
 

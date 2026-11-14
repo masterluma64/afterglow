@@ -1,0 +1,13 @@
+[package]
+name = "afterglow-setup"
+# Its version is the app's, from ../Cargo.toml (see build.rs).
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+embed-resource = "3.0.12"

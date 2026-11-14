@@ -76,6 +76,10 @@ fn window_icon() -> egui::IconData {
 }
 
 fn main() -> eframe::Result {
+    // `--register` and `--uninstall`, from the setup and Settings › Apps.
+    if let Some(code) = platform::install::run_command() {
+        std::process::exit(code);
+    }
     dll_search::restrict();
     let open = absolute_paths(std::env::args_os().skip(1));
     // With Afterglow already running (using the same data folder), hand it

@@ -1,8 +1,10 @@
 //! Windows integration: one instance at a time, media keys, staying awake,
-//! monitors, the date, the desktop shortcut, the taskbar button and the
-//! Pictures folder.
+//! monitors, the date, the desktop shortcut, the taskbar button, the
+//! Pictures folder, and installing.
 
 pub(crate) mod clock;
+pub(crate) mod install;
+pub(crate) mod installed;
 pub(crate) mod instance;
 pub(crate) mod media_keys;
 pub(crate) mod power;
