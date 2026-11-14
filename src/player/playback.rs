@@ -187,9 +187,9 @@ impl App {
         }
         let Some(path) = self.playlist.get(index).cloned() else { return };
         let name = self.video_name(&path);
-        if !path.is_file() {
-            return self.warn(format!("{name} was not found (moved or deleted?)"));
-        }
+        // Not checked to be there first: on a drive that has gone to sleep,
+        // that waits for it to wake up, freezing the window. mpv opens it in
+        // the background, and says if it can't (see `handle_mpv_events`).
         if self.store.is_movie(&path) {
             self.store.add_recent_video(&path);
         }
@@ -269,8 +269,9 @@ impl App {
         mpv.set("sub-speed", &prefs.sub_speed.unwrap_or(1.0).to_string());
         mpv.set("audio-delay", &prefs.audio_delay.to_string());
         // Subtitle files load in the background when sent without waiting, so
-        // the saved tracks are selected once they have all been added.
-        let files: Vec<PathBuf> = prefs.sub_files.iter().filter(|f| f.is_file()).cloned().collect();
+        // the saved tracks are selected once they have all been added (or
+        // failed to, when a file is gone).
+        let files = prefs.sub_files.clone();
         for file in &files {
             mpv.send_tagged(SUB_RESTORE_TAG, &["sub-add", &file.to_string_lossy(), "auto"]);
         }
@@ -401,7 +402,13 @@ impl App {
                 mpv::Event::EndFile { eof, error, .. } => {
                     self.loaded = false;
                     if error {
-                        self.warn("Playback failed: the file could not be decoded.");
+                        // Only now is the file looked for, as mpv just tried
+                        // to read it.
+                        let missing = self.current_path().map(|p| (self.video_name(p), p.is_file()));
+                        match missing {
+                            Some((name, false)) => self.warn(format!("{name} was not found (moved or deleted?)")),
+                            _ => self.warn("Playback failed: the file could not be decoded."),
+                        }
                         self.finish(ctx);
                         continue;
                     }

@@ -192,9 +192,13 @@ impl App {
                     grid("settings-data").show(ui, |ui| {
                         if let Some(folder) = self.store.folder() {
                             ui.label("Progress and settings");
-                            let open = ui.add_enabled(folder.is_dir(), egui::Button::new("Open folder"));
-                            if open.on_hover_text(folder.display().to_string()).clicked() {
-                                let _ = std::process::Command::new("explorer").arg(&folder).spawn();
+                            // Looked for only when clicked, not on every frame.
+                            if ui.button("Open folder").on_hover_text(folder.display().to_string()).clicked() {
+                                if folder.is_dir() {
+                                    let _ = std::process::Command::new("explorer").arg(&folder).spawn();
+                                } else {
+                                    self.warn(format!("{} doesn't exist yet", folder.display()));
+                                }
                             }
                             ui.end_row();
                         }
@@ -264,9 +268,9 @@ impl App {
                     ui.label("Afterglow is free software under the GNU General Public License, version 3 or later. It plays videos with libmpv and FFmpeg.");
                     ui.horizontal(|ui| {
                         ui.hyperlink_to("Source code", env!("CARGO_PKG_REPOSITORY"));
-                        // Shipped next to the exe; otherwise the copy in the repository.
-                        let notices = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("THIRD-PARTY-NOTICES.txt"))).filter(|p| p.is_file());
                         if ui.link("Third-party licenses").clicked() {
+                            // Shipped next to the exe; otherwise the copy in the repository.
+                            let notices = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("THIRD-PARTY-NOTICES.txt"))).filter(|p| p.is_file());
                             match notices {
                                 Some(file) => {
                                     let _ = std::process::Command::new("notepad").arg(file).spawn();

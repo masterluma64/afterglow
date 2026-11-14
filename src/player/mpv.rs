@@ -1718,4 +1718,27 @@ mod screenshot_tests {
         assert!(started.elapsed() >= Duration::from_millis(1400), "it didn't wait: {:?}", started.elapsed());
         letting_go.join().unwrap();
     }
+
+    /// A video that isn't there: mpv answers the command to open it before
+    /// it reports the failure, so the failure counts as the current video's
+    /// (see `playback::Loads`).
+    #[test]
+    fn reports_a_missing_video_after_answering() {
+        use_built_dll();
+        let mpv = Mpv::software(egui::Context::default()).expect("libmpv");
+        mpv.load_file(Path::new(r"C:\no such folder\gone.mkv"), 0.0, 7);
+        let mut order = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && !order.contains(&"end") {
+            for event in mpv.poll_events() {
+                match event {
+                    Event::CommandDone { tag: 7, ok, .. } => order.push(if ok { "answered" } else { "refused" }),
+                    Event::EndFile { error: true, .. } => order.push("end"),
+                    _ => {}
+                }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(order, ["answered", "end"]);
+    }
 }
