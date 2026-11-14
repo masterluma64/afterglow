@@ -65,14 +65,6 @@ impl App {
         self.menu_item(ui, Action::Next);
         self.menu_item(ui, Action::Prev);
         self.menu_item(ui, Action::Skip);
-        let movie = self.current_path().is_some_and(|p| self.store.is_movie(p));
-        let (opening, ending) = if movie {
-            ("For this video (see Video settings)", "For this video, counted back from the end (see Video settings)")
-        } else {
-            ("For every video in this folder (see Folder settings)", "For every video in this folder, counted back from the end (see Folder settings)")
-        };
-        self.menu_item(ui, Action::MarkSkip(progress::Skip::Opening)).on_hover_text(opening);
-        self.menu_item(ui, Action::MarkSkip(progress::Skip::Ending)).on_hover_text(ending);
         ui.separator();
         let loaded = self.loaded;
         ui.add_enabled_ui(loaded, |ui| {
@@ -149,8 +141,6 @@ impl App {
             self.command(Action::Next, "skip"),
             self.command(Action::Prev, "back"),
             self.command(Action::Skip, "intro opening ending credits outro"),
-            self.command(Action::MarkSkip(progress::Skip::Opening), "intro opening set folder skip"),
-            self.command(Action::MarkSkip(progress::Skip::Ending), "credits outro ending set folder skip"),
             self.command(Action::Seek { to: 0.0, exact: true }, "restart beginning"),
             self.command(Action::Chapter { forward: true }, "skip"),
             self.command(Action::Chapter { forward: false }, "back"),

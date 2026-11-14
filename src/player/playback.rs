@@ -493,20 +493,17 @@ impl App {
     }
 
     /// The opening and ending of the loaded video, in seconds from its
-    /// start: from its folder settings, or else from its chapter titles, or
-    /// else the opening heard by listening.
+    /// start: from its chapter titles, or else the opening heard by
+    /// listening.
     pub(crate) fn skips(&self) -> Vec<(progress::Skip, f64, f64)> {
         if !self.loaded {
             return Vec::new();
         }
-        let duration = self.playback.duration;
-        let folder = self.current_path().and_then(|p| self.store.folder_settings(p));
-        let set = folder.map(|(_, folder)| folder.skips(duration)).unwrap_or_default();
-        let found = chapter_skips(&self.chapters, duration);
+        let found = chapter_skips(&self.chapters, self.playback.duration);
         let heard = self.heard_opening().map(|(start, end)| (progress::Skip::Opening, start, end));
         [progress::Skip::Opening, progress::Skip::Ending]
             .into_iter()
-            .filter_map(|kind| set.iter().chain(&found).chain(&heard).find(|s| s.0 == kind).copied())
+            .filter_map(|kind| found.iter().chain(&heard).find(|s| s.0 == kind).copied())
             .collect()
     }
 
@@ -519,7 +516,7 @@ impl App {
     }
 
     /// Asks for the playing episode's opening to be found by listening, if
-    /// its folder settings and chapters don't have one, and it wasn't
+    /// its chapters don't have one, and it wasn't
     /// listened to yet. It's compared with other episodes in its folder.
     pub(crate) fn listen_for_opening(&mut self) {
         // Its length and chapters are known by the time it's playing.

@@ -1,6 +1,6 @@
-//! Folder settings: where the opening and ending of a folder's videos are,
-//! and settings that differ from the global ones for that folder. A video
-//! opened by itself has the same settings for just that video.
+//! Folder settings: settings that differ from the global ones for a
+//! folder's videos. A video opened by itself has the same settings for just
+//! that video.
 
 use crate::*;
 use progress::FolderSettings;
@@ -19,8 +19,6 @@ impl App {
         let movie = self.store.is_movie(&video);
         let global = self.store.settings.clone();
         let global_autoplay = self.store.autoplay_next;
-        // "Now" fills in the playing video's time, when it is this video.
-        let now = (self.loaded && self.current_path() == Some(video.as_path())).then_some((self.playback.position, self.playback.duration));
         let mut close = false;
         let modal = egui::Modal::new(egui::Id::unique("folder-settings")).show(ctx, |ui| {
             ui.set_width(540.0);
@@ -45,20 +43,8 @@ impl App {
             let max_height = (ui.ctx().content_rect().height() - 220.0).max(200.0);
             egui::ScrollArea::vertical().max_height(max_height).auto_shrink([false, true]).show(ui, |ui| {
                 card(ui, "Skipping", |ui| {
-                    grid("folder-skipping").show(ui, |ui| {
-                        ui.label("Opening ends at").on_hover_text("Counted from the start of each video. Until then, the opening can be skipped.");
-                        skip_field(ui, false, &mut folder.opening_end, 90.0, now.map(|(position, _)| position), movie);
-                        ui.end_row();
-                        ui.label("Ending starts at").on_hover_text(
-                            "Counted back from the end of each video, so it fits videos of different lengths. From then on, skipping goes to the next video.",
-                        );
-                        let before_end = now.map(|(position, duration)| (duration - position).max(0.0));
-                        skip_field(ui, true, &mut folder.ending_start, 90.0, before_end, movie);
-                        ui.end_row();
-                    });
-                    ui.add_space(2.0);
-                    ui.weak("While it plays, a Skip button shows in the bottom-right corner of the video (Enter skips).");
-                    ui.weak("Without a time here, chapters named like Intro, Opening, Credits or Ending are used.");
+                    ui.weak("While an opening or ending plays, a Skip button shows in the bottom-right corner of the video (Enter skips).");
+                    ui.weak("They're found from chapters named like Intro, Opening, Credits or Ending.");
                     if global.listen_for_openings {
                         let heard = match self.store.heard_opening(&video) {
                             Some(Some((start, end))) => format!(" In this video, it heard one from {} to {}.", format_time(start), format_time(end)),
@@ -131,7 +117,7 @@ impl App {
             });
             ui.add_space(12.0);
             ui.horizontal(|ui| {
-                if ui.button(if movie { "Reset video" } else { "Reset folder" }).on_hover_text("Follow the global settings again, with nothing skipped").clicked() {
+                if ui.button(if movie { "Reset video" } else { "Reset folder" }).on_hover_text("Follow the global settings again").clicked() {
                     folder = FolderSettings::default();
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -195,66 +181,4 @@ fn switch_field(ui: &mut egui::Ui, value: &mut Option<bool>, global: bool) {
         ui.selectable_value(value, Some(true), "On");
         ui.selectable_value(value, Some(false), "Off");
     });
-}
-
-/// Where the opening ends or the ending starts: off, or a time with a button
-/// that fills in `now` (the current time, counted the same way). Times
-/// `before_end` are counted back from the end, shown as "−1:30". `movie`
-/// says the settings are a single video's.
-fn skip_field(ui: &mut egui::Ui, before_end: bool, value: &mut Option<f64>, initial: f64, now: Option<f64>, movie: bool) {
-    ui.horizontal(|ui| {
-        let mut on = value.is_some();
-        ui.selectable_value(&mut on, false, "Off");
-        ui.selectable_value(&mut on, true, "On");
-        match (on, value.is_some()) {
-            (false, _) => *value = None,
-            (true, false) => *value = Some(initial),
-            _ => {}
-        }
-        let Some(time) = value else { return };
-        ui.add_space(4.0);
-        ui.push_id(before_end, |ui| {
-            ui.add(time_field(time, before_end));
-            let tip = match now {
-                Some(now) => format!("Use the current time ({})", format_span_time(now, before_end)),
-                None if movie => "Use the current time, while this video plays".into(),
-                None => "Use the current time, while this folder's video plays".into(),
-            };
-            if ui.add_enabled(now.is_some(), egui::Button::new("Now")).on_hover_text(tip).clicked() {
-                *time = now.unwrap_or_default().round();
-            }
-        });
-    });
-}
-
-/// A time in minutes and seconds, which can be typed ("1:30") or dragged.
-fn time_field(seconds: &mut f64, before_end: bool) -> egui::DragValue<'_> {
-    egui::DragValue::new(seconds)
-        .range(0.0..=36000.0)
-        .speed(1.0)
-        .custom_formatter(move |s, _| format_span_time(s, before_end))
-        .custom_parser(|text| parse_time(text.trim().trim_start_matches(['−', '-'])))
-}
-
-fn format_span_time(seconds: f64, before_end: bool) -> String {
-    if before_end { format!("−{}", format_time(seconds)) } else { format_time(seconds) }
-}
-
-/// "1:30" or "1:02:05" (or plain seconds) in seconds.
-fn parse_time(text: &str) -> Option<f64> {
-    text.trim().split(':').try_fold(0.0, |total, part| Some(total * 60.0 + part.trim().parse::<f64>().ok()?))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_typed_times() {
-        assert_eq!(parse_time("1:30"), Some(90.0));
-        assert_eq!(parse_time(" 01:02:05 "), Some(3725.0));
-        assert_eq!(parse_time("45"), Some(45.0));
-        assert_eq!(parse_time("1:x"), None);
-        assert_eq!(parse_time(""), None);
-    }
 }
