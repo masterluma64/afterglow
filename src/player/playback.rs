@@ -2,8 +2,6 @@
 
 use crate::*;
 
-/// How long an episode plays without a seek before its opening is listened for.
-const LISTEN_WAIT: Duration = Duration::from_secs(20);
 /// How long listening pauses after a seek.
 const LISTEN_HOLD: Duration = Duration::from_secs(3);
 
@@ -524,9 +522,8 @@ impl App {
     /// Asks for the playing episode's opening to be found by listening, if
     /// its chapters don't have one, and it wasn't
     /// listened to yet. It's compared with other episodes in its folder.
-    /// Listening reads from the same disk as playback, so it waits until
-    /// the episode has played a while without a seek, and pauses for a
-    /// moment after each one.
+    /// It starts as soon as the episode is loaded. Listening reads from the
+    /// same disk as playback, so it pauses for a moment after each seek.
     pub(crate) fn listen_for_opening(&mut self, ctx: &egui::Context) {
         let settling = self.last_seek.elapsed();
         self.listener.hold(settling < LISTEN_HOLD);
@@ -534,7 +531,8 @@ impl App {
             // To go on once it has settled, even while paused.
             ctx.request_repaint_after(LISTEN_HOLD - settling);
         }
-        if !self.loaded || self.playback.paused || settling < LISTEN_WAIT || !self.store.settings.listen_for_openings {
+        // Its chapters come in with its length.
+        if !self.loaded || self.playback.duration <= 0.0 || !self.store.settings.listen_for_openings {
             return;
         }
         let Some(index) = self.current else { return };
