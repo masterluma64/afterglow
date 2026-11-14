@@ -40,7 +40,8 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    7z a -t7z -mx=9 afterglow-X.Y.Z-windows-x64.7z afterglow-X.Y.Z-windows-x64.exe LICENSE THIRD-PARTY-NOTICES.txt
    ```
 
-7. Sign both, so a future updater can check that a release came from you:
+7. Sign both. Copies of Afterglow update themselves from the newest release's `.7z`
+   (`src/update.rs`), and only install one with a valid `.sig`:
 
    ```sh
    cargo run --example sign_release -- afterglow-X.Y.Z-windows-x64-setup.exe
@@ -59,4 +60,6 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    ```
 
    The notes are a bullet list of what changed since the last release, from
-   `git log vPREVIOUS..vX.Y.Z --oneline`, written for someone using the app.
+   `git log vPREVIOUS..vX.Y.Z --oneline`, written for someone using the app. Updated copies
+   show them after restarting, under "Updated to Afterglow X.Y.Z". Copies find a release as
+   soon as it is published, so check it before publishing (`--draft` first, if need be).

@@ -61,6 +61,8 @@ pub const STACK: &str = "\u{E466}";
 pub const PICTURE_IN_PICTURE: &str = "\u{E64C}";
 pub const HOUSE: &str = "\u{E2C2}";
 pub const PENCIL: &str = "\u{E3B4}";
+pub const DOWNLOAD: &str = "\u{E20A}";
+pub const SPARKLE: &str = "\u{E6A2}";
 // The text font has no arrows; shortcut texts use these code points inline.
 pub const ARROW_LEFT: &str = "\u{E058}";
 pub const ARROW_RIGHT: &str = "\u{E06C}";

@@ -5,6 +5,7 @@ mod library;
 mod platform;
 mod player;
 mod ui;
+mod update;
 
 use library::{disk, playlist, progress, stats, watch};
 use platform::{clock, instance, media_keys, power, screen, shortcut, taskbar};
@@ -75,13 +76,20 @@ fn window_icon() -> egui::IconData {
     egui::IconData { rgba: app_icon::render(SIZE), width: SIZE, height: SIZE }
 }
 
+/// How often a running Afterglow looks for a new release.
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
+
 fn main() -> eframe::Result {
     // `--register` and `--uninstall`, from the setup and Settings › Apps.
     if let Some(code) = platform::install::run_command() {
         std::process::exit(code);
     }
+    // An installed copy that just updated itself says so in Settings › Apps.
+    platform::install::refresh_entry();
     dll_search::restrict();
-    let open = absolute_paths(std::env::args_os().skip(1));
+    // After an update, this waits for the old copy to quit first.
+    let args = update::tidy_up(std::env::args_os().skip(1).collect(), progress::data_dir().as_deref());
+    let open = absolute_paths(args.into_iter());
     // With Afterglow already running (using the same data folder), hand it
     // the files instead: two at once would save over each other's progress.
     let pipe = progress::data_dir().map(|dir| instance::pipe_name(&dir));
@@ -295,6 +303,12 @@ struct App {
     /// The system media controls, set up once the window exists.
     media_keys: Option<Result<media_keys::MediaKeys, String>>,
     sleep_blocker: power::SleepBlocker,
+    /// Checking for, downloading and installing updates.
+    updater: update::Updater,
+    /// The version just updated to and its release notes, while they show.
+    whats_new: Option<progress::UpdateNotes>,
+    /// When GitHub was last asked for a new release.
+    last_update_check: std::time::Instant,
     /// Whether the home screen shows over the video (it always shows while
     /// nothing plays).
     home: bool,
@@ -413,6 +427,9 @@ impl App {
             media_keys: None,
             sleep_blocker: power::SleepBlocker::default(),
             other_starts: other_starts.into_iter().collect(),
+            updater: update::Updater::new(ctx.clone()),
+            whats_new: None,
+            last_update_check: std::time::Instant::now(),
             home: false,
             home_cards: None,
             mini: None,
@@ -437,6 +454,11 @@ impl App {
         }
         if let Some(warning) = load_warning {
             app.warn(warning);
+        }
+        // Updated since the last start: say what's new.
+        app.whats_new = app.store.take_update_notes().filter(|n| n.version == update::VERSION);
+        if app.store.settings.check_for_updates && update::cannot_update().is_none() {
+            app.check_for_updates();
         }
         app
     }
@@ -614,6 +636,16 @@ impl eframe::App for App {
         self.receive_scans();
         self.receive_missing_files();
         self.receive_gone();
+        if let Some(release) = self.updater.poll() {
+            self.notify(format!("Afterglow {} is ready: restart to update", release.version));
+        }
+        // Afterglow can stay open for days.
+        if self.store.settings.check_for_updates
+            && self.last_update_check.elapsed() >= UPDATE_CHECK_INTERVAL
+            && update::cannot_update().is_none()
+        {
+            self.check_for_updates();
+        }
         if let Some(ready) = &self.thumbnails_ready
             && let Ok(thumbnails) = ready.try_recv()
         {
@@ -713,6 +745,9 @@ impl eframe::App for App {
         }
         if self.show_help {
             self.help_dialog(&ctx);
+        }
+        if self.whats_new.is_some() {
+            self.whats_new_dialog(&ctx);
         }
         if self.settings_open {
             self.settings_dialog(&ctx);
@@ -911,7 +946,7 @@ mod tests {
             icons::SIDEBAR, icons::FOLDER_PLUS, icons::FILE_VIDEO, icons::CORNERS_OUT, icons::CORNERS_IN,
             icons::SPEAKER_HIGH, icons::SPEAKER_LOW, icons::SPEAKER_X, icons::SUBTITLES, icons::WAVEFORM,
             icons::CHECK, icons::PLUS, icons::MINUS, icons::X, icons::TRASH, icons::RESET, icons::MORE, icons::WARNING, icons::PLAY, icons::SEARCH, icons::TIMER, icons::REFRESH, icons::RECENT,
-            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::PICTURE_IN_PICTURE, icons::HOUSE, icons::PENCIL, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
+            icons::FOLDER, icons::KEYBOARD, icons::GEAR, icons::GAUGE, icons::CHART, icons::REWIND, icons::REPEAT, icons::EYE_SLASH, icons::BROOM, icons::SELECTION_SLASH, icons::FILE_PLUS, icons::LIST_NUMBERS, icons::COMMAND, icons::FILM_STRIP, icons::MOON, icons::FAST_FORWARD, icons::SLIDERS, icons::FLAG, icons::FLAG_CHECKERED, icons::FILM_SLATE, icons::MONITOR_PLAY, icons::CAMERA, icons::IMAGES, icons::STACK, icons::PICTURE_IN_PICTURE, icons::HOUSE, icons::PENCIL, icons::DOWNLOAD, icons::SPARKLE, icons::ARROW_LEFT, icons::ARROW_RIGHT, icons::ARROW_UP,
             icons::ARROW_DOWN, "–",
             "—", "·", "…", "−", "×",
         ];

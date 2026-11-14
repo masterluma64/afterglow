@@ -21,8 +21,11 @@ use it, but expect rough edges, and features that come and go.
 Get the setup (`afterglow-…-setup.exe`) from the
 [latest release](https://github.com/masterluma64/afterglow/releases/latest). It needs 64-bit
 Windows 10 or 11, installs just for you (no administrator rights needed) and adds Afterglow to
-"Open with" for videos. Running a newer setup updates it; uninstall it from Settings › Apps.
-Rather not install? The `.7z` has the bare `afterglow.exe`, which runs from anywhere.
+"Open with" for videos; uninstall it from Settings › Apps. Rather not install? The `.7z` has the
+bare `afterglow.exe`, which runs from anywhere.
+
+Afterglow keeps itself up to date: a new version downloads in the background, and **Restart to
+update** at the top right installs it and shows what's new.
 
 Afterglow isn't code-signed, so Windows SmartScreen may warn you the first time. Choose
 **More info**, then **Run anyway**.
@@ -70,7 +73,9 @@ Afterglow isn't code-signed, so Windows SmartScreen may warn you the first time.
 ## Your data
 
 Progress, settings and stats stay on your PC, in `%LOCALAPPDATA%\afterglow`. Afterglow
-doesn't collect or send anything, and only goes online when you click a link in it.
+doesn't collect or send anything. It goes online only to look for a new version on GitHub (when
+it starts, and twice a day while it runs; you can turn that off in Settings), and when you
+click a link in it.
 Uninstalling leaves that folder, so your progress is still there if you reinstall; delete it
 to remove everything.
 

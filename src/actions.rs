@@ -85,6 +85,10 @@ pub(crate) enum Action {
     ToggleOnTop,
     /// Turns the window into the mini player, or back.
     ToggleMiniPlayer,
+    /// Asks GitHub for a newer version, and downloads it.
+    CheckForUpdates,
+    /// Puts the downloaded update in place and restarts into it.
+    InstallUpdate,
     ToggleSidebar,
     SetTrack { kind: &'static str, id: Option<i64> },
     CycleSubtitles,
@@ -584,6 +588,8 @@ impl App {
                     None => {}
                 }
             }
+            Action::CheckForUpdates => self.check_for_updates(),
+            Action::InstallUpdate => self.install_update(ctx),
             Action::ToggleMiniPlayer if self.mini() => self.exit_mini(ctx),
             Action::ToggleMiniPlayer => self.enter_mini(ctx),
             // Fullscreen from the mini player goes by the window it came from.
@@ -857,6 +863,27 @@ fn audio_delay_notice(delay: f64) -> String {
         d if d > 0.0 => format!("Audio delay {d:+.1} s (sound later)"),
         d if d < 0.0 => format!("Audio delay {d:+.1} s (sound earlier)"),
         _ => "Audio delay 0.0 s".into(),
+    }
+}
+
+impl App {
+    pub(crate) fn check_for_updates(&mut self) {
+        self.last_update_check = std::time::Instant::now();
+        self.updater.check(progress::data_dir());
+    }
+
+    /// Restarts into the downloaded update, which shows its release notes.
+    fn install_update(&mut self, ctx: &egui::Context) {
+        let update::State::Ready { release, exe } = self.updater.state.clone() else { return };
+        self.store.set_update_notes(progress::UpdateNotes { version: release.version.clone(), notes: release.notes.clone() });
+        match update::install(&exe) {
+            // Quitting saves everything; the new copy waits for that.
+            Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Err(e) => {
+                self.store.take_update_notes();
+                self.warn(e);
+            }
+        }
     }
 }
 

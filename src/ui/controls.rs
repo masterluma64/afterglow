@@ -38,6 +38,7 @@ impl App {
                 if mini.clicked() {
                     self.actions.push(Action::ToggleMiniPlayer);
                 }
+                self.update_button(ui);
                 let (response, _) = ui::menu_button(more).ui(ui, |ui| ui::fit_to_window(ui, None, |ui| {
                     let recent = self.store.recent_folders.clone();
                     let recent_videos = self.store.recent_videos.clone();
@@ -86,6 +87,23 @@ impl App {
                 });
             });
         });
+    }
+
+    /// At the top right: "Restart to update" once an update is ready, and
+    /// how far it got while it downloads.
+    fn update_button(&mut self, ui: &mut egui::Ui) {
+        match &self.updater.state {
+            update::State::Ready { release, .. } => {
+                let tip = format!("Afterglow {} is downloaded. Restarting installs it and opens where you are now.", release.version);
+                if gradient::button(ui, format!("{}  Restart to update", icons::DOWNLOAD)).on_hover_text(tip).clicked() {
+                    self.actions.push(Action::InstallUpdate);
+                }
+            }
+            update::State::Downloading { release, done } => {
+                ui.label(RichText::new(format!("{}  Downloading {} · {:.0}%", icons::DOWNLOAD, release.version, done * 100.0)).weak());
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn controls(&mut self, ui: &mut egui::Ui) {

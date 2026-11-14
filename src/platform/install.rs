@@ -69,6 +69,16 @@ fn this_exe() -> Result<PathBuf, Stop> {
     Ok(std::env::current_exe().map_err(|e| format!("Afterglow couldn't find its own program file: {e}"))?)
 }
 
+/// After an update (see `crate::update`): the installed copy registers again,
+/// so Settings › Apps shows the new version. Quick when there's nothing to do.
+pub fn refresh_entry() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(installed) = installed::find() else { return };
+    if installed.version != env!("CARGO_PKG_VERSION") && exe.parent().is_some_and(|dir| installed::same_path(dir, &installed.dir)) {
+        let _ = register(installed.desktop);
+    }
+}
+
 /// Adds the shortcuts, "Open with" and the Settings › Apps entry for this exe.
 fn register(desktop: bool) -> Result<(), Stop> {
     let exe = this_exe()?;
@@ -187,7 +197,8 @@ fn finish_uninstall(dir: &Path, parent: Option<u32>, quiet: bool) -> Result<(), 
     problems.extend(registry.into_iter().filter_map(Result::err));
     associations_changed();
 
-    for file in installed::FILES {
+    // An update leaves the exe it replaced until the next start.
+    for file in installed::FILES.into_iter().chain(["afterglow.old.exe"]) {
         if let Err(e) = remove_file_patiently(&dir.join(file)) {
             problems.push(format!("{file}: {e}"));
         }

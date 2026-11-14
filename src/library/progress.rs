@@ -65,6 +65,9 @@ pub struct Settings {
     pub show_remaining: bool,
     /// Whether the playlist shows a still of each video.
     pub playlist_stills: bool,
+    /// Whether to look for a new release on GitHub when Afterglow starts,
+    /// and twice a day while it runs.
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +88,7 @@ impl Default for Settings {
             save_screenshots: true,
             show_remaining: true,
             playlist_stills: true,
+            check_for_updates: true,
         }
     }
 }
@@ -95,6 +99,14 @@ pub enum DroppedVideos {
     Add,
     /// Make them the playlist.
     Replace,
+}
+
+/// The version an update installed and its release notes, shown once after
+/// the restart.
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct UpdateNotes {
+    pub version: String,
+    pub notes: String,
 }
 
 /// The window's place and size, in points, to open it the same way next time.
@@ -226,6 +238,8 @@ pub struct Store {
     pub on_top: bool,
     /// Where the mini player was, to open it there again.
     pub mini_window: Option<WindowPlacement>,
+    /// What was just updated to, until it has been shown.
+    pub update_notes: Option<UpdateNotes>,
     /// Watching stats, which outlast the progress of deleted videos.
     pub stats: Stats,
     /// Settings per folder of videos.
@@ -264,6 +278,7 @@ impl Default for Store {
             window: None,
             on_top: false,
             mini_window: None,
+            update_notes: None,
             stats: Stats::default(),
             folders: HashMap::new(),
             videos: HashMap::new(),
@@ -876,6 +891,19 @@ impl Store {
             self.mini_window = Some(window);
             self.dirty = true;
         }
+    }
+
+    /// Remembers what an update is about to install, to show after the restart.
+    pub fn set_update_notes(&mut self, notes: UpdateNotes) {
+        self.update_notes = Some(notes);
+        self.dirty = true;
+    }
+
+    /// What was updated to, once: it is forgotten as it is taken.
+    pub fn take_update_notes(&mut self) -> Option<UpdateNotes> {
+        let notes = self.update_notes.take();
+        self.dirty |= notes.is_some();
+        notes
     }
 
     pub fn set_on_top(&mut self, on_top: bool) {

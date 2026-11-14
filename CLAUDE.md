@@ -20,8 +20,9 @@ Afterglow is free software under GPL-3.0-or-later (`LICENSE`), which lets releas
 include shinchiro's GPL libmpv. Code and assets added to the repo must be compatible with
 GPL-3.0-or-later.
 
-Self-updating is wanted later, straight from GitHub releases. Releases are already signed for
-it (see `docs/releasing.md`).
+Afterglow updates itself straight from GitHub releases (`src/update.rs`), and only installs a
+release signed with the maintainer's key, so every release must be signed (see
+`docs/releasing.md`). A published release reaches every copy, so never publish an untested one.
 
 ## Ideas
 
