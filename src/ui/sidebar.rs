@@ -519,7 +519,7 @@ impl App {
                         _ => label(i),
                     };
                     let hover = i.map(watched).unwrap_or_else(|| format!("Every video, {} seasons", self.seasons.len()));
-                    if ui.selectable_label(shown == i, text).on_hover_text(hover).clicked() {
+                    if gradient::selectable(ui, shown == i, text).on_hover_text(hover).clicked() {
                         pick = Some(i);
                     }
                 }

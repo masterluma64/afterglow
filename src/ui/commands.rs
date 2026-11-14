@@ -78,7 +78,7 @@ impl App {
                 for (i, chapter) in self.chapters.iter().enumerate() {
                     let label = egui::Button::selectable(now == Some(i), &chapter.title)
                         .shortcut_text(ui::secondary(ui, now == Some(i), format_time(chapter.time)));
-                    if ui.add(label).clicked() {
+                    if gradient::add_selectable(ui, now == Some(i), label).clicked() {
                         self.actions.push(Action::Seek { to: chapter.time, exact: true });
                     }
                 }
@@ -296,7 +296,7 @@ impl App {
                     let button = egui::Button::selectable(n == palette.pick, format!("{}  {}", c.icon, c.label))
                         .shortcut_text(ui::secondary(ui, n == palette.pick, c.key.as_ref()))
                         .min_size(vec2(ui.available_width(), PLAYLIST_ROW_HEIGHT));
-                    let row = ui.add(button);
+                    let row = gradient::add_selectable(ui, n == palette.pick, button);
                     if row.clicked() {
                         chosen = Some(i);
                     }

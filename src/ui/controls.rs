@@ -282,12 +282,12 @@ impl App {
         let tracks: Vec<mpv::Track> = self.tracks(kind).cloned().collect();
         if kind == "sub" {
             let none_selected = !tracks.iter().any(|t| t.selected);
-            if ui.selectable_label(none_selected, "Off").clicked() {
+            if gradient::selectable(ui, none_selected, "Off").clicked() {
                 self.actions.push(Action::SetTrack { kind, id: None });
             }
         }
         for t in &tracks {
-            if ui.selectable_label(t.selected, &t.label).clicked() {
+            if gradient::selectable(ui, t.selected, &t.label).clicked() {
                 self.actions.push(Action::SetTrack { kind, id: Some(t.id) });
             }
         }
@@ -324,7 +324,7 @@ impl App {
             for (speed, label) in SUB_TIMINGS {
                 let text = label[..1].to_uppercase() + &label[1..];
                 let selected = (sub_speed - speed).abs() < 1e-6;
-                let choice = ui.selectable_label(selected, text).on_hover_text("For subtitles that drift further off over time");
+                let choice = gradient::selectable(ui, selected, text).on_hover_text("For subtitles that drift further off over time");
                 if choice.clicked() && !selected {
                     self.actions.push(Action::SetSubSpeed(speed));
                 }
@@ -361,7 +361,7 @@ impl App {
     pub(crate) fn speed_items(&mut self, ui: &mut egui::Ui) {
         let speed = self.playback.speed;
         for preset in SPEEDS {
-            if ui.selectable_label((speed - preset).abs() < 0.001, format_speed(preset)).clicked() {
+            if gradient::selectable(ui, (speed - preset).abs() < 0.001, format_speed(preset)).clicked() {
                 self.actions.push(Action::SetSpeed(preset));
             }
         }

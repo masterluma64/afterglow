@@ -81,7 +81,7 @@ impl App {
                         custom_field(ui, &mut folder.sub_speed, 1.0, |v| sub_timing_name(*v), |ui, v| {
                             egui::ComboBox::from_id_salt("folder-sub-timing").selected_text(sub_timing_name(*v)).show_ui(ui, |ui| {
                                 for (speed, name) in SUB_TIMINGS {
-                                    ui.selectable_value(v, speed, name);
+                                    gradient::selectable_value(ui, v, speed, name);
                                 }
                             });
                         });
@@ -107,7 +107,7 @@ impl App {
                         custom_field(ui, &mut folder.speed, 1.0, |v| format_speed(*v), |ui, v| {
                             egui::ComboBox::from_id_salt("folder-speed").selected_text(format_speed(*v)).show_ui(ui, |ui| {
                                 for preset in SPEEDS {
-                                    ui.selectable_value(v, preset, format_speed(preset));
+                                    gradient::selectable_value(ui, v, preset, format_speed(preset));
                                 }
                             });
                         });
@@ -157,8 +157,8 @@ fn custom_field<T: Clone>(
 ) {
     ui.horizontal(|ui| {
         let mut custom = value.is_some();
-        ui.selectable_value(&mut custom, false, "Default");
-        ui.selectable_value(&mut custom, true, "Custom");
+        gradient::selectable_value(ui, &mut custom, false, "Default");
+        gradient::selectable_value(ui, &mut custom, true, "Custom");
         if !custom {
             *value = None;
         } else if value.is_none() {
@@ -177,8 +177,8 @@ fn custom_field<T: Clone>(
 /// An on/off setting that follows the global one until it is set for the folder.
 fn switch_field(ui: &mut egui::Ui, value: &mut Option<bool>, global: bool) {
     ui.horizontal(|ui| {
-        ui.selectable_value(value, None, format!("Default ({})", if global { "on" } else { "off" }));
-        ui.selectable_value(value, Some(true), "On");
-        ui.selectable_value(value, Some(false), "Off");
+        gradient::selectable_value(ui, value, None, format!("Default ({})", if global { "on" } else { "off" }));
+        gradient::selectable_value(ui, value, Some(true), "On");
+        gradient::selectable_value(ui, value, Some(false), "Off");
     });
 }

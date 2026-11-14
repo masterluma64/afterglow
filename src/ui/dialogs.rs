@@ -96,7 +96,7 @@ impl App {
                         ui.horizontal(|ui| {
                             use progress::DroppedVideos as D;
                             for (choice, label) in [(None, "Ask"), (Some(D::Add), "Add"), (Some(D::Replace), "Replace playlist")] {
-                                ui.selectable_value(&mut settings.dropped_videos, choice, label);
+                                gradient::selectable_value(ui, &mut settings.dropped_videos, choice, label);
                             }
                         });
                         ui.end_row();
@@ -134,7 +134,7 @@ impl App {
                         let name = SCREENSHOT_MODES.iter().find(|(m, _)| *m == mode).map_or("Copy to clipboard and save", |(_, name)| name);
                         egui::ComboBox::from_id_salt("screenshot-mode").selected_text(name).show_ui(ui, |ui| {
                             for (m, name) in SCREENSHOT_MODES {
-                                ui.selectable_value(&mut mode, m, name);
+                                gradient::selectable_value(ui, &mut mode, m, name);
                             }
                         })
                         .response
@@ -152,7 +152,7 @@ impl App {
                                 (progress::Theme::Dark, "Dark"),
                                 (progress::Theme::Light, "Light"),
                             ] {
-                                ui.selectable_value(&mut settings.theme, theme, label);
+                                gradient::selectable_value(ui, &mut settings.theme, theme, label);
                             }
                         });
                         ui.end_row();
@@ -163,7 +163,7 @@ impl App {
                         ui.label("Playlist side");
                         ui.horizontal(|ui| {
                             for (side, label) in [(progress::Side::Left, "Left"), (progress::Side::Right, "Right")] {
-                                ui.selectable_value(&mut settings.sidebar_side, side, label);
+                                gradient::selectable_value(ui, &mut settings.sidebar_side, side, label);
                             }
                         });
                         ui.end_row();

@@ -97,6 +97,41 @@ pub(crate) fn button(ui: &mut egui::Ui, text: impl Into<egui::RichText>) -> egui
     resp
 }
 
+/// A selectable button (`egui::Button::selectable(selected, …)`) that is
+/// filled with the accent gradient while selected, like the main buttons,
+/// in place of egui's flat accent.
+pub(crate) fn add_selectable(ui: &mut egui::Ui, selected: bool, button: egui::Button<'_>) -> egui::Response {
+    // Painted under the button once its size is known.
+    let background = ui.painter().add(egui::Shape::Noop);
+    let resp = ui
+        .scope(|ui| {
+            ui.visuals_mut().selection.bg_fill = Color32::TRANSPARENT;
+            ui.add(button)
+        })
+        .inner;
+    if selected {
+        let colors = accent(ui.visuals());
+        let colors = if resp.hovered() { colors.map(|c| c.gamma_multiply(1.2)) } else { colors };
+        fill_slot(ui.painter(), background, resp.rect, ui.visuals().widgets.inactive.corner_radius, colors);
+    }
+    resp
+}
+
+/// `ui.selectable_label`, filled with the accent gradient while selected.
+pub(crate) fn selectable(ui: &mut egui::Ui, selected: bool, text: impl Into<egui::WidgetText>) -> egui::Response {
+    add_selectable(ui, selected, egui::Button::selectable(selected, text))
+}
+
+/// `ui.selectable_value`, filled with the accent gradient while selected.
+pub(crate) fn selectable_value<T: PartialEq>(ui: &mut egui::Ui, current: &mut T, value: T, text: impl Into<egui::WidgetText>) -> egui::Response {
+    let mut resp = selectable(ui, *current == value, text);
+    if resp.clicked() && *current != value {
+        *current = value;
+        resp.mark_changed();
+    }
+    resp
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
