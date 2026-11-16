@@ -1,134 +1,97 @@
-//! The Afterglow setup. It puts afterglow.exe (built into this exe), its
-//! license and notices in `%LOCALAPPDATA%\Programs\afterglow`, or where an
-//! earlier install is, then has the new afterglow.exe add its shortcuts and
-//! registry entries (`afterglow.exe --register`, see
-//! `src/platform/install.rs`). No administrator rights are needed.
+//! The Afterglow setup: one window, one question, one button.
 //!
-//! `--quiet` installs without asking anything, keeping the desktop shortcut
-//! as it was.
+//! It carries afterglow.exe inside it (built in by build.rs), with its
+//! license and notices, asks where they should go, writes them there, then
+//! has the new afterglow.exe add its shortcuts and registry entries
+//! (`afterglow.exe --register`, see `src/platform/install.rs`). No
+//! administrator rights are needed. Over an earlier install it updates that
+//! copy where it is.
+//!
+//! `--quiet` installs without a window, where an earlier install is (or in
+//! the usual folder), keeping its shortcuts as they were.
 
 #![windows_subsystem = "windows"]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
 
-use windows::Win32::Foundation::HWND;
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Controls::{
-    TASKDIALOG_BUTTON, TASKDIALOG_COMMON_BUTTON_FLAGS, TASKDIALOGCONFIG, TASKDIALOGCONFIG_0, TD_ERROR_ICON, TD_WARNING_ICON,
-    TDCBF_CANCEL_BUTTON, TDCBF_CLOSE_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION, TDF_SIZE_TO_CONTENT, TaskDialogIndirect,
-};
-use windows::core::{BOOL, HSTRING, PCWSTR};
+use eframe::egui;
 
 #[path = "../../src/platform/installed.rs"]
 mod installed;
+
+#[path = "../../src/ui/app_icon.rs"]
+mod app_icon;
 
 const APP: &[u8] = include_bytes!(env!("AFTERGLOW_PAYLOAD"));
 const LICENSE: &[u8] = include_bytes!("../../LICENSE");
 const NOTICES: &[u8] = include_bytes!("../../THIRD-PARTY-NOTICES.txt");
 const VERSION: &str = env!("AFTERGLOW_VERSION");
 
-const INSTALL: i32 = 100;
-const START: i32 = 101;
-const RETRY: i32 = 102;
-
-enum Stop {
-    Cancelled,
-    Failed(String),
-    /// Failed, and afterglow.exe already said why.
-    Told,
-}
+const TITLE: &str = "Afterglow Setup";
+const NAME: &str = "Afterglow";
+/// Phosphor's folder-open icon, for the Browse button.
+const FOLDER_OPEN: &str = "\u{E256}";
 
 fn main() {
-    let quiet = std::env::args().any(|a| a == "--quiet");
-    let code = match run(quiet) {
-        Ok(()) => 0,
-        Err(Stop::Cancelled) => 1,
-        Err(Stop::Told) => 2,
-        Err(Stop::Failed(message)) => {
-            if !quiet {
-                Dialog::new("Afterglow couldn't be installed", &message).icon(Icon::Error).show();
+    if std::env::args().any(|a| a == "--quiet") {
+        std::process::exit(match quiet() {
+            Ok(()) => 0,
+            Err(message) => {
+                eprintln!("{message}");
+                2
             }
-            2
-        }
+        });
+    }
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title(TITLE)
+            .with_inner_size([520.0, 360.0])
+            .with_resizable(false)
+            .with_maximize_button(false)
+            .with_icon(std::sync::Arc::new(egui::IconData { rgba: app_icon::render(256), width: 256, height: 256 })),
+        centered: true,
+        ..Default::default()
     };
-    std::process::exit(code);
+    let _ = eframe::run_native(TITLE, options, Box::new(|cc| Ok(Box::new(Setup::new(cc)))));
 }
 
-fn run(quiet: bool) -> Result<(), Stop> {
+/// Installs without asking, as `--quiet` does.
+fn quiet() -> Result<(), String> {
     let earlier = installed::find();
     let dir = match &earlier {
         Some(earlier) => earlier.dir.clone(),
-        None => installed::default_dir().ok_or_else(|| Stop::Failed("The folder for programs (%LOCALAPPDATA%) wasn't found.".into()))?,
+        None => installed::default_dir().ok_or("The folder for programs (%LOCALAPPDATA%) wasn't found.")?,
     };
+    let (start_menu, desktop) = earlier.as_ref().map_or((true, false), |e| (e.start_menu, e.desktop));
+    install(&dir, start_menu, desktop)
+}
+
+/// What an install did, or why it couldn't.
+type Outcome = Result<(), String>;
+
+/// Closes a running Afterglow in `dir`, writes the files and registers them.
+fn install(dir: &Path, start_menu: bool, desktop: bool) -> Outcome {
     let exe = dir.join(installed::EXE);
-
-    let mut desktop = earlier.as_ref().is_some_and(|e| e.desktop);
-    if !quiet {
-        let (title, button, content) = match &earlier {
-            None => (
-                format!("Install Afterglow {VERSION}"),
-                "Install",
-                format!(
-                    "Afterglow goes in {}, just for you. It gets a Start menu shortcut, and you can open videos with it from \"Open with\".\n\nAfterglow is free software, under the GNU General Public License 3.0 or later.",
-                    dir.display()
-                ),
-            ),
-            Some(earlier) => (
-                if earlier.version == VERSION { format!("Reinstall Afterglow {VERSION}") } else { format!("Update Afterglow {} to {VERSION}", earlier.version) },
-                if earlier.version == VERSION { "Reinstall" } else { "Update" },
-                format!("Afterglow is in {}. Your progress and settings are kept.\n\nIf Afterglow is open, it closes first.", dir.display()),
-            ),
-        };
-        let (pressed, checked) =
-            Dialog::new(&title, &content).button(INSTALL, button).common(TDCBF_CANCEL_BUTTON).checkbox("Add a shortcut to the desktop", desktop).show();
-        if pressed != INSTALL {
-            return Err(Stop::Cancelled);
-        }
-        desktop = checked;
+    if !installed::close_running(&exe, Duration::from_secs(10)) {
+        return Err("Afterglow is open and didn't close. Close it, then run the setup again.".into());
     }
-
-    while !installed::close_running(&exe, Duration::from_secs(10)) {
-        if quiet {
-            return Err(Stop::Failed("Afterglow is open and didn't close.".into()));
-        }
-        let (pressed, _) = Dialog::new("Close Afterglow to continue", "Afterglow is still open. Close it, then try again.")
-            .icon(Icon::Warning)
-            .button(RETRY, "Try again")
-            .common(TDCBF_CANCEL_BUTTON)
-            .show();
-        if pressed != RETRY {
-            return Err(Stop::Cancelled);
-        }
-    }
-
-    put_files(&dir).map_err(|e| Stop::Failed(format!("Writing to {} failed: {e}", dir.display())))?;
-
+    put_files(dir).map_err(|e| format!("Writing to {} failed: {e}", dir.display()))?;
     let mut register = Command::new(&exe);
-    register.arg("--register").current_dir(&dir);
+    // Quietly: what goes wrong is shown here instead.
+    register.args(["--register", "--quiet"]).current_dir(dir);
     if desktop {
         register.arg("--desktop");
     }
-    if quiet {
-        register.arg("--quiet");
+    if !start_menu {
+        register.arg("--no-start-menu");
     }
-    let status = register.status().map_err(|e| Stop::Failed(format!("{} couldn't be started: {e}", exe.display())))?;
-    if !status.success() {
-        return Err(if quiet { Stop::Failed("afterglow.exe --register failed".into()) } else { Stop::Told });
-    }
-
-    if !quiet {
-        let (pressed, _) = Dialog::new(
-            &format!("Afterglow {VERSION} is installed"),
-            "Find it in the Start menu, or open a video with it from \"Open with\". To uninstall it, go to Settings › Apps.",
-        )
-        .button(START, "Start Afterglow")
-        .common(TDCBF_CLOSE_BUTTON)
-        .show();
-        if pressed == START {
-            let _ = Command::new(&exe).current_dir(&dir).spawn();
-        }
+    let output = register.output().map_err(|e| format!("{} couldn't be started: {e}", exe.display()))?;
+    if !output.status.success() {
+        let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if said.is_empty() { "Afterglow couldn't register itself.".into() } else { said });
     }
     Ok(())
 }
@@ -158,89 +121,278 @@ fn put_files(dir: &Path) -> std::io::Result<()> {
     }
 }
 
-enum Icon {
-    App,
-    Warning,
-    Error,
+/// Where the setup has got to.
+enum Stage {
+    /// Asking where Afterglow should go.
+    Asking,
+    /// Writing, on a thread of its own so the window keeps painting.
+    Working(Receiver<Outcome>),
+    /// Done, with where it went.
+    Done(PathBuf),
+    Failed(String),
 }
 
-/// A Windows task dialog: a title, text, buttons and maybe a checkbox.
-struct Dialog {
-    title: HSTRING,
-    content: HSTRING,
-    icon: Icon,
-    buttons: Vec<(i32, HSTRING)>,
-    common: TASKDIALOG_COMMON_BUTTON_FLAGS,
-    checkbox: Option<(HSTRING, bool)>,
+struct Setup {
+    /// Afterglow's icon, drawn once and kept.
+    icon: Option<egui::TextureHandle>,
+    stage: Stage,
+    /// The folder being written to, once the work has started.
+    target: PathBuf,
+    /// The installed version, when there is an install to update.
+    earlier: Option<String>,
+    dir: String,
+    start_menu: bool,
+    desktop: bool,
+    launch: bool,
 }
 
-impl Dialog {
-    fn new(title: &str, content: &str) -> Self {
-        Dialog {
-            title: title.into(),
-            content: content.into(),
-            icon: Icon::App,
-            buttons: Vec::new(),
-            common: TDCBF_CLOSE_BUTTON,
-            checkbox: None,
+impl Setup {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert("phosphor".into(), std::sync::Arc::new(egui::FontData::from_static(include_bytes!("../../assets/fonts/Phosphor.ttf"))));
+        fonts.families.entry(egui::FontFamily::Proportional).or_default().push("phosphor".into());
+        cc.egui_ctx.set_fonts(fonts);
+        // Where it already is, when there is somewhere, else the usual place.
+        let earlier = installed::find();
+        let dir = earlier.as_ref().map(|e| e.dir.clone()).or_else(installed::default_dir).unwrap_or_default();
+        let (start_menu, desktop) = earlier.as_ref().map_or((true, false), |e| (e.start_menu, e.desktop));
+        Self {
+            icon: None,
+            stage: Stage::Asking,
+            target: PathBuf::new(),
+            earlier: earlier.map(|e| e.version),
+            dir: dir.display().to_string(),
+            start_menu,
+            desktop,
+            launch: true,
         }
     }
 
-    fn icon(mut self, icon: Icon) -> Self {
-        self.icon = icon;
-        self
-    }
-
-    fn button(mut self, id: i32, text: &str) -> Self {
-        self.buttons.push((id, text.into()));
-        self
-    }
-
-    fn common(mut self, buttons: TASKDIALOG_COMMON_BUTTON_FLAGS) -> Self {
-        self.common = buttons;
-        self
-    }
-
-    fn checkbox(mut self, text: &str, checked: bool) -> Self {
-        self.checkbox = Some((text.into(), checked));
-        self
-    }
-
-    /// Shows it, returning the button pressed and whether the box is ticked.
-    fn show(self) -> (i32, bool) {
-        let window_title = HSTRING::from("Afterglow setup");
-        let buttons: Vec<TASKDIALOG_BUTTON> =
-            self.buttons.iter().map(|(id, text)| TASKDIALOG_BUTTON { nButtonID: *id, pszButtonText: PCWSTR(text.as_ptr()) }).collect();
-        let main_icon = match self.icon {
-            // The icon built into this exe (see build.rs), by its number.
-            Icon::App => PCWSTR(std::ptr::without_provenance(1)),
-            Icon::Warning => TD_WARNING_ICON,
-            Icon::Error => TD_ERROR_ICON,
+    /// Starts the work and leaves the window free to draw. The thread wakes
+    /// the window when it's done, since nothing else would.
+    fn act(&mut self, ctx: &egui::Context) {
+        let dir = PathBuf::from(self.dir.trim());
+        self.target = dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (start_menu, desktop) = (self.start_menu, self.desktop);
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new().name("install".into()).spawn(move || {
+            let _ = tx.send(install(&dir, start_menu, desktop));
+            ctx.request_repaint();
+        });
+        self.stage = match spawned {
+            Ok(_) => Stage::Working(rx),
+            Err(e) => Stage::Failed(format!("The setup couldn't start writing: {e}")),
         };
-        let mut flags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_SIZE_TO_CONTENT;
-        if self.checkbox.as_ref().is_some_and(|(_, checked)| *checked) {
-            flags |= windows::Win32::UI::Controls::TDF_VERIFICATION_FLAG_CHECKED;
-        }
-        let config = TASKDIALOGCONFIG {
-            cbSize: size_of::<TASKDIALOGCONFIG>() as u32,
-            hwndParent: HWND::default(),
-            hInstance: unsafe { GetModuleHandleW(None) }.map(Into::into).unwrap_or_default(),
-            dwFlags: flags,
-            dwCommonButtons: self.common,
-            pszWindowTitle: PCWSTR(window_title.as_ptr()),
-            Anonymous1: TASKDIALOGCONFIG_0 { pszMainIcon: main_icon },
-            pszMainInstruction: PCWSTR(self.title.as_ptr()),
-            pszContent: PCWSTR(self.content.as_ptr()),
-            cButtons: buttons.len() as u32,
-            pButtons: if buttons.is_empty() { std::ptr::null() } else { buttons.as_ptr() },
-            nDefaultButton: self.buttons.first().map_or(0, |(id, _)| *id),
-            pszVerificationText: self.checkbox.as_ref().map_or(PCWSTR::null(), |(text, _)| PCWSTR(text.as_ptr())),
-            ..Default::default()
+    }
+
+    /// Takes the answer when the thread has one.
+    fn finished(&mut self) {
+        let Stage::Working(rx) = &self.stage else { return };
+        let outcome = match rx.try_recv() {
+            Ok(outcome) => outcome,
+            // Still writing, which is most frames.
+            Err(TryRecvError::Empty) => return,
+            // The thread went without answering: nothing is coming, and a
+            // spinner that never stops is worse than saying so.
+            Err(TryRecvError::Disconnected) => Err("Writing stopped before it finished. Close this and try again.".into()),
         };
-        let (mut pressed, mut checked) = (0, BOOL(0));
-        if unsafe { TaskDialogIndirect(&config, Some(&mut pressed), None, Some(&mut checked)) }.is_err() {
-            return (0, false);
+        self.stage = match outcome {
+            Ok(()) => Stage::Done(std::mem::take(&mut self.target)),
+            Err(why) => Stage::Failed(why),
+        };
+    }
+
+    /// Whether this updates an earlier install (or reinstalls it).
+    fn updating(&self) -> bool {
+        self.earlier.is_some()
+    }
+}
+
+impl eframe::App for Setup {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Room around everything: the window is small, and its controls
+        // shouldn't sit against its edges.
+        egui::Frame::new().inner_margin(egui::Margin { left: 22, right: 22, top: 12, bottom: 14 }).show(ui, |ui| self.body(ui));
+    }
+}
+
+impl Setup {
+    fn body(&mut self, ui: &mut egui::Ui) {
+        let icon = self
+            .icon
+            .get_or_insert_with(|| {
+                let image = egui::ColorImage::from_rgba_unmultiplied([128, 128], &app_icon::render(128));
+                ui.ctx().load_texture("setup-icon", image, egui::TextureOptions::LINEAR)
+            })
+            .id();
+        ui.add_space(12.0);
+        ui.vertical_centered(|ui| {
+            ui.add(egui::Image::new((icon, egui::vec2(84.0, 84.0))));
+            ui.label(egui::RichText::new(NAME).size(20.0).strong());
+            ui.weak(format!("Version {VERSION}"));
+        });
+        ui.add_space(12.0);
+
+        self.finished();
+        match &self.stage {
+            Stage::Asking => self.ask(ui),
+            Stage::Working(_) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(if self.updating() { "Updating\u{2026}" } else { "Installing\u{2026}" });
+                });
+                ui.add_space(4.0);
+                ui.weak(self.target.display().to_string());
+                // egui draws on demand; without this the spinner would sit still.
+                ui.ctx().request_repaint();
+            }
+            Stage::Done(dir) => {
+                let dir = dir.clone();
+                ui.label(if self.updating() { "Updated." } else { "Installed." });
+                ui.weak(dir.display().to_string());
+                ui.add_space(8.0);
+                ui.checkbox(&mut self.launch, "Open it now");
+                self.footer(ui, "Close", |setup| {
+                    if setup.launch {
+                        let _ = Command::new(dir.join(installed::EXE)).current_dir(&dir).spawn();
+                    }
+                    true
+                });
+            }
+            Stage::Failed(why) => {
+                let why = why.clone();
+                ui.colored_label(ui.visuals().error_fg_color, &why);
+                ui.add_space(8.0);
+                self.footer(ui, "Close", |_| true);
+            }
         }
-        (pressed, checked.as_bool())
+    }
+
+    /// The question: where should it go.
+    fn ask(&mut self, ui: &mut egui::Ui) {
+        let updating = self.updating();
+        ui.label(if updating { "Installed in:" } else { "Install it in:" });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            // An earlier install is updated where it is.
+            ui.add_enabled_ui(!updating, |ui| {
+                let width = ui.available_width() - 90.0;
+                ui.add_sized([width, 24.0], egui::TextEdit::singleline(&mut self.dir));
+                if ui.button(format!("{FOLDER_OPEN} Browse")).clicked()
+                    && let Some(picked) = rfd::FileDialog::new().set_title("Choose a folder").pick_folder()
+                {
+                    self.dir = in_own_folder(picked).display().to_string();
+                }
+            });
+        });
+        ui.add_space(10.0);
+        ui.checkbox(&mut self.start_menu, "Add a shortcut to the Start menu");
+        ui.checkbox(&mut self.desktop, "Add a shortcut to the desktop");
+
+        let label = match &self.earlier {
+            Some(version) if version == VERSION => "Reinstall",
+            Some(_) => "Update",
+            None => "Install",
+        };
+        let ctx = ui.ctx().clone();
+        self.footer(ui, label, move |setup| {
+            setup.act(&ctx);
+            false
+        });
+    }
+
+    /// The bottom row: the one button that does the thing. It closes the
+    /// window when `act` says so.
+    fn footer(&mut self, ui: &mut egui::Ui, label: &str, act: impl FnOnce(&mut Self) -> bool) {
+        let enabled = !self.dir.trim().is_empty();
+        ui.add_space(16.0);
+        ui.separator();
+        ui.add_space(8.0);
+        let mut done = false;
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let button = egui::Button::new(egui::RichText::new(label).strong()).min_size(egui::vec2(110.0, 28.0));
+                if ui.add_enabled(enabled, button).clicked() {
+                    done = act(self);
+                }
+            });
+        });
+        if done {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+}
+
+/// A folder of Afterglow's own inside the one picked, so uninstalling never
+/// takes a folder that was full of other things.
+fn in_own_folder(picked: PathBuf) -> PathBuf {
+    let own = picked.file_name().is_some_and(|name| name.eq_ignore_ascii_case(NAME));
+    if own { picked } else { picked.join(NAME) }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc::{Sender, channel};
+
+    use super::*;
+
+    /// A setup part-way through the work, and the channel the thread would
+    /// answer on. The window is never built: what is under test is which
+    /// stage the answer leaves it in.
+    fn working() -> (Setup, Sender<Outcome>) {
+        let (tx, rx) = channel();
+        let target = PathBuf::from(r"C:\Programs\Afterglow");
+        let setup = Setup {
+            icon: None,
+            stage: Stage::Working(rx),
+            target: target.clone(),
+            earlier: None,
+            dir: target.display().to_string(),
+            start_menu: true,
+            desktop: false,
+            launch: true,
+        };
+        (setup, tx)
+    }
+
+    #[test]
+    fn a_thread_still_writing_is_waited_for() {
+        let (mut setup, _tx) = working();
+        setup.finished();
+        assert!(matches!(setup.stage, Stage::Working(_)));
+    }
+
+    #[test]
+    fn an_install_that_worked_says_where_it_went() {
+        let (mut setup, tx) = working();
+        let target = setup.target.clone();
+        tx.send(Ok(())).unwrap();
+        setup.finished();
+        assert!(matches!(setup.stage, Stage::Done(ref dir) if *dir == target));
+    }
+
+    #[test]
+    fn a_failure_is_shown_as_it_came() {
+        let (mut setup, tx) = working();
+        tx.send(Err("the disk is full".into())).unwrap();
+        setup.finished();
+        assert!(matches!(setup.stage, Stage::Failed(ref why) if why == "the disk is full"));
+    }
+
+    /// The thread is gone and no answer was ever sent, as when the work
+    /// panicked: that's a failure, not a spinner for ever.
+    #[test]
+    fn a_thread_that_dies_without_answering_is_a_failure() {
+        let (mut setup, tx) = working();
+        drop(tx);
+        setup.finished();
+        assert!(matches!(setup.stage, Stage::Failed(ref why) if !why.is_empty()));
+    }
+
+    #[test]
+    fn a_picked_folder_gets_a_folder_of_its_own() {
+        assert_eq!(in_own_folder(PathBuf::from(r"D:\Apps")), PathBuf::from(r"D:\Apps\Afterglow"));
+        assert_eq!(in_own_folder(PathBuf::from(r"D:\Apps\afterglow")), PathBuf::from(r"D:\Apps\afterglow"));
     }
 }

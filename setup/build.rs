@@ -73,7 +73,7 @@ END
     )
 }
 
-/// Common Controls 6, for the task dialogs; `asInvoker`, or Windows would ask
+/// Common Controls 6, for the folder picker; `asInvoker`, or Windows would ask
 /// for administrator rights for an exe with "setup" in its name; and sharp
 /// text on scaled displays.
 const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

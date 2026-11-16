@@ -33,6 +33,9 @@ pub struct Installed {
     pub version: String,
     /// Whether it was given a desktop shortcut.
     pub desktop: bool,
+    /// Whether it was given a Start menu shortcut (always, before this was
+    /// a choice).
+    pub start_menu: bool,
 }
 
 pub fn find() -> Option<Installed> {
@@ -40,7 +43,8 @@ pub fn find() -> Option<Installed> {
     let dir = PathBuf::from(key.string("InstallLocation")?);
     let version = key.string("DisplayVersion").unwrap_or_default();
     let desktop = key.dword("DesktopShortcut") == Some(1);
-    Some(Installed { dir, version, desktop })
+    let start_menu = key.dword("StartMenuShortcut") != Some(0);
+    Some(Installed { dir, version, desktop, start_menu })
 }
 
 /// Whether two paths name the same file, as far as their text tells.

@@ -28,10 +28,11 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    cargo build --release -p afterglow-setup
    ```
 
-   Copy `target/release/afterglow-setup.exe` to `afterglow-X.Y.Z-windows-x64-setup.exe`. It
-   installs to `%LOCALAPPDATA%\Programs\afterglow` without administrator rights, and
-   updates an installed copy where it is; `--quiet` does that without asking anything. The
-   installed exe uninstalls itself from Settings › Apps (`src/platform/install.rs`).
+   Copy `target/release/afterglow-setup.exe` to `afterglow-X.Y.Z-windows-x64-setup.exe`. Its
+   window asks where to install (`%LOCALAPPDATA%\Programs\afterglow` unless another folder
+   is picked) and which shortcuts to add, without administrator rights, and updates an
+   installed copy where it is; `--quiet` does that without a window. The installed exe
+   uninstalls itself from Settings › Apps (`src/platform/install.rs`).
 
 6. Copy `target/release/afterglow.exe` to `afterglow-X.Y.Z-windows-x64.exe` and pack it with
    the license and notices:

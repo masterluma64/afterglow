@@ -1,10 +1,10 @@
 //! Installing and uninstalling, run from the command line rather than the
 //! window:
 //!
-//! - `afterglow.exe --register [--desktop]`: the setup (`setup/`) runs this
-//!   once it has put the files in place. It adds the Start menu shortcut (and
-//!   the desktop one, or removes it), "Open with" for videos, and the entry in
-//!   Settings › Apps.
+//! - `afterglow.exe --register [--desktop] [--no-start-menu]`: the setup
+//!   (`setup/`) runs this once it has put the files in place. It adds the
+//!   Start menu and desktop shortcuts asked for (removing the others), "Open
+//!   with" for videos, and the entry in Settings › Apps.
 //! - `afterglow.exe --uninstall [--quiet]`: that entry's Uninstall button.
 //!   It runs again from a copy in the temp folder (an exe can't delete itself
 //!   while it runs), which removes all of the above and the program's files,
@@ -31,7 +31,7 @@ pub fn run_command() -> Option<i32> {
     let has = |flag: &str| args.iter().any(|a| a == flag);
     let quiet = has("--quiet");
     let result = match args.first()?.to_str()? {
-        "--register" => register(has("--desktop")),
+        "--register" => register(has("--desktop"), !has("--no-start-menu")),
         "--uninstall" => uninstall(quiet),
         "--uninstall-from" => {
             let dir = PathBuf::from(args.get(1)?);
@@ -75,21 +75,22 @@ pub fn refresh_entry() {
     let Ok(exe) = std::env::current_exe() else { return };
     let Some(installed) = installed::find() else { return };
     if installed.version != env!("CARGO_PKG_VERSION") && exe.parent().is_some_and(|dir| installed::same_path(dir, &installed.dir)) {
-        let _ = register(installed.desktop);
+        let _ = register(installed.desktop, installed.start_menu);
     }
 }
 
 /// Adds the shortcuts, "Open with" and the Settings › Apps entry for this exe.
-fn register(desktop: bool) -> Result<(), Stop> {
+fn register(desktop: bool, start_menu: bool) -> Result<(), Stop> {
     let exe = this_exe()?;
     let dir = exe.parent().ok_or_else(|| "Afterglow's folder wasn't found".to_string())?;
     let failed = |what: &str, e: String| format!("Afterglow couldn't add {what}: {e}");
 
-    shortcut::create(Place::StartMenu).map_err(|e| failed("its Start menu shortcut", e))?;
-    if desktop {
-        shortcut::create(Place::Desktop).map_err(|e| failed("its desktop shortcut", e))?;
-    } else if shortcut::target(Place::Desktop).is_some_and(|t| installed::same_path(&t, &exe)) {
-        shortcut::remove(Place::Desktop).map_err(|e| failed("its desktop shortcut", e))?;
+    for (place, wanted, what) in [(Place::StartMenu, start_menu, "its Start menu shortcut"), (Place::Desktop, desktop, "its desktop shortcut")] {
+        if wanted {
+            shortcut::create(place).map_err(|e| failed(what, e))?;
+        } else if shortcut::target(place).is_some_and(|t| installed::same_path(&t, &exe)) {
+            shortcut::remove(place).map_err(|e| failed(what, e))?;
+        }
     }
 
     let exe_text = exe.display().to_string();
@@ -125,6 +126,7 @@ fn register(desktop: bool) -> Result<(), Stop> {
         entry.set_dword("NoRepair", 1)?;
         // For the setup, when it updates this.
         entry.set_dword("DesktopShortcut", desktop as u32)?;
+        entry.set_dword("StartMenuShortcut", start_menu as u32)?;
         let size: u64 = installed::FILES.iter().filter_map(|f| std::fs::metadata(dir.join(f)).ok()).map(|m| m.len()).sum();
         entry.set_dword("EstimatedSize", (size / 1024) as u32)?;
         Ok(())
