@@ -4807,7 +4807,7 @@ DEALINGS IN THE SOFTWARE.
 der 0.7.10, 0.8.3 (Apache-2.0 OR MIT)
 ------------------------------------------------------------
 
-der-0.7.10\LICENSE-APACHE:
+der-0.8.3\LICENSE-APACHE:
 
                               Apache License
                         Version 2.0, January 2004
@@ -5011,9 +5011,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-der-0.7.10\LICENSE-MIT:
+der-0.8.3\LICENSE-MIT:
 
-Copyright (c) 2020-2023 The RustCrypto Project Developers
+Copyright (c) 2020-2026 The RustCrypto Project Developers
 
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
@@ -8891,7 +8891,7 @@ SOFTWARE.
 getrandom 0.2.17, 0.3.4 (MIT OR Apache-2.0)
 ------------------------------------------------------------
 
-getrandom-0.2.17\LICENSE-APACHE:
+getrandom-0.3.4\LICENSE-APACHE:
 
                               Apache License
                         Version 2.0, January 2004
@@ -9095,9 +9095,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-getrandom-0.2.17\LICENSE-MIT:
+getrandom-0.3.4\LICENSE-MIT:
 
-Copyright (c) 2018-2024 The rust-random Project Developers
+Copyright (c) 2018-2025 The rust-random Project Developers
 Copyright (c) 2014 The Rust Project Developers
 
 Permission is hereby granted, free of charge, to any
@@ -33177,7 +33177,7 @@ windows-strings-0.5.1\license-mit:
 windows-sys 0.52.0, 0.61.2 (MIT OR Apache-2.0)
 ------------------------------------------------------------
 
-windows-sys-0.52.0\license-apache-2.0:
+windows-sys-0.61.2\license-apache-2.0:
 
                                  Apache License
                            Version 2.0, January 2004
@@ -33381,7 +33381,7 @@ windows-sys-0.52.0\license-apache-2.0:
    See the License for the specific language governing permissions and
    limitations under the License.
 
-windows-sys-0.52.0\license-mit:
+windows-sys-0.61.2\license-mit:
 
     MIT License
 
@@ -33409,7 +33409,7 @@ windows-sys-0.52.0\license-mit:
 windows-targets 0.42.2, 0.52.6 (MIT OR Apache-2.0)
 ------------------------------------------------------------
 
-windows-targets-0.52.6\license-apache-2.0:
+windows-targets-0.42.2\license-apache-2.0:
 
                                  Apache License
                            Version 2.0, January 2004
@@ -33613,7 +33613,7 @@ windows-targets-0.52.6\license-apache-2.0:
    See the License for the specific language governing permissions and
    limitations under the License.
 
-windows-targets-0.52.6\license-mit:
+windows-targets-0.42.2\license-mit:
 
     MIT License
 
