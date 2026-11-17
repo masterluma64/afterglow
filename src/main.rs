@@ -247,7 +247,8 @@ struct App {
     thumbnails_ready: Option<Receiver<Result<thumbnails::Thumbnails, String>>>,
     /// A still of each video, for the playlist.
     stills: player::stills::Stills,
-    /// Listens for openings that have no chapter (see `listen_for_opening`).
+    /// Listens for openings and endings that have no chapter (see
+    /// `listen_for_skips`).
     listener: player::listen::Listener,
     /// The video last looked at for listening, so it is only looked at once.
     listen_asked: Option<PathBuf>,
@@ -649,7 +650,7 @@ impl eframe::App for App {
         self.receive_durations();
         self.receive_disk(&ctx);
         self.receive_heard();
-        self.listen_for_opening(&ctx);
+        self.listen_for_skips(&ctx);
         let gone = self.recent.receive();
         self.store.forget_recent(&gone);
         self.receive_scans();

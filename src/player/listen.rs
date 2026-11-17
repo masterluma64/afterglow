@@ -1,8 +1,9 @@
-//! Finding a show's opening by listening: the theme song sounds the same in
-//! every episode, while the rest of the sound differs. The start of two
-//! episodes is decoded (by a silent mpv of its own, on a background thread),
-//! each turned into an audio fingerprint, and the longest stretch of sound
-//! they share is the opening.
+//! Finding a show's opening and ending by listening: the theme songs sound
+//! the same in every episode, while the rest of the sound differs. The start
+//! of two episodes is decoded (by a silent mpv of its own, on a background
+//! thread), each turned into an audio fingerprint, and the longest stretch of
+//! sound they share is the opening. Their last minutes give the ending the
+//! same way.
 //!
 //! The fingerprint is that of Haitsma and Kalker ("A Highly Robust Audio
 //! Fingerprinting System", 2002): 32 bits per short step of sound, each
@@ -18,6 +19,7 @@ use std::time::Duration;
 
 use eframe::egui;
 
+use crate::library::progress::Skip;
 use crate::player::mpv;
 
 /// Samples per second the sound is listened to at.
@@ -41,16 +43,19 @@ const MAX_BITS: u32 = 10;
 const MAX_GAP: usize = 30;
 /// How much of a shared stretch must match, as a fraction of its steps.
 const MIN_DENSITY: f32 = 0.5;
-/// The shortest and longest an opening can be, in seconds.
+/// The shortest and longest an opening (or ending) can be, in seconds.
 const MIN_OPENING: f64 = 15.0;
 pub const MAX_OPENING: f64 = 180.0;
-/// How much of each episode is listened to, in seconds: openings come
-/// early, though some shows have a scene first.
+/// How much of the start of each episode is listened to for its opening,
+/// in seconds: openings come early, though some shows have a scene first.
 pub const LISTEN: f64 = 420.0;
+/// How much of the end is listened to for its ending: the credits come
+/// last, perhaps with a preview or a scene after them.
+pub const LISTEN_END: f64 = 300.0;
 /// How long decoding one episode may take before it's given up on.
 const TIMEOUT: Duration = Duration::from_secs(120);
 /// Fingerprints kept for the next episodes to be compared with.
-const KEPT: usize = 6;
+const KEPT: usize = 8;
 
 /// A fingerprint: 32 bits per step, and whether the step is loud enough to
 /// compare.
@@ -58,6 +63,8 @@ const KEPT: usize = 6;
 pub struct Print {
     bits: Vec<u32>,
     loud: Vec<bool>,
+    /// Where the sound starts in the video, in seconds.
+    start: f64,
 }
 
 /// The fingerprint of mono sound at `RATE`, with samples from -1 to 1.
@@ -141,7 +148,7 @@ fn time_of(step: usize) -> f64 {
 }
 
 /// The longest stretch of sound two fingerprints share, as an opening is
-/// long: where it is in each, in seconds.
+/// long: where it is in each video, in seconds.
 pub fn shared(a: &Print, b: &Print) -> Option<((f64, f64), (f64, f64))> {
     let steps = |seconds: f64| (seconds * RATE as f64 / HOP as f64) as usize;
     let (min, max) = (steps(MIN_OPENING), steps(MAX_OPENING));
@@ -200,19 +207,33 @@ pub fn shared(a: &Print, b: &Print) -> Option<((f64, f64), (f64, f64))> {
     if ((last - first + 1) as f64) < MIN_OPENING * RATE as f64 / HOP as f64 {
         return None;
     }
-    Some(((time_of(first), time_of(last)), (time_of(in_b(first)), time_of(in_b(last)))))
+    let (sa, sb) = (a.start, b.start);
+    Some(((sa + time_of(first), sa + time_of(last)), (sb + time_of(in_b(first)), sb + time_of(in_b(last)))))
 }
 
-/// An opening heard in a video, in seconds from its start: `None` if it
-/// was listened to, but none was found.
-pub type Opening = Option<(f64, f64)>;
+/// An opening or ending heard in a video, in seconds from its start:
+/// `None` if it was listened to, but none was found.
+pub type Found = Option<(f64, f64)>;
 
-/// Listens to the openings of videos asked for, on a background thread.
+/// What listening to a video found.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Heard {
+    pub video: PathBuf,
+    pub part: Skip,
+    pub found: Found,
+}
+
+/// A video to listen to, the episodes to compare it with, and what to
+/// listen for.
+type Ask = (PathBuf, Vec<PathBuf>, Vec<Skip>);
+
+/// Listens to the openings and endings of videos asked for, on a
+/// background thread.
 pub struct Listener {
-    asks: Sender<(PathBuf, Vec<PathBuf>)>,
-    /// What was heard: the video asked for, and the others whose opening
-    /// was found along the way.
-    pub heard: Receiver<Vec<(PathBuf, Opening)>>,
+    asks: Sender<Ask>,
+    /// What was heard: in the video asked for, and in the other one it
+    /// shared it with.
+    pub heard: Receiver<Vec<Heard>>,
     /// Set to pause listening, so it doesn't compete with playback for the
     /// disk (see `hold`).
     holding: Arc<AtomicBool>,
@@ -220,33 +241,40 @@ pub struct Listener {
 
 impl Listener {
     pub fn new(ctx: egui::Context) -> Self {
-        let (asks, ask_rx) = mpsc::channel::<(PathBuf, Vec<PathBuf>)>();
+        let (asks, ask_rx) = mpsc::channel::<Ask>();
         let (heard_tx, heard) = mpsc::channel();
         let holding = Arc::new(AtomicBool::new(false));
         let hold = holding.clone();
         let spawned = std::thread::Builder::new().name("listen".into()).spawn(move || {
-            let mut prints: Vec<(PathBuf, Option<Print>)> = Vec::new();
-            let mut print_of = |path: &Path| -> Option<Print> {
-                if let Some((_, print)) = prints.iter().find(|(p, _)| p == path) {
+            let mut prints: Vec<(PathBuf, Skip, Option<Print>)> = Vec::new();
+            let mut print_of = |path: &Path, part: Skip| -> Option<Print> {
+                if let Some((.., print)) = prints.iter().find(|(p, k, _)| p == path && *k == part) {
                     return print.clone();
                 }
-                let print = mpv::decode_audio(path, LISTEN, RATE, TIMEOUT, &hold).map(|s| fingerprint(&s));
+                let (seconds, from_end) = if part == Skip::Ending { (LISTEN_END, true) } else { (LISTEN, false) };
+                let print = mpv::decode_audio(path, seconds, from_end, RATE, TIMEOUT, &hold)
+                    .map(|(samples, start)| Print { start, ..fingerprint(&samples) });
                 if prints.len() >= KEPT {
                     prints.remove(0);
                 }
-                prints.push((path.to_path_buf(), print.clone()));
+                prints.push((path.to_path_buf(), part, print.clone()));
                 print
             };
-            for (video, others) in ask_rx {
-                let heard = listen(&video, &others, &mut print_of);
-                if heard_tx.send(heard).is_err() {
-                    return;
+            for (video, others, parts) in ask_rx {
+                for part in parts {
+                    let heard = listen(&video, &others, &mut |path| print_of(path, part))
+                        .into_iter()
+                        .map(|(video, found)| Heard { video, part, found })
+                        .collect();
+                    if heard_tx.send(heard).is_err() {
+                        return;
+                    }
+                    ctx.request_repaint();
                 }
-                ctx.request_repaint();
             }
         });
         if let Err(e) = spawned {
-            eprintln!("could not start listening for openings: {e}");
+            eprintln!("could not start listening for openings and endings: {e}");
         }
         Self { asks, heard, holding }
     }
@@ -257,15 +285,17 @@ impl Listener {
         self.holding.store(hold, Ordering::Relaxed);
     }
 
-    /// Listens for the opening of `video`, comparing it with `others`
-    /// (episodes of the same show, the likeliest first).
-    pub fn ask(&self, video: &Path, others: Vec<PathBuf>) {
-        let _ = self.asks.send((video.to_path_buf(), others));
+    /// Listens for the `parts` of `video` (its opening, ending or both),
+    /// comparing it with `others` (episodes of the same show, the likeliest
+    /// first).
+    pub fn ask(&self, video: &Path, others: Vec<PathBuf>, parts: Vec<Skip>) {
+        let _ = self.asks.send((video.to_path_buf(), others, parts));
     }
 }
 
-/// Compares `video` with each of `others` until they share an opening.
-fn listen(video: &Path, others: &[PathBuf], print_of: &mut impl FnMut(&Path) -> Option<Print>) -> Vec<(PathBuf, Opening)> {
+/// Compares the sound of `video` with that of each of `others` until they
+/// share an opening (or ending, by `print_of`).
+fn listen(video: &Path, others: &[PathBuf], print_of: &mut impl FnMut(&Path) -> Option<Print>) -> Vec<(PathBuf, Found)> {
     let Some(print) = print_of(video) else { return vec![(video.to_path_buf(), None)] };
     for other in others {
         let Some(other_print) = print_of(other) else { continue };
@@ -356,6 +386,18 @@ mod tests {
         let near = |x: f64, y: f64| (x - y).abs() < 1.0;
         assert!(near(a_start, 40.0) && near(a_end, 100.0), "in a: {a_start:.1}–{a_end:.1}");
         assert!(near(b_start, 83.0) && near(b_end, 143.0), "in b: {b_start:.1}–{b_end:.1}");
+    }
+
+    /// Heard at the end, the times count from where the sound starts.
+    #[test]
+    fn places_an_ending_in_the_video() {
+        let a = episode(&[noise(50.0, 21), theme(80.0, 1.0), noise(30.0, 22)]);
+        let b = episode(&[noise(70.0, 23), theme(80.0, 1.0), noise(20.0, 24)]);
+        let (a, b) = (Print { start: 1300.0, ..fingerprint(&a) }, Print { start: 1250.0, ..fingerprint(&b) });
+        let ((a_start, a_end), (b_start, b_end)) = shared(&a, &b).expect("found");
+        let near = |x: f64, y: f64| (x - y).abs() < 1.0;
+        assert!(near(a_start, 1350.0) && near(a_end, 1430.0), "in a: {a_start:.1}–{a_end:.1}");
+        assert!(near(b_start, 1320.0) && near(b_end, 1400.0), "in b: {b_start:.1}–{b_end:.1}");
     }
 
     #[test]

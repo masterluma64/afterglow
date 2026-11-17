@@ -45,13 +45,14 @@ impl App {
                 card(ui, "Skipping", |ui| {
                     ui.weak("While an opening or ending plays, a Skip button shows in the bottom-right corner of the video (Enter skips).");
                     ui.weak("They're found from chapters named like Intro, Opening, Credits or Ending.");
-                    if global.listen_for_openings {
-                        let heard = match self.store.heard_opening(&video) {
-                            Some(Some((start, end))) => format!(" In this video, it heard one from {} to {}.", format_time(start), format_time(end)),
-                            Some(None) => " It heard none in this video.".to_string(),
+                    if global.listen_for_skips {
+                        let heard = |part, name| match self.store.heard(&video, part) {
+                            Some(Some((start, end))) => format!(" In this video, it heard the {name} from {} to {}.", format_time(start), format_time(end)),
+                            Some(None) => format!(" It heard no {name} in this video."),
                             None => String::new(),
                         };
-                        ui.weak(format!("Without those, Afterglow listens for the theme song episodes share.{heard}"));
+                        let (opening, ending) = (heard(progress::Skip::Opening, "opening"), heard(progress::Skip::Ending, "ending"));
+                        ui.weak(format!("Without those, Afterglow listens for the theme songs episodes share.{opening}{ending}"));
                     }
                 });
                 ui.add_space(8.0);

@@ -1083,18 +1083,20 @@ impl Drop for Prober {
     }
 }
 
-/// Decodes the first `seconds` of a video's sound as mono samples at
-/// `rate` Hz, from -1 to 1. A silent mpv of its own writes them to a
-/// temporary file as fast as it can decode them, pausing while `hold` is
-/// set. `None` if the video has no sound, or it can't be read within
-/// `timeout` (not counting the pauses).
+/// Decodes the first `seconds` of a video's sound (or with `from_end`, the
+/// last) as mono samples at `rate` Hz, from -1 to 1, with the time of the
+/// first one in seconds from the video's start. A silent mpv of its own
+/// writes them to a temporary file as fast as it can decode them, pausing
+/// while `hold` is set. `None` if the video has no sound, or it can't be
+/// read within `timeout` (not counting the pauses).
 pub fn decode_audio(
     path: &Path,
     seconds: f64,
+    from_end: bool,
     rate: u32,
     timeout: std::time::Duration,
     hold: &std::sync::atomic::AtomicBool,
-) -> Option<Vec<f32>> {
+) -> Option<(Vec<f32>, f64)> {
     static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let out = std::env::temp_dir().join(format!("afterglow-listen-{}-{n}.pcm", std::process::id()));
@@ -1103,7 +1105,9 @@ pub fn decode_audio(
     if handle.is_null() {
         return None;
     }
-    let (file, end, rate) = (out.to_string_lossy().into_owned(), format!("{seconds}"), rate.to_string());
+    let (file, rate_text) = (out.to_string_lossy().into_owned(), rate.to_string());
+    // From the end: a negative start counts back from it.
+    let range = if from_end { ("start", format!("-{seconds}")) } else { ("end", format!("{seconds}")) };
     let options = [
         ("vid", "no"),
         ("vo", "null"),
@@ -1114,8 +1118,9 @@ pub fn decode_audio(
         ("ao-pcm-waveheader", "no"),
         ("audio-format", "s16"),
         ("audio-channels", "mono"),
-        ("audio-samplerate", rate.as_str()),
-        ("end", end.as_str()),
+        ("audio-samplerate", rate_text.as_str()),
+        (range.0, range.1.as_str()),
+        ("hr-seek", "yes"),
         ("idle", "yes"),
         ("ytdl", "no"),
         ("input-default-bindings", "no"),
@@ -1134,6 +1139,9 @@ pub fn decode_audio(
         api.check(unsafe { (api.command)(handle, args.as_mut_ptr()) }).ok()?;
         let step = std::time::Duration::from_millis(100);
         let (mut left, mut held) = (timeout, false);
+        // The video's length. (Where decoding started can't be asked: it
+        // runs ahead of the events, so it's worked out from this.)
+        let mut duration = None::<f64>;
         while !left.is_zero() {
             let now = hold.load(std::sync::atomic::Ordering::Relaxed);
             if now != held {
@@ -1143,9 +1151,14 @@ pub fn decode_audio(
                 unsafe { (api.command)(handle, args.as_mut_ptr()) };
             }
             let ev = unsafe { &*(api.wait_event)(handle, step.as_secs_f64()) };
+            if ev.event_id == MPV_EVENT_FILE_LOADED {
+                let (name, mut v) = (cstr("duration"), 0f64);
+                let got = unsafe { (api.get_property)(handle, name.as_ptr(), MPV_FORMAT_DOUBLE, &mut v as *mut f64 as *mut c_void) };
+                duration = (got >= 0).then_some(v);
+            }
             if ev.event_id == MPV_EVENT_END_FILE {
                 let end = unsafe { &*(ev.data as *const RawEndFile) };
-                return (end.reason != MPV_END_FILE_REASON_ERROR).then_some(());
+                return (end.reason != MPV_END_FILE_REASON_ERROR).then_some(duration);
             }
             if !held {
                 left = left.saturating_sub(step);
@@ -1157,9 +1170,15 @@ pub fn decode_audio(
     unsafe { (api.terminate_destroy)(handle) };
     let bytes = std::fs::read(&out).ok();
     let _ = std::fs::remove_file(&out);
-    finished?;
+    let duration = finished?;
     let samples: Vec<f32> = bytes?.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b) as f32 / 32768.0).collect();
-    (!samples.is_empty()).then_some(samples)
+    if samples.is_empty() {
+        return None;
+    }
+    let length = samples.len() as f64 / rate as f64;
+    // From the end, the sound ends with the video.
+    let start = if from_end { (duration? - length).max(0.0) } else { 0.0 };
+    Some((samples, start))
 }
 
 /// 64-byte aligned storage, as recommended for mpv's software renderer.
@@ -1698,14 +1717,47 @@ mod screenshot_tests {
         let started = Instant::now();
         let tone = Path::new("av://lavfi:sine=frequency=1000:duration=600");
         let free = std::sync::atomic::AtomicBool::new(false);
-        let samples = decode_audio(tone, 420.0, 11025, Duration::from_secs(60), &free).expect("decoded");
+        let (samples, start) = decode_audio(tone, 420.0, false, 11025, Duration::from_secs(60), &free).expect("decoded");
+        assert_eq!(start, 0.0);
         assert!(started.elapsed() < Duration::from_secs(30), "took {:?}", started.elapsed());
         assert!((samples.len() as f64 - 420.0 * 11025.0).abs() < 11025.0, "{} samples", samples.len());
         // 1000 Hz: 11.025 samples per wave, so the sign changes about 2000 times a second.
         let second = &samples[11025..22050];
         let crossings = second.windows(2).filter(|w| (w[0] < 0.0) != (w[1] < 0.0)).count();
         assert!((1900..2100).contains(&crossings), "{crossings} crossings");
-        assert!(decode_audio(Path::new(r"D:\no such video.mkv"), 10.0, 11025, Duration::from_secs(10), &free).is_none());
+        // The end of a file: 500 s of silence, then 100 s of the tone.
+        let rate = 11025u32;
+        let samples: Vec<i16> = (0..600 * rate)
+            .map(|i| if i < 500 * rate { 0 } else { ((i as f32 * 1000.0 / rate as f32 * std::f32::consts::TAU).sin() * 8000.0) as i16 })
+            .collect();
+        let mut wav = Vec::new();
+        let data = samples.len() as u32 * 2;
+        for (tag, value) in [(&b"RIFF"[..], 36 + data), (b"WAVEfmt ", 16)] {
+            wav.extend_from_slice(tag);
+            wav.extend_from_slice(&value.to_le_bytes());
+        }
+        for half in [1u16, 1] {
+            wav.extend_from_slice(&half.to_le_bytes()); // PCM, mono
+        }
+        for value in [rate, rate * 2] {
+            wav.extend_from_slice(&value.to_le_bytes());
+        }
+        for half in [2u16, 16] {
+            wav.extend_from_slice(&half.to_le_bytes());
+        }
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data.to_le_bytes());
+        wav.extend(samples.iter().flat_map(|s| s.to_le_bytes()));
+        let file = std::env::temp_dir().join(format!("afterglow-test-tail-{}.wav", std::process::id()));
+        std::fs::write(&file, wav).unwrap();
+        let tail = decode_audio(&file, 150.0, true, rate, Duration::from_secs(60), &free);
+        let _ = std::fs::remove_file(&file);
+        let (tail, start) = tail.expect("decoded the end");
+        assert!((start - 450.0).abs() < 0.2, "starts at {start}, {} samples", tail.len());
+        // The tone comes in 50 s into what was decoded.
+        let loud = tail.iter().position(|s| s.abs() > 0.1).unwrap() as f64 / rate as f64;
+        assert!((loud - 50.0).abs() < 0.2, "tone at {loud}");
+        assert!(decode_audio(Path::new(r"D:\no such video.mkv"), 10.0, false, 11025, Duration::from_secs(10), &free).is_none());
         // Held, it waits; let go, it finishes.
         let held = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let release = held.clone();
@@ -1714,7 +1766,7 @@ mod screenshot_tests {
             release.store(false, std::sync::atomic::Ordering::Relaxed);
         });
         let started = Instant::now();
-        assert!(decode_audio(tone, 60.0, 11025, Duration::from_secs(60), &held).is_some());
+        assert!(decode_audio(tone, 60.0, false, 11025, Duration::from_secs(60), &held).is_some());
         assert!(started.elapsed() >= Duration::from_millis(1400), "it didn't wait: {:?}", started.elapsed());
         letting_go.join().unwrap();
     }

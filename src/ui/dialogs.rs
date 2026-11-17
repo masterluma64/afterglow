@@ -85,10 +85,10 @@ impl App {
                         ui.checkbox(&mut settings.level_volume, "Even out volume")
                             .on_hover_text("Quiet dialogue gets louder and loud scenes quieter");
                         ui.end_row();
-                        ui.label("Openings");
-                        ui.checkbox(&mut settings.listen_for_openings, "Find openings by listening").on_hover_text(
-                            "For an episode whose chapters don't mark its opening: listens to its first minutes and the next \
-                             episode's in the background, and lets you skip the theme song they share",
+                        ui.label("Openings and endings");
+                        ui.checkbox(&mut settings.listen_for_skips, "Find them by listening").on_hover_text(
+                            "For an episode whose chapters don't mark its opening or ending: listens to its first and last \
+                             minutes and the next episode's in the background, and lets you skip the theme songs they share",
                         );
                         ui.end_row();
                         ui.label("Dropped videos")

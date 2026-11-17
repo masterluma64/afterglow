@@ -68,9 +68,11 @@ pub struct Settings {
     /// Whether to look for a new release on GitHub when Afterglow starts,
     /// and twice a day while it runs.
     pub check_for_updates: bool,
-    /// Whether to find the opening of an episode with no chapters for it by
-    /// listening for the sound it shares with the next one.
-    pub listen_for_openings: bool,
+    /// Whether to find the opening and ending of an episode with no
+    /// chapters for them by listening for the sound it shares with the next
+    /// one.
+    #[serde(alias = "listen_for_openings")]
+    pub listen_for_skips: bool,
 }
 
 impl Default for Settings {
@@ -92,7 +94,7 @@ impl Default for Settings {
             show_remaining: true,
             playlist_stills: true,
             check_for_updates: true,
-            listen_for_openings: true,
+            listen_for_skips: true,
         }
     }
 }
@@ -200,6 +202,8 @@ pub struct Store {
     /// The opening of each video listened to, in seconds from its start
     /// (see `player::listen`): `None` if none was found.
     pub openings: HashMap<String, Option<(f64, f64)>>,
+    /// The ending of each video listened to, the same way.
+    pub endings: HashMap<String, Option<(f64, f64)>>,
     /// The playlist, in play order.
     pub playlist: Vec<PathBuf>,
     /// The playlist entry that was playing last.
@@ -253,6 +257,7 @@ impl Default for Store {
             tracks: HashMap::new(),
             titles: HashMap::new(),
             openings: HashMap::new(),
+            endings: HashMap::new(),
             playlist: Vec::new(),
             current: None,
             folder: None,
@@ -509,14 +514,17 @@ impl Store {
         self.titles.get(&key(path)).map(String::as_str).filter(|t| !t.is_empty())
     }
 
-    /// The opening heard in a video: `Some(None)` if it was listened to, but
-    /// none was found, and `None` if it wasn't listened to yet.
-    pub fn heard_opening(&self, path: &Path) -> Option<Option<(f64, f64)>> {
-        self.openings.get(&key(path)).copied()
+    /// The opening or ending heard in a video: `Some(None)` if it was
+    /// listened to, but none was found, and `None` if it wasn't listened to
+    /// yet.
+    pub fn heard(&self, path: &Path, part: Skip) -> Option<Option<(f64, f64)>> {
+        let heard = if part == Skip::Opening { &self.openings } else { &self.endings };
+        heard.get(&key(path)).copied()
     }
 
-    pub fn set_heard_opening(&mut self, path: &Path, opening: Option<(f64, f64)>) {
-        self.openings.insert(key(path), opening);
+    pub fn set_heard(&mut self, path: &Path, part: Skip, found: Option<(f64, f64)>) {
+        let heard = if part == Skip::Opening { &mut self.openings } else { &mut self.endings };
+        heard.insert(key(path), found);
         self.dirty = true;
     }
 
@@ -756,6 +764,7 @@ impl Store {
             .chain(self.tracks.keys())
             .chain(self.titles.keys())
             .chain(self.openings.keys())
+            .chain(self.endings.keys())
             .chain(self.videos.keys())
             .chain(self.folders.keys())
             .cloned()
@@ -773,7 +782,7 @@ impl Store {
             let entry = self.entries.remove(k).is_some();
             let tracks = self.tracks.remove(k).is_some();
             let title = self.titles.remove(k).is_some();
-            let opening = self.openings.remove(k).is_some();
+            let opening = self.openings.remove(k).is_some() | self.endings.remove(k).is_some();
             let settings = self.videos.remove(k).is_some() | self.folders.remove(k).is_some();
             forgotten += usize::from(entry || tracks || title || opening || settings);
         }
@@ -1377,6 +1386,14 @@ mod tests {
         let saved = br#"{"folders": {"D:\\Shows": {"opening_end": 96.0, "ending_start": 106.0, "speed": 1.25}}}"#;
         let store: Store = serde_json::from_slice(saved).unwrap();
         assert_eq!(store.folders[r"D:\Shows"].speed, Some(1.25));
+    }
+
+    /// Listening once found only openings, under another name.
+    #[test]
+    fn keeps_listening_turned_off() {
+        let settings: Settings = serde_json::from_slice(br#"{"listen_for_openings": false}"#).unwrap();
+        assert!(!settings.listen_for_skips);
+        assert!(Settings::default().listen_for_skips);
     }
 
     #[test]
