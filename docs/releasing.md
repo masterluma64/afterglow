@@ -61,6 +61,7 @@ Needs [GitHub CLI](https://cli.github.com) (logged in with `gh auth login`) and
    ```
 
    The notes are a bullet list of what changed since the last release, from
-   `git log vPREVIOUS..vX.Y.Z --oneline`, written for someone using the app. Updated copies
-   show them after restarting, under "Updated to Afterglow X.Y.Z". Copies find a release as
+   `git log vPREVIOUS..vX.Y.Z --oneline`, written for someone using the app, and nothing
+   else: no download instructions, since GitHub lists the files below the notes anyway.
+   Updated copies show the notes after restarting, under "Updated to Afterglow X.Y.Z". Copies find a release as
    soon as it is published, so check it before publishing (`--draft` first, if need be).
